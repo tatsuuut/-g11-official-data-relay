@@ -29,6 +29,8 @@ race predictions, runtime state, credentials, or purchase/notification logic.
 4. Keep the default branch named `main`.
 5. Do not enable workflows from forks and do not add a
    `pull_request_target` trigger.
+6. Set the Actions variable `G11_RELAY_ENABLED=true` only after the private
+   entrypoint and both required secrets have passed their connection test.
 
 The scheduled job deliberately fails closed until both required secrets and
 the private `g11.relay.v1` entrypoint are available.
