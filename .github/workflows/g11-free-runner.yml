@@ -112,9 +112,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v1-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
           restore-keys: |
-            g11-state-v1-${{ steps.due.outputs.operational_date }}-
+            g11-state-v2-${{ steps.due.outputs.operational_date }}-
 
       - name: Fail closed when the private credential is absent
         env:
@@ -227,7 +227,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v1-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
 
       - name: Publish a newly verified feed through OIDC
         if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != ''
