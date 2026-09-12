@@ -13,8 +13,8 @@ race predictions, runtime state, credentials, or purchase/notification logic.
 - The token must have read-only Contents access to only
   `tatsuuut/boat-brain-lab`.
 - Workflows never run on `pull_request` or `pull_request_target`.
-- Runtime state may leave the runner only after encryption by the private
-  runtime.
+- Runtime state may leave the runner only as an AES-256 encrypted cache. The
+  repository-scoped token is also the cache passphrase and is never printed.
 - The public-surface audit runs before any private checkout.
 - Logs must not print environment variables, tokens, source files, model files,
   or decrypted state.
@@ -25,12 +25,11 @@ race predictions, runtime state, credentials, or purchase/notification logic.
    `-g11-official-data-relay`.
 2. Add the Actions secret `G11_PRIVATE_REPO_TOKEN` using a fine-grained token
    limited to `tatsuuut/boat-brain-lab`, Contents: read-only.
-3. Add the Actions secret `G11_RELAY_STATE_KEY` using a random 32-byte value.
-4. Keep the default branch named `main`.
-5. Do not enable workflows from forks and do not add a
+3. Keep the default branch named `main`.
+4. Do not enable workflows from forks and do not add a
    `pull_request_target` trigger.
-6. Set the Actions variable `G11_RELAY_ENABLED=true` only after the private
-   entrypoint and both required secrets have passed their connection test.
+5. Set the Actions variable `G11_RELAY_ENABLED=true` only after the private
+   entrypoint and required secret have passed their connection test.
 
-The scheduled job deliberately fails closed until both required secrets and
+The scheduled job deliberately fails closed until the required secret and
 the private `g11.relay.v1` entrypoint are available.
