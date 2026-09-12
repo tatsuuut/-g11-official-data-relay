@@ -6,9 +6,10 @@ Do not commit any of the following:
 - TRUE AI source, model files, feature schemas, or SHAP output
 - morning, predeadline, or night prediction payloads
 - decrypted runtime state
-- GitHub tokens, encryption keys, cookies, or credentials
+- GitHub tokens, cache passphrases, cookies, or credentials
 - exported Actions logs or artifacts
 
 The only accepted public payloads are scheduler configuration, integrity
-checks, and documentation. Suspected exposure requires disabling the workflow,
-revoking the affected credential, and rotating the relay state key.
+checks, and documentation. Suspected exposure requires disabling the workflow
+and rotating the repository-scoped credential; encrypted state is then rebuilt
+from the next morning acquisition.
