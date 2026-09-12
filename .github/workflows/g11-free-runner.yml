@@ -1,0 +1,70 @@
+name: G11 free official-data runner
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 08:00-20:55 JST. The private runtime decides whether work is due.
+    - cron: "*/5 23 * * *"
+    - cron: "*/5 0-11 * * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: g11-free-official-data-runner
+  cancel-in-progress: true
+
+jobs:
+  run-private-runtime:
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    env:
+      G11_PRIVATE_REPOSITORY: tatsuuut/boat-brain-lab
+      G11_PRIVATE_RUNTIME_REF: main
+      G11_RUNTIME_BRANCH: g11-runtime
+      G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
+      G11_OIDC_AUDIENCE: g11-race-lab
+      G11_RELAY_STATE_KEY: ${{ secrets.G11_RELAY_STATE_KEY }}
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout public relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Audit public surface
+        run: python3 scripts/audit_public_surface.py
+
+      - name: Fail closed when private credentials are absent
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          test -n "${G11_PRIVATE_REPO_TOKEN}"
+          test -n "${G11_RELAY_STATE_KEY}"
+
+      - name: Checkout private G11 runtime
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          ref: ${{ env.G11_PRIVATE_RUNTIME_REF }}
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Run private fail-closed relay entrypoint
+        working-directory: .g11-private
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          python3 -m g11.relay.v1 \
+            --mode auto \
+            --public-repository "${GITHUB_REPOSITORY}" \
+            --public-run-id "${GITHUB_RUN_ID}" \
+            --runtime-ref "${G11_RUNTIME_BRANCH}" \
+            --app-origin "${G11_APP_ORIGIN}" \
+            --oidc-audience "${G11_OIDC_AUDIENCE}"
