@@ -1,0 +1,13 @@
+.g11-private/
+.relay-state/
+*.zip
+*.tar
+*.tar.gz
+*.json
+*.json.gz
+*.cbm
+*.onnx
+*.pkl
+*.pickle
+*.joblib
+__pycache__/
