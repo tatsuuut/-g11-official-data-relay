@@ -206,7 +206,7 @@ jobs:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
           set -euo pipefail
-          if [ ! -f .relay-state/relay-state.json ]; then
+          if [ ! -f .relay-state/relay-state.json ] && [ ! -f .relay-state/store/manifest.json ]; then
             echo 'ready=false' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
