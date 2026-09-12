@@ -17,7 +17,10 @@ concurrency:
 
 jobs:
   run-private-runtime:
-    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'tatsuuut/-g11-official-data-relay' &&
+      github.ref == 'refs/heads/main' &&
+      vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 4
     env:
