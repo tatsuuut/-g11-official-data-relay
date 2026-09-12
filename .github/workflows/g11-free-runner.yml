@@ -2,10 +2,32 @@ name: G11 free official-data runner
 
 on:
   workflow_dispatch:
+    inputs:
+      phase:
+        description: Safe relay phase
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - auto
+          - morning
+          - predeadline
+          - night
+      operational_date:
+        description: YYYY-MM-DD; dry-run may inspect a non-current date
+        required: false
+        type: string
   schedule:
-    # 08:00-20:55 JST. The private runtime decides whether work is due.
+    # 05:25-07:05 JST: bounded morning acquisition and safe retry window.
+    - cron: "25-55/5 20 * * *"
+    - cron: "*/5 21 * * *"
+    - cron: "0-5/5 22 * * *"
+    # 08:00-20:55 JST: official predeadline data and EV-only odds capture.
     - cron: "*/5 23 * * *"
     - cron: "*/5 0-11 * * *"
+    # 21:30-23:30 and 00:30-01:30 JST: official result completion slots.
+    - cron: "30 12-16 * * *"
 
 permissions:
   contents: read
@@ -13,7 +35,7 @@ permissions:
 
 concurrency:
   group: g11-free-official-data-runner
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   run-private-runtime:
@@ -22,16 +44,16 @@ jobs:
       github.ref == 'refs/heads/main' &&
       vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 4
+    timeout-minutes: 22
     env:
       G11_PRIVATE_REPOSITORY: tatsuuut/boat-brain-lab
       G11_PRIVATE_RUNTIME_REF: main
       G11_RUNTIME_BRANCH: g11-runtime
       G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
       G11_OIDC_AUDIENCE: g11-race-lab
-      G11_RELAY_STATE_KEY: ${{ secrets.G11_RELAY_STATE_KEY }}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
+      TZ: Asia/Tokyo
 
     steps:
       - name: Checkout public relay
@@ -42,14 +64,97 @@ jobs:
       - name: Audit public surface
         run: python3 scripts/audit_public_surface.py
 
-      - name: Fail closed when private credentials are absent
+      - name: Resolve the bounded phase and race day
+        id: due
+        env:
+          REQUESTED_PHASE: ${{ inputs.phase }}
+          REQUESTED_DATE: ${{ inputs.operational_date }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          now_hour="$(date +%H)"
+          now_minute="$(date +%M)"
+          if [ "${now_hour}" -lt 5 ]; then
+            operational_date="$(date --date='yesterday' +%F)"
+          else
+            operational_date="$(date +%F)"
+          fi
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            phase="${REQUESTED_PHASE:-dry-run}"
+            if [ -n "${REQUESTED_DATE}" ]; then
+              operational_date="${REQUESTED_DATE}"
+            fi
+          elif [ "${now_hour}" -ge 5 ] && [ "${now_hour}" -le 7 ]; then
+            phase="morning"
+          elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
+            phase="predeadline"
+          elif [ "${now_minute}" = "30" ]; then
+            phase="night"
+          else
+            phase="auto"
+          fi
+          python3 - "${operational_date}" "${phase}" <<'PY'
+          import datetime as dt
+          import re
+          import sys
+
+          if re.fullmatch(r"\d{4}-\d{2}-\d{2}", sys.argv[1]) is None:
+              raise SystemExit("G11_RELAY_OPERATIONAL_DATE_FORMAT")
+          dt.date.fromisoformat(sys.argv[1])
+          if sys.argv[2] not in {"auto", "morning", "predeadline", "night", "dry-run"}:
+              raise SystemExit("G11_RELAY_PHASE")
+          PY
+          printf 'operational_date=%s\nphase=%s\n' \
+            "${operational_date}" "${phase}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore only encrypted runtime state
+        id: restore-state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v1-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v1-${{ steps.due.outputs.operational_date }}-
+
+      - name: Fail closed when the private credential is absent
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: test -n "${G11_PRIVATE_REPO_TOKEN}"
+
+      - name: Decrypt and validate restored state
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
-          test -n "${G11_PRIVATE_REPO_TOKEN}"
-          test -n "${G11_RELAY_STATE_KEY}"
+          set -euo pipefail
+          mkdir -p .relay-state
+          encrypted=".relay-cache/state.tgz.gpg"
+          if [ ! -f "${encrypted}" ]; then
+            exit 0
+          fi
+          archive="${RUNNER_TEMP}/g11-relay-state.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${archive}" "${encrypted}"
+          exec 3<&-
+          python3 - "${archive}" <<'PY'
+          import pathlib
+          import sys
+          import tarfile
+
+          archive = pathlib.Path(sys.argv[1])
+          with tarfile.open(archive, "r:gz") as handle:
+              members = handle.getmembers()
+              if not members:
+                  raise SystemExit("G11_RELAY_EMPTY_STATE_ARCHIVE")
+              for member in members:
+                  path = pathlib.PurePosixPath(member.name)
+                  if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
+                      raise SystemExit("G11_RELAY_UNSAFE_STATE_ARCHIVE")
+              handle.extractall(".relay-state", filter="data")
+          PY
 
       - name: Checkout private G11 runtime
+        id: private-source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
@@ -59,15 +164,104 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Run private fail-closed relay entrypoint
-        working-directory: .g11-private
+      - name: Resolve immutable private source identity
+        id: source
         env:
           G11_PRIVATE_REPO_TOKEN: ""
         run: |
-          python3 -m g11.relay.v1 \
-            --mode auto \
-            --public-repository "${GITHUB_REPOSITORY}" \
-            --public-run-id "${GITHUB_RUN_ID}" \
-            --runtime-ref "${G11_RUNTIME_BRANCH}" \
-            --app-origin "${G11_APP_ORIGIN}" \
+          set -euo pipefail
+          source_sha="$(git -C .g11-private rev-parse HEAD)"
+          printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install pinned private runtime dependency
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+
+      - name: Run the private fail-closed relay
+        id: runtime
+        continue-on-error: true
+        working-directory: .g11-private
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+          G11_PRIVATE_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p ../.relay-output
+          args=(
+            --phase "${{ steps.due.outputs.phase }}"
+            --operational-date "${{ steps.due.outputs.operational_date }}"
+            --state-root "${GITHUB_WORKSPACE}/.relay-state"
+            --feed-output "${GITHUB_WORKSPACE}/.relay-output/feed.json"
+            --public-repository "${GITHUB_REPOSITORY}"
+            --public-run-id "${GITHUB_RUN_ID}"
+            --runtime-ref "${G11_RUNTIME_BRANCH}"
+            --app-origin "${G11_APP_ORIGIN}"
             --oidc-audience "${G11_OIDC_AUDIENCE}"
+          )
+          python3 -m g11.relay.v1 "${args[@]}" | tee ../.relay-output/result.json
+
+      - name: Encrypt changed state before persistence
+        if: always()
+        id: encrypt-state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -f .relay-state/relay-state.json ]; then
+            echo 'ready=false' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          mkdir -p .relay-cache
+          encrypted=".relay-cache/state.tgz.gpg"
+          temporary="${encrypted}.tmp"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . | \
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+              --symmetric --cipher-algo AES256 --output "${temporary}"
+          exec 3<&-
+          mv "${temporary}" "${encrypted}"
+          test -s "${encrypted}"
+          echo 'ready=true' >> "${GITHUB_OUTPUT}"
+
+      - name: Save only encrypted runtime state
+        if: always() && steps.encrypt-state.outputs.ready == 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v1-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+
+      - name: Publish a newly verified feed through OIDC
+        if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != ''
+        id: publish
+        env:
+          FEED: .relay-output/feed.json
+        run: |
+          set -euo pipefail
+          feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+          oidc="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            -H 'Accept: application/json' \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
+          token="$(printf '%s' "${oidc}" | jq -er '.value')"
+          curl --fail-with-body --silent --show-error \
+            -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Content-Type: application/json' \
+            -H "x-g11-feed-sha256: ${feed_sha}" \
+            --data-binary "@${FEED}" > .relay-output/publish-result.json
+          printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify exact app readback
+        if: steps.publish.outcome == 'success'
+        env:
+          FEED: .relay-output/feed.json
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+            -o .relay-output/readback.json
+          cmp "${FEED}" .relay-output/readback.json
+
+      - name: Propagate private runtime failure after state checkpoint
+        if: always() && steps.runtime.outcome == 'failure'
+        run: exit 1
