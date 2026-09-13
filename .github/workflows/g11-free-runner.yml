@@ -276,10 +276,10 @@ jobs:
           FEED: .relay-output/feed.json
         run: |
           set -euo pipefail
-          # A delayed runner can restore a branch whose official-live capture
-          # is older while its odds capture is newer. Preserve the already
-          # published live forecast in that one case and advance only the
-          # market/EV fields. Morning predictions are untouched.
+          # Once an official-live forecast has been published, a delayed cache
+          # branch must not replace it. Preserve that forecast and advance only
+          # a newer pre-deadline market/EV snapshot. Morning predictions are
+          # untouched.
           if curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
             -o .relay-output/stored-feed.json; then
@@ -295,7 +295,6 @@ jobs:
                        and ($incoming.odds_captured_at_jst < $incoming.deadline_jst)
                        and (($old.predeadline | type) == "object")
                        and (($incoming.predeadline | type) == "object")
-                       and ($incoming.predeadline.captured_at_jst <= $old.predeadline.captured_at_jst)
                     then .predeadline = ($old.predeadline + {
                       odds_merit: $incoming.odds_merit,
                       best_ev_bet: $incoming.best_ev_bet,
