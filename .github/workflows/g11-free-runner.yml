@@ -312,23 +312,29 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
-          # Preserve the complete verified JSON contract. Compress only the
-          # HTTP request body so prediction, display, research and result data
-          # remain structurally identical end-to-end.
-          canonical_feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
-          printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
-          for field in conditional_finish_research logic_candidate_research original_display_research abeken true_ai three_engine_comparison; do
-            printf '%s_bytes=' "${field}"
-            jq -c --arg field "${field}" '.[$field]' "${FEED}" | wc -c
-          done
-          printf 'race_original_display_bytes='
-          jq -c '[.races[].original_display_shadow]' "${FEED}" | wc -c
-          printf 'race_abeken_bytes='
-          jq -c '[.races[].abeken_shadow?]' "${FEED}" | wc -c
-          gzip -9 -c "${FEED}" > .relay-output/feed.json.gz
-          printf 'verified_feed_gzip_bytes=%s\n' "$(wc -c < .relay-output/feed.json.gz)"
-          transport_sha="$(sha256sum .relay-output/feed.json.gz | cut -d' ' -f1)"
+          # The encrypted canonical store keeps the full original-display audit.
+          # The app transport keeps capture state, six-boat identity/ranking,
+          # live inputs, profile tickets and night outcomes while dropping only
+          # duplicate metric maps/verification lists and the huge raw aggregate.
+          jq -c '
+            .races |= map(
+              if ((.original_display_shadow.boats? | type) == "array") then
+                .original_display_shadow.boats |= map(del(.metric_ranks, .metric_values))
+              else . end
+              | if ((.original_display_shadow.profile_projections? | type) == "object") then
+                  .original_display_shadow.profile_projections |= with_entries(
+                    .value |= del(.verification10)
+                  )
+                else . end
+            )
+            | if ((.original_display_research? | type) == "object") then
+                .original_display_research.daily_aggregate = null
+              else . end
+          ' "${FEED}" > .relay-output/feed-transport.json
+          mv .relay-output/feed-transport.json "${FEED}"
 
+          feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+          printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             -H 'Accept: application/json' \
@@ -338,9 +344,8 @@ jobs:
             -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
             -H "Authorization: Bearer ${token}" \
             -H 'Content-Type: application/json' \
-            -H 'Content-Encoding: gzip' \
-            -H "x-g11-feed-sha256: ${transport_sha}" \
-            --data-binary '@.relay-output/feed.json.gz' \
+            -H "x-g11-feed-sha256: ${feed_sha}" \
+            --data-binary "@${FEED}" \
             --output .relay-output/publish-result.json \
             --write-out '%{http_code}')"
           if [[ ! "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
@@ -368,7 +373,7 @@ jobs:
             fi
             exit 1
           fi
-          printf 'feed_sha=%s\n' "${canonical_feed_sha}" >> "${GITHUB_OUTPUT}"
+          printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify exact app readback
         if: steps.publish.outcome == 'success'
