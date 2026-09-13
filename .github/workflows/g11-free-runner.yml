@@ -312,59 +312,21 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
-          # Keep the signed app payload bounded. The complete research/audit
-          # material remains in the encrypted canonical store. Only duplicate
-          # diagnostics and repeated ABEKEN provenance are removed in transport.
-          # TRUE AI stays byte-structurally complete because the app verifies
-          # its prediction contract field-for-field.
+          # Keep all three prediction-engine contracts intact. For races whose
+          # deadlines have already passed, only the bulky per-boat original-
+          # display diagnostics are collapsed. Summary movement, last-minute
+          # official inputs, results, scoring and engine snapshots remain.
           jq -c '
-            .races |= map(
-              if ((.original_display_shadow.boats? | type) == "array") then
-                .original_display_shadow.boats |= map(del(.metric_ranks, .metric_values))
-              else . end
-              | if ((.original_display_shadow.profile_projections? | type) == "object") then
-                  .original_display_shadow.profile_projections |= with_entries(
-                    .value |= del(.verification10)
-                  )
-                else . end
-              | if ((.abeken_shadow? | type) == "object") then
-                  .abeken_shadow |= (
-                    del(
-                      .schema, .model_version, .reproduction_estimate,
-                      .immutable_prediction_snapshots, .score_only,
-                      .result_feedback_to_model, .p3_input_used,
-                      .true_ai_input_used, .market_odds_input_used,
-                      .production_use
-                    )
-                    | if ((.morning? | type) == "object") then
-                        .morning |= del(
-                          .head_boat, .head_pool, .boats, .head_formations,
-                          .main_head_buy_count, .sub_head_buy_count,
-                          .total_buy_count, .text_head_fixed,
-                          .actual_buy_head_set, .prediction_note,
-                          .observation_ids, .source_screenshot_references,
-                          .unresolved, .score_only, .result_feedback_to_model,
-                          .p3_input_used, .true_ai_input_used,
-                          .market_odds_input_used, .production_use,
-                          .purchase_executed, .buy_logic_sha256
-                        )
-                      else . end
-                    | if ((.live? | type) == "object") then
-                        .live |= del(
-                          .head_boat, .head_pool, .boats, .head_formations,
-                          .main_head_buy_count, .sub_head_buy_count,
-                          .total_buy_count, .text_head_fixed,
-                          .actual_buy_head_set, .prediction_note,
-                          .observation_ids, .source_screenshot_references,
-                          .unresolved, .score_only, .result_feedback_to_model,
-                          .p3_input_used, .true_ai_input_used,
-                          .market_odds_input_used, .production_use,
-                          .purchase_executed, .buy_logic_sha256
-                        )
-                      else . end
-                  )
-                else . end
-            )
+            .generated_at_jst as $now
+            | .races |= map(
+                if ((.deadline_jst | type) == "string")
+                     and (.deadline_jst < $now)
+                     and ((.original_display_shadow | type) == "object")
+                then .original_display_shadow.boats = []
+                  | .original_display_shadow.profile_projections = null
+                else .
+                end
+              )
           ' "${FEED}" > .relay-output/feed-transport.json
           mv .relay-output/feed-transport.json "${FEED}"
 
