@@ -292,6 +292,25 @@ jobs:
             printf 'G11 sync rejected the verified feed (HTTP %s):\n' "${http_status}" >&2
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
+            if [ "${http_status}" = "409" ] && \
+               jq -e '.error == "ODDS_IMMUTABLE_CONFLICT"' \
+                 .relay-output/publish-result.json >/dev/null 2>&1; then
+              curl --fail-with-body --silent --show-error --location \
+                "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
+                -o .relay-output/stored-feed.json
+              jq -cn \
+                --slurpfile stored .relay-output/stored-feed.json \
+                --slurpfile incoming "${FEED}" '
+                  def odds: {
+                    odds_merit, best_ev_bet, best_ev, value_bets,
+                    odds_captured_at_jst
+                  };
+                  ($stored[0].races | map({key: .key, value: odds}) | from_entries) as $old
+                  | $incoming[0].races
+                  | map(select(.odds_captured_at_jst != null and $old[.key] != odds)
+                      | {key, stored: $old[.key], incoming: odds})
+                ' >&2
+            fi
             exit 1
           fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
