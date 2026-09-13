@@ -1,6 +1,12 @@
 name: G11 free official-data runner
 
 on:
+  # Immediately validate a runner change without waiting for GitHub's delayed cron.
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/g11-free-runner.yml
   workflow_dispatch:
     inputs:
       phase:
