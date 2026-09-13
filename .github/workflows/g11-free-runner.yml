@@ -36,6 +36,8 @@ on:
     - cron: "30 12-16 * * *"
 
 permissions:
+  # Site v82 accepts only monotonic, pre-deadline market refreshes; prediction
+  # and morning-lock fields remain immutable.
   actions: write
   contents: read
   id-token: write
