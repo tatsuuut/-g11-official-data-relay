@@ -315,7 +315,7 @@ jobs:
           # Preserve the complete verified JSON contract. Compress only the
           # HTTP request body so prediction, display, research and result data
           # remain structurally identical end-to-end.
-          feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+          canonical_feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           for field in conditional_finish_research logic_candidate_research original_display_research abeken true_ai three_engine_comparison; do
             printf '%s_bytes=' "${field}"
@@ -327,6 +327,7 @@ jobs:
           jq -c '[.races[].abeken_shadow?]' "${FEED}" | wc -c
           gzip -9 -c "${FEED}" > .relay-output/feed.json.gz
           printf 'verified_feed_gzip_bytes=%s\n' "$(wc -c < .relay-output/feed.json.gz)"
+          transport_sha="$(sha256sum .relay-output/feed.json.gz | cut -d' ' -f1)"
 
           oidc="$(curl --fail-with-body --silent --show-error \
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
@@ -338,7 +339,7 @@ jobs:
             -H "Authorization: Bearer ${token}" \
             -H 'Content-Type: application/json' \
             -H 'Content-Encoding: gzip' \
-            -H "x-g11-feed-sha256: ${feed_sha}" \
+            -H "x-g11-feed-sha256: ${transport_sha}" \
             --data-binary '@.relay-output/feed.json.gz' \
             --output .relay-output/publish-result.json \
             --write-out '%{http_code}')"
@@ -367,7 +368,7 @@ jobs:
             fi
             exit 1
           fi
-          printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+          printf 'feed_sha=%s\n' "${canonical_feed_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify exact app readback
         if: steps.publish.outcome == 'success'
