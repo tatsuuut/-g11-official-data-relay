@@ -300,6 +300,10 @@ jobs:
                     else .
                     end
                 )
+              | ([.races[] | select(.research_eligible == true and .odds_captured_at_jst != null)] | length) as $enriched
+              | .counts.odds_enriched = $enriched
+              | .counts.odds_waiting = (.counts.formal - $enriched)
+              | .counts.win_candidates = ([.races[] | select(.research_eligible == true and .odds_merit == "◎")] | length)
             ' "${FEED}" > .relay-output/feed-reconciled.json
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
