@@ -312,23 +312,45 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
-          # Keep active/pending race display sidecars complete. After an
-          # official result is final, the bulky original-display sidecar is no
-          # longer needed by the live UI and is omitted only from app transport.
-          # The encrypted canonical store keeps the complete research evidence.
-          jq -c '
-            .races |= map(
-              if ((.result_meta.result_status? // "") == "ESTABLISHED")
-                   or ((.result_meta.result_status? // "") == "TRIFECTA_NOT_ESTABLISHED")
-              then del(.original_display_shadow)
-              else .
-              end
-            )
-            | if ((.original_display_research? | type) == "object") then
-                .original_display_research.daily_aggregate = null
-              else . end
-          ' "${FEED}" > .relay-output/feed-transport.json
-          mv .relay-output/feed-transport.json "${FEED}"
+          # Night transport uses the canonical unavailable shape for the
+          # original-display research sidecar. The complete captured evidence
+          # remains in the encrypted state store; live/predeadline runs are not
+          # affected. This preserves the app validator's exact object contract
+          # while leaving room for official night results.
+          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+            jq -c '
+              .races |= map(
+                .original_display_shadow = {
+                  status: "NOT_YET_ISSUED",
+                  source: "BOAT_RACE_OFFICIAL_BOATCAST",
+                  captured_at_jst: null,
+                  top_display_boat: null,
+                  rising_boats: [],
+                  falling_boats: [],
+                  boats: [],
+                  last_minute_inputs: null,
+                  profile_projections: null,
+                  night_execution: null,
+                  production_mutated: false
+                }
+              )
+              | .original_display_research = {
+                  available: false,
+                  status: "NOT_YET_ISSUED",
+                  source: "BOAT_RACE_OFFICIAL_BOATCAST",
+                  boaters_used: false,
+                  morning_audits: 0,
+                  captures: 0,
+                  night_settlements: 0,
+                  profiles: ["A","P","B","C","D","E","F","G"],
+                  promotion_gate: null,
+                  proposal_gate_300r: null,
+                  daily_aggregate: null,
+                  production_mutated: false
+                }
+            ' "${FEED}" > .relay-output/feed-transport.json
+            mv .relay-output/feed-transport.json "${FEED}"
+          fi
 
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
