@@ -280,12 +280,20 @@ jobs:
             -H 'Accept: application/json' \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
           token="$(printf '%s' "${oidc}" | jq -er '.value')"
-          curl --fail-with-body --silent --show-error \
+          http_status="$(curl --silent --show-error \
             -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
             -H "Authorization: Bearer ${token}" \
             -H 'Content-Type: application/json' \
             -H "x-g11-feed-sha256: ${feed_sha}" \
-            --data-binary "@${FEED}" > .relay-output/publish-result.json
+            --data-binary "@${FEED}" \
+            --output .relay-output/publish-result.json \
+            --write-out '%{http_code}')"
+          if [[ ! "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
+            printf 'G11 sync rejected the verified feed (HTTP %s):\n' "${http_status}" >&2
+            jq -c . .relay-output/publish-result.json >&2 || \
+              sed -n '1,40p' .relay-output/publish-result.json >&2
+            exit 1
+          fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify exact app readback
@@ -312,7 +320,7 @@ jobs:
           fi
 
           # Scheduled Actions are best-effort and can arrive more than seven
-          # minutes late. Leave enough spacing for the next official update,
+          # minutes late.  Leave enough spacing for the next official update,
           # then continue only when no other run is already queued/running.
           sleep 45
           runs="$(curl --fail-with-body --silent --show-error \
