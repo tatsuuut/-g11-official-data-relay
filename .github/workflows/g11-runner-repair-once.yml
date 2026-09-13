@@ -16,9 +16,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Checkout relay
+      - name: Checkout relay with repository credential
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           fetch-depth: 1
 
       - name: Apply bounded repair and remove one-shot workflow
