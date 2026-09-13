@@ -322,7 +322,7 @@ jobs:
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=20")"
           active="$(printf '%s' "${runs}" | jq \
             --argjson current "${GITHUB_RUN_ID}" \
-            '[.workflow_runs[] | select(.id != $current and (.status == "queued" or .status == "in_progress"))] | length')"
+            '[.workflow_runs[] | select(.id != $current and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending"))] | length')"
           if [ "${active}" -gt 0 ]; then
             exit 0
           fi
