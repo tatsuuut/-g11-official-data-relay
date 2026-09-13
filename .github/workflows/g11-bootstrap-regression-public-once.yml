@@ -1,0 +1,38 @@
+name: G11 private bootstrap regression public once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/g11-bootstrap-regression-public-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test-private-bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout public harness
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Checkout private runtime read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Install pinned runtime dependency
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+      - name: Compile repaired relay files
+        working-directory: .g11-private
+        run: python3 -m py_compile g11/relay/__init__.py g11/relay/bootstrap_v1.py g11/relay/v1.py g11/relay/test_bootstrap_v1.py
+      - name: Run fresh-store bootstrap regression
+        working-directory: .g11-private
+        run: python3 -m unittest -v g11.relay.test_bootstrap_v1
