@@ -36,7 +36,7 @@ on:
     - cron: "30 12-16 * * *"
 
 permissions:
-  # Site v82 accepts only monotonic, pre-deadline market refreshes; prediction
+  # The Site accepts only monotonic, pre-deadline market refreshes; prediction
   # and morning-lock fields remain immutable.
   actions: write
   contents: read
@@ -283,7 +283,7 @@ jobs:
           if curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
             -o .relay-output/stored-feed.json; then
-            jq --slurpfile stored .relay-output/stored-feed.json '
+            jq -c --slurpfile stored .relay-output/stored-feed.json '
               ($stored[0].races | map({key: .key, value: .}) | from_entries) as $prior
               | .races |= map(
                   . as $incoming
