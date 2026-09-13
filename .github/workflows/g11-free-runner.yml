@@ -164,6 +164,18 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Checkout hash-locked TRUE AI model only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          ref: ${{ env.G11_RUNTIME_BRANCH }}
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-model
+          persist-credentials: false
+          fetch-depth: 1
+          sparse-checkout: |
+            g11/true-ai-models
+
       - name: Resolve immutable private source identity
         id: source
         env:
@@ -173,8 +185,27 @@ jobs:
           source_sha="$(git -C .g11-private rev-parse HEAD)"
           printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
 
-      - name: Install pinned private runtime dependency
-        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+      - name: Stage the hash-locked TRUE AI model
+        run: |
+          set -euo pipefail
+          day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
+          if [ ! -f "${day_root}/morning-predictions.manifest.json" ]; then
+            model_source=".g11-model/g11/true-ai-models"
+            test -f "${model_source}/latest-research.json"
+            mkdir -p .relay-state/store/g11/true-ai-models
+            cp -a "${model_source}/." .relay-state/store/g11/true-ai-models/
+          fi
+
+      - name: Install pinned private runtime dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+          day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
+          if [ "${{ steps.due.outputs.phase }}" = "morning" ] || \
+             { [ "${{ steps.due.outputs.phase }}" = "predeadline" ] && \
+               [ ! -f "${day_root}/morning-predictions.manifest.json" ]; }; then
+            python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
+          fi
 
       - name: Run the private fail-closed relay
         id: runtime
