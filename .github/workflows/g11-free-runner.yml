@@ -312,20 +312,17 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
-          # The encrypted canonical store keeps the full original-display audit.
-          # The app transport keeps capture state, six-boat identity/ranking,
-          # live inputs, profile tickets and night outcomes while dropping only
-          # duplicate metric maps/verification lists and the huge raw aggregate.
+          # Keep active/pending race display sidecars complete. After an
+          # official result is final, the bulky original-display sidecar is no
+          # longer needed by the live UI and is omitted only from app transport.
+          # The encrypted canonical store keeps the complete research evidence.
           jq -c '
             .races |= map(
-              if ((.original_display_shadow.boats? | type) == "array") then
-                .original_display_shadow.boats |= map(del(.metric_ranks, .metric_values))
-              else . end
-              | if ((.original_display_shadow.profile_projections? | type) == "object") then
-                  .original_display_shadow.profile_projections |= with_entries(
-                    .value |= del(.verification10)
-                  )
-                else . end
+              if ((.result_meta.result_status? // "") == "ESTABLISHED")
+                   or ((.result_meta.result_status? // "") == "TRIFECTA_NOT_ESTABLISHED")
+              then del(.original_display_shadow)
+              else .
+              end
             )
             | if ((.original_display_research? | type) == "object") then
                 .original_display_research.daily_aggregate = null
