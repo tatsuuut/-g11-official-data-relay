@@ -312,26 +312,22 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
-          # Keep all three prediction-engine contracts intact. For races whose
-          # deadlines have already passed, only the bulky per-boat original-
-          # display diagnostics are collapsed. Summary movement, last-minute
-          # official inputs, results, scoring and engine snapshots remain.
-          jq -c '
-            .generated_at_jst as $now
-            | .races |= map(
-                if ((.deadline_jst | type) == "string")
-                     and (.deadline_jst < $now)
-                     and ((.original_display_shadow | type) == "object")
-                then .original_display_shadow.boats = []
-                  | .original_display_shadow.profile_projections = null
-                else .
-                end
-              )
-          ' "${FEED}" > .relay-output/feed-transport.json
-          mv .relay-output/feed-transport.json "${FEED}"
-
+          # Preserve the complete verified JSON contract. Compress only the
+          # HTTP request body so prediction, display, research and result data
+          # remain structurally identical end-to-end.
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
+          for field in conditional_finish_research logic_candidate_research original_display_research abeken true_ai three_engine_comparison; do
+            printf '%s_bytes=' "${field}"
+            jq -c --arg field "${field}" '.[$field]' "${FEED}" | wc -c
+          done
+          printf 'race_original_display_bytes='
+          jq -c '[.races[].original_display_shadow]' "${FEED}" | wc -c
+          printf 'race_abeken_bytes='
+          jq -c '[.races[].abeken_shadow?]' "${FEED}" | wc -c
+          gzip -9 -c "${FEED}" > .relay-output/feed.json.gz
+          printf 'verified_feed_gzip_bytes=%s\n' "$(wc -c < .relay-output/feed.json.gz)"
+
           oidc="$(curl --fail-with-body --silent --show-error \
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             -H 'Accept: application/json' \
@@ -341,8 +337,9 @@ jobs:
             -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
             -H "Authorization: Bearer ${token}" \
             -H 'Content-Type: application/json' \
+            -H 'Content-Encoding: gzip' \
             -H "x-g11-feed-sha256: ${feed_sha}" \
-            --data-binary "@${FEED}" \
+            --data-binary '@.relay-output/feed.json.gz' \
             --output .relay-output/publish-result.json \
             --write-out '%{http_code}')"
           if [[ ! "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
