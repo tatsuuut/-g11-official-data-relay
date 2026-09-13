@@ -314,9 +314,9 @@ jobs:
 
           # Keep the signed app payload bounded. The complete research/audit
           # material remains in the encrypted canonical store. Only duplicate
-          # diagnostics and repeated provenance flags are removed in transport;
-          # heads, rankings, tickets, odds, results, settlement scores and the
-          # three-engine comparison remain available to the app.
+          # diagnostics and repeated ABEKEN provenance are removed in transport.
+          # TRUE AI stays byte-structurally complete because the app verifies
+          # its prediction contract field-for-field.
           jq -c '
             .races |= map(
               if ((.original_display_shadow.boats? | type) == "array") then
@@ -365,15 +365,6 @@ jobs:
                   )
                 else . end
             )
-            | if ((.true_ai.public_predictions? | type) == "array") then
-                .true_ai.public_predictions |= map(del(
-                  .schema, .prediction_stage, .model_version, .model_sha256,
-                  .p3_used_as_feature, .legacy_coefficient_used_as_feature,
-                  .market_odds_used_as_feature, .shadow_only,
-                  .production_mutated, .purchase_executed,
-                  .source_artifact_sha256
-                ))
-              else . end
           ' "${FEED}" > .relay-output/feed-transport.json
           mv .relay-output/feed-transport.json "${FEED}"
 
