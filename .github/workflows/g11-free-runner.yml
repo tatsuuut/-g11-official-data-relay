@@ -97,6 +97,10 @@ jobs:
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
             phase="predeadline"
+          elif [ "${EVENT_NAME}" = "push" ] && { [ "${now_hour}" -ge 21 ] || [ "${now_hour}" -le 1 ]; }; then
+            # A runner repair committed during the result window must validate
+            # the night path immediately instead of waiting for the next cron.
+            phase="night"
           elif [ "${now_minute}" = "30" ]; then
             phase="night"
           else
@@ -307,6 +311,27 @@ jobs:
             ' "${FEED}" > .relay-output/feed-reconciled.json
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
+
+          # The private store retains the complete original-display audit. The
+          # signed app transport keeps the user-facing summary but drops two
+          # repeated per-boat diagnostic maps and the duplicate profile
+          # verification-10 list. This prevents end-of-day capture growth from
+          # crossing the Site request-body ceiling without changing predictions,
+          # odds, results, tickets, engine comparison, or the canonical store.
+          jq -c '
+            .races |= map(
+              if ((.original_display_shadow.boats? | type) == "array") then
+                .original_display_shadow.boats |= map(del(.metric_ranks, .metric_values))
+              else . end
+              | if ((.original_display_shadow.profile_projections? | type) == "object") then
+                  .original_display_shadow.profile_projections |= with_entries(
+                    .value |= del(.verification10)
+                  )
+                else . end
+            )
+          ' "${FEED}" > .relay-output/feed-transport.json
+          mv .relay-output/feed-transport.json "${FEED}"
+
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
@@ -373,7 +398,7 @@ jobs:
           fi
 
           # Scheduled Actions are best-effort and can arrive more than seven
-          # minutes late.  Leave enough spacing for the next official update,
+          # minutes late. Leave enough spacing for the next official update,
           # then continue only when no other run is already queued/running.
           sleep 45
           runs="$(curl --fail-with-body --silent --show-error \
