@@ -277,6 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+          printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             -H 'Accept: application/json' \
