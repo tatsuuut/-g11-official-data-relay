@@ -8,6 +8,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
     ".github/workflows/g11-free-runner.yml",
+    ".github/workflows/g11-explicit-night-dispatcher.yml",
     ".gitignore",
     "README.md",
     "SECURITY.md",
