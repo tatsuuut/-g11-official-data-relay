@@ -9,21 +9,28 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   dispatch-rescue:
     runs-on: ubuntu-24.04
     steps:
-      - name: Dispatch production predeadline rescue
+      - name: Remove kick workflow then dispatch clean production rescue
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          headers=(
+            -H "Authorization: Bearer ${GH_TOKEN}"
+            -H 'Accept: application/vnd.github+json'
+            -H 'X-GitHub-Api-Version: 2022-11-28'
+          )
+          sha="$(curl --fail-with-body --silent --show-error "${headers[@]}" \
+            "${api}/contents/.github/workflows/g11-rescue-kick.yml?ref=main" | jq -er '.sha')"
+          curl --fail-with-body --silent --show-error "${headers[@]}" \
+            -X DELETE "${api}/contents/.github/workflows/g11-rescue-kick.yml" \
+            -d "$(jq -cn --arg sha "${sha}" '{message:"Remove temporary rescue kick",sha:$sha,branch:"main"}')"
+          curl --fail-with-body --silent --show-error "${headers[@]}" \
+            -X POST "${api}/actions/workflows/g11-free-runner.yml/dispatches" \
             -d '{"ref":"main","inputs":{"phase":"predeadline","operational_date":"2026-09-14"}}'
