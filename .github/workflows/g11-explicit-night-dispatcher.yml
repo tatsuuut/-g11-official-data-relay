@@ -1,0 +1,51 @@
+name: G11 explicit night dispatcher
+
+on:
+  # Creating or repairing this dispatcher during the result window validates it
+  # immediately without depending on a punctual scheduled start.
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/g11-explicit-night-dispatcher.yml
+  workflow_dispatch:
+  schedule:
+    # 21:30-23:30 and 00:30-01:30 JST.  The dispatcher may itself start late;
+    # it still sends an explicit NIGHT phase to the bounded relay.
+    - cron: "30 12-16 * * *"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: g11-explicit-night-dispatcher
+  cancel-in-progress: false
+
+jobs:
+  dispatch-night:
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      TZ: Asia/Tokyo
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Dispatch explicit NIGHT phase
+        run: |
+          set -euo pipefail
+          now_hour="$(date +%H)"
+          if [ "${now_hour}" -lt 5 ]; then
+            operational_date="$(date --date='yesterday' +%F)"
+          else
+            operational_date="$(date +%F)"
+          fi
+          payload="$(jq -cn --arg day "${operational_date}" \
+            '{ref:"main",inputs:{phase:"night",operational_date:$day}}')"
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+            -d "${payload}"
