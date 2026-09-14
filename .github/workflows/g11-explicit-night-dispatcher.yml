@@ -1,8 +1,8 @@
 name: G11 explicit night dispatcher
 
 on:
-  # Creating or repairing this dispatcher during the result window validates it
-  # immediately without depending on a punctual scheduled start.
+  # This file is allowlisted by the public-surface audit. Creating or repairing
+  # it during the result window validates the NIGHT dispatch immediately.
   push:
     branches:
       - main
@@ -10,7 +10,7 @@ on:
       - .github/workflows/g11-explicit-night-dispatcher.yml
   workflow_dispatch:
   schedule:
-    # 21:30-23:30 and 00:30-01:30 JST.  The dispatcher may itself start late;
+    # 21:30-23:30 and 00:30-01:30 JST. The dispatcher may itself start late;
     # it still sends an explicit NIGHT phase to the bounded relay.
     - cron: "30 12-16 * * *"
 
