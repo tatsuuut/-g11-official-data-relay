@@ -2,7 +2,7 @@ name: G11 free official-data runner
 
 on:
   # Immediately validate a runner change without waiting for GitHub's delayed cron.
-  # 2026-09-15: retrigger repaired future-only morning rescue.
+  # 2026-09-15: retrigger repaired future-only morning rescue v2.
   push:
     branches:
       - main
