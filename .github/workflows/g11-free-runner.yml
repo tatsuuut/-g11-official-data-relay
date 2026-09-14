@@ -412,6 +412,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
+          if [ ! -f "${day_root}/morning-predictions.manifest.json" ]; then
+            exit 0
+          fi
           now_hhmm="$(date +%H%M)"
           if [ "${now_hhmm}" -ge 2050 ]; then
             exit 0
