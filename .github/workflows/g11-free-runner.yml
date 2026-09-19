@@ -454,6 +454,16 @@ jobs:
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
             if [ "${http_status}" = "409" ] && \
+               [ "${{ steps.due.outputs.phase }}" = "night" ] && \
+               jq -e '.error == "NIGHT_IMMUTABLE_CONFLICT"' \
+                 .relay-output/publish-result.json >/dev/null 2>&1; then
+              # A finalized NIGHT snapshot is immutable by design. A manual
+              # replay may still verify and checkpoint research ledgers, but
+              # it must not rewrite the already published production result.
+              echo 'immutable_night=true' >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            if [ "${http_status}" = "409" ] && \
                jq -e '.error == "ODDS_IMMUTABLE_CONFLICT"' \
                  .relay-output/publish-result.json >/dev/null 2>&1; then
               curl --fail-with-body --silent --show-error --location \
@@ -477,7 +487,7 @@ jobs:
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify source identity and projected app readback
-        if: steps.publish.outcome == 'success'
+        if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true'
         env:
           FEED: .relay-output/feed.json
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
@@ -523,6 +533,24 @@ jobs:
             and (.canonical_authorities.wild_pack | type == "object")
             and .capabilities.canonical_authorities
           ' .relay-output/readback.json >/dev/null
+
+      - name: Verify existing immutable night readback
+        if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night == 'true'
+        env:
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+            -o .relay-output/readback-existing-night.json
+          jq -e --arg operational_date "${OPERATIONAL_DATE}" '
+            .operational_date_jst == $operational_date
+            and .stage == "NIGHT"
+            and .status == "PASS"
+            and (.canonical_authorities | type == "object")
+            and (.races | type == "array")
+            and (.counts.results > 0)
+          ' .relay-output/readback-existing-night.json >/dev/null
 
       - name: Keep the predeadline relay alive between delayed cron starts
         if: success() && steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'predeadline'
