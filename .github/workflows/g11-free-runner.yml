@@ -80,6 +80,7 @@ jobs:
           REQUESTED_PHASE: ${{ inputs.phase }}
           REQUESTED_DATE: ${{ inputs.operational_date }}
           EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
           now_hour="$(date +%H)"
@@ -94,6 +95,25 @@ jobs:
             if [ -n "${REQUESTED_DATE}" ]; then
               operational_date="${REQUESTED_DATE}"
             fi
+          elif [ "${EVENT_NAME}" = "schedule" ]; then
+            # GitHub scheduled jobs are best-effort and can start after the
+            # intended clock window. Resolve the phase from the triggering
+            # cron expression so a delayed predeadline job can never enter the
+            # night result path before the official K file exists.
+            case "${SCHEDULE_EXPRESSION}" in
+              "25-55/5 20 * * *"|"*/5 21 * * *"|"0-5/5 22 * * *")
+                phase="morning"
+                ;;
+              "*/5 23 * * *"|"*/5 0-11 * * *")
+                phase="predeadline"
+                ;;
+              "30 12-16 * * *")
+                phase="night"
+                ;;
+              *)
+                phase="auto"
+                ;;
+            esac
           elif [ "${now_hour}" -ge 5 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
