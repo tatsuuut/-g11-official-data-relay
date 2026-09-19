@@ -33,8 +33,8 @@ on:
     # 08:00-20:55 JST: official predeadline data and EV-only odds capture.
     - cron: "*/5 23 * * *"
     - cron: "*/5 0-11 * * *"
-    # 21:30-23:30 and 00:30-01:30 JST: official result completion slots.
-    - cron: "30 12-16 * * *"
+    # NIGHT is dispatched only by g11-explicit-night-dispatcher.yml.
+    # Keeping one scheduler prevents duplicate result runs.
 
 permissions:
   # The Site accepts only monotonic, pre-deadline market refreshes; prediction
@@ -106,9 +106,6 @@ jobs:
                 ;;
               "*/5 23 * * *"|"*/5 0-11 * * *")
                 phase="predeadline"
-                ;;
-              "30 12-16 * * *")
-                phase="night"
                 ;;
               *)
                 phase="auto"
