@@ -417,7 +417,7 @@ jobs:
           fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
 
-      - name: Verify exact app readback
+      - name: Verify source identity and projected app readback
         if: steps.publish.outcome == 'success'
         env:
           FEED: .relay-output/feed.json
@@ -426,8 +426,44 @@ jobs:
           set -euo pipefail
           curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+            --dump-header .relay-output/readback.headers \
             -o .relay-output/readback.json
-          cmp "${FEED}" .relay-output/readback.json
+
+          header() {
+            awk -F ': *' -v wanted="$1" '
+              tolower($1) == tolower(wanted) {
+                value=$2
+                sub(/\r$/, "", value)
+              }
+              END { print value }
+            ' .relay-output/readback.headers
+          }
+
+          source_sha="$(header x-g11-source-feed-sha256)"
+          readback_sha="$(header x-g11-feed-sha256)"
+          authority_source="$(header x-g11-authority-readback-source)"
+          expected_source_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+          actual_readback_sha="$(sha256sum .relay-output/readback.json | cut -d' ' -f1)"
+
+          test -n "${source_sha}"
+          test -n "${readback_sha}"
+          test "${source_sha}" = "${expected_source_sha}"
+          test "${readback_sha}" = "${actual_readback_sha}"
+          case "${authority_source}" in
+            UPSTREAM|FAIL_CLOSED_SITE_ADAPTER) ;;
+            *)
+              printf 'G11_READBACK_AUTHORITY_SOURCE_INVALID: %s\n' "${authority_source}" >&2
+              exit 1
+              ;;
+          esac
+
+          jq -e --arg operational_date "${OPERATIONAL_DATE}" '
+            .operational_date_jst == $operational_date
+            and (.canonical_authorities | type == "object")
+            and (.canonical_authorities.growth_p3 | type == "object")
+            and (.canonical_authorities.wild_pack | type == "object")
+            and .capabilities.canonical_authorities
+          ' .relay-output/readback.json >/dev/null
 
       - name: Keep the predeadline relay alive between delayed cron starts
         if: success() && steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'predeadline'
