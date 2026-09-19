@@ -148,6 +148,7 @@ jobs:
           key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
           restore-keys: |
             g11-state-v2-${{ steps.due.outputs.operational_date }}-
+            g11-state-v2-
 
       - name: Fail closed when the private credential is absent
         env:
@@ -204,8 +205,8 @@ jobs:
           ref: ${{ env.G11_RUNTIME_BRANCH }}
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-model
-          persist-credentials: true
-          fetch-depth: 0
+          persist-credentials: false
+          fetch-depth: 1
           sparse-checkout: |
             g11/true-ai-models
             g11/true-ai-history
@@ -287,42 +288,20 @@ jobs:
           )
           python3 -m g11.relay.v1 "${args[@]}" | tee ../.relay-output/result.json
 
-      - name: Persist verified nightly research ledgers
+      - name: Verify nightly research ledgers before encrypted persistence
         if: steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'night'
-        # The private runtime later projects only hash-verified cumulative
-        # counts; this step never changes the app production-pack pointer.
         working-directory: .g11-private
         env:
-          RUNTIME_WORKTREE: ${{ github.workspace }}/.g11-model
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
           set -euo pipefail
-          year="${OPERATIONAL_DATE:0:4}"
-          month="${OPERATIONAL_DATE:5:2}"
-          day="${OPERATIONAL_DATE:8:2}"
           true_source="${STATE_STORE}/g11/true-ai-history/${OPERATIONAL_DATE}"
           wild_source="${STATE_STORE}/g11/wild-pack-history/${OPERATIONAL_DATE}"
-          true_target="${RUNTIME_WORKTREE}/g11/true-ai-history/${year}/${month}/${day}"
-          wild_target="${RUNTIME_WORKTREE}/g11/wild-pack-history/${year}/${month}/${day}"
           test -f "${true_source}/day-records.manifest.json"
           test -f "${wild_source}/factual-paths.manifest.json"
-
-          changed=false
-          if [ ! -d "${true_target}" ] || ! diff -qr "${true_source}" "${true_target}" >/dev/null; then
-            changed=true
-          fi
-          if [ ! -d "${wild_target}" ] || ! diff -qr "${wild_source}" "${wild_target}" >/dev/null; then
-            changed=true
-          fi
-          if [ "${changed}" = false ]; then
-            exit 0
-          fi
-
-          mkdir -p "${true_target}" "${wild_target}"
-          cp -a "${true_source}/." "${true_target}/"
-          cp -a "${wild_source}/." "${wild_target}/"
-          python3 - "${RUNTIME_WORKTREE}" <<'PY'
+          python3 - "${STATE_STORE}" <<'PY'
+          import json
           import pathlib
           import sys
           from g11.true_ai.v1.src import true_ai_research_inference_v1 as inference
@@ -330,24 +309,21 @@ jobs:
           from g11.wild_pack.v1 import runtime_collection_v1 as wild_runtime
 
           root = pathlib.Path(sys.argv[1]) / "g11"
-          true_runtime._write_json_atomic(
-              root / "true-ai-history" / "status.json",
-              true_runtime.collection_status(root / "true-ai-history"),
-          )
-          true_runtime._write_json_atomic(
-              root / "true-ai-history" / "shadow-status.json",
-              inference.shadow_status(root / "true-ai-history"),
-          )
-          wild_runtime._write_json_atomic(
-              root / "wild-pack-history" / "status.json",
-              wild_runtime.collection_status(root / "wild-pack-history"),
-          )
+          true_status = true_runtime.collection_status(root / "true-ai-history")
+          shadow_status = inference.shadow_status(root / "true-ai-history")
+          wild_status = wild_runtime.collection_status(root / "wild-pack-history")
+          assert true_status["DATA_LEAK_COUNT"] == 0
+          assert shadow_status["DATA_LEAK_COUNT"] == 0
+          assert wild_status["COUNTERFACTUAL_TARGET_COUNT"] == 0
+          assert wild_status["BET_ELIGIBLE_RACES"] == 0
+          assert wild_status["FULL_PACK_READY"] is False
+          print(json.dumps({
+              "TRUE_AI_FORMAL_PAIRED_RACES": true_status["FORMAL_PAIRED_RACES"],
+              "WILD_SECOND_ELIGIBLE_RACES": wild_status["SECOND_ELIGIBLE_RACES"],
+              "WILD_THIRD_ELIGIBLE_RACES": wild_status["THIRD_ELIGIBLE_RACES"],
+              "WILD_BET_ELIGIBLE_RACES": wild_status["BET_ELIGIBLE_RACES"],
+          }, sort_keys=True))
           PY
-          git -C "${RUNTIME_WORKTREE}" add g11/true-ai-history g11/wild-pack-history
-          git -C "${RUNTIME_WORKTREE}" -c user.name='github-actions[bot]' \
-            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            commit -m "wild: capture NIGHT ${OPERATIONAL_DATE}"
-          git -C "${RUNTIME_WORKTREE}" push origin HEAD:g11-runtime
 
       - name: Encrypt changed state before persistence
         if: always()
