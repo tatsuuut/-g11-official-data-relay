@@ -10,6 +10,7 @@ ALLOWED_FILES = {
     ".github/workflows/g11-free-runner.yml",
     ".github/workflows/g11-explicit-night-dispatcher.yml",
     ".github/workflows/g11-night-backfill-20260917-20260919.yml",
+    ".github/workflows/g11-wild-position-bootstrap.yml",
     ".gitignore",
     "README.md",
     "SECURITY.md",
