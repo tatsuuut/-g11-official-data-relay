@@ -240,6 +240,12 @@ jobs:
             python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
           fi
 
+      - name: Verify relay schedule and authority contracts
+        working-directory: .g11-private
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: python3 -m unittest g11.relay.test_v1
+
       - name: Run the private fail-closed relay
         id: runtime
         continue-on-error: true
