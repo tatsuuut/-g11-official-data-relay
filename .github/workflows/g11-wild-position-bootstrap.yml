@@ -2,6 +2,12 @@ name: G11 Wild conditional position bootstrap
 
 on:
   workflow_dispatch:
+    inputs:
+      source_state_cache_key:
+        description: Existing encrypted Wild position state to verify and rebind; blank trains a new artifact
+        required: false
+        default: ""
+        type: string
 
 permissions:
   actions: write
@@ -30,13 +36,20 @@ jobs:
 
       - name: Resolve the encrypted state date
         id: state-date
-        run: printf 'state_date=%s\n' "$(TZ=Asia/Tokyo date +%F)" >> "${GITHUB_OUTPUT}"
+        run: |
+          set -euo pipefail
+          if [ "$(date +%H)" -lt 5 ]; then
+            state_date="$(date --date='yesterday' +%F)"
+          else
+            state_date="$(date +%F)"
+          fi
+          printf 'state_date=%s\n' "${state_date}" >> "${GITHUB_OUTPUT}"
 
       - name: Restore latest encrypted runtime state
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.state-date.outputs.state_date }}-${{ github.run_id }}-wild-position
+          key: ${{ inputs.source_state_cache_key || format('g11-state-v2-{0}-{1}-wild-position', steps.state-date.outputs.state_date, github.run_id) }}
           restore-keys: |
             g11-state-v2-${{ steps.state-date.outputs.state_date }}-
             g11-state-v2-
@@ -79,6 +92,7 @@ jobs:
           PY
 
       - name: Checkout private model authority
+        if: inputs.source_state_cache_key == ''
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
@@ -89,6 +103,7 @@ jobs:
           fetch-depth: 1
 
       - name: Checkout public official-source history
+        if: inputs.source_state_cache_key == ''
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: BoatraceCSV/boatracecsv.github.io
@@ -98,9 +113,11 @@ jobs:
           fetch-depth: 0
 
       - name: Install the pinned existing backend
+        if: inputs.source_state_cache_key == ''
         run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
 
       - name: Verify conditional model contracts
+        if: inputs.source_state_cache_key == ''
         working-directory: .g11-private
         run: |
           python3 -m unittest \
@@ -110,6 +127,7 @@ jobs:
             g11.wild_pack.v1.test_conditional_position_model_v1
 
       - name: Rebuild the hash-bound factual dataset
+        if: inputs.source_state_cache_key == ''
         working-directory: .g11-private
         env:
           BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
@@ -132,6 +150,7 @@ jobs:
             --contract g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json
 
       - name: Train and freeze WILD SECOND and THIRD
+        if: inputs.source_state_cache_key == ''
         working-directory: .g11-private
         env:
           BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
@@ -155,6 +174,7 @@ jobs:
           cp "${BOOTSTRAP_ROOT}/position-audit.json" "${MODEL_ROOT}.candidate/"
 
       - name: Prove full 30 and 120 path inference
+        if: inputs.source_state_cache_key == ''
         working-directory: .g11-private
         env:
           BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
@@ -179,6 +199,7 @@ jobs:
             "${MODEL_ROOT}/WILD_THIRD/inference-readback.json" >/dev/null
 
       - name: Build and verify the immutable model manifest
+        if: inputs.source_state_cache_key == ''
         working-directory: .g11-private
         env:
           MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning.candidate
@@ -238,7 +259,48 @@ jobs:
           mv "${MODEL_ROOT}" "${final_root}"
           rm -rf "${final_root}.previous"
 
+      - name: Verify reusable frozen model state
+        if: inputs.source_state_cache_key != ''
+        env:
+          SOURCE_STATE_CACHE_KEY: ${{ inputs.source_state_cache_key }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+
+          root = pathlib.Path(".relay-state/store/g11/wild-pack-models/morning")
+          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          if manifest.get("STATUS") != "HISTORICAL_SHADOW_ARTIFACTS_FROZEN":
+              raise SystemExit("WILD_POSITION_REUSE_STATUS")
+          if manifest.get("FULL_PATH_READBACK") != {"SECOND": 30, "THIRD": 120}:
+              raise SystemExit("WILD_POSITION_REUSE_PATHS")
+          if manifest.get("P3_MUTATED") is not False or manifest.get("APP_PUBLISHED") is not False:
+              raise SystemExit("WILD_POSITION_REUSE_BACKFLOW")
+          for name in ("WILD_SECOND", "WILD_THIRD"):
+              registry = manifest["SECOND" if name == "WILD_SECOND" else "THIRD"]
+              model = root / name / "model.cbm"
+              digest = hashlib.sha256(model.read_bytes()).hexdigest()
+              if digest != registry["MODEL_SHA256"]:
+                  raise SystemExit(f"{name}_REUSE_MODEL_HASH")
+              readback = json.loads((root / name / "inference-readback.json").read_text(encoding="utf-8"))
+              expected = 30 if name == "WILD_SECOND" else 120
+              if readback.get("STATUS") != "SHADOW_PREDICTION_LOCKED" or readback.get("PATH_COUNT") != expected:
+                  raise SystemExit(f"{name}_REUSE_READBACK")
+              if readback.get("MID_PATH_PRUNING_COUNT") != 0 or readback.get("PRODUCTION_MUTATED") is not False:
+                  raise SystemExit(f"{name}_REUSE_INTEGRITY")
+          print(json.dumps({
+              "STATUS": "REUSABLE_FROZEN_MODEL_STATE_PASS",
+              "SOURCE_STATE_CACHE_KEY": os.environ["SOURCE_STATE_CACHE_KEY"],
+              "SECOND_MODEL_SHA256": manifest["SECOND"]["MODEL_SHA256"],
+              "THIRD_MODEL_SHA256": manifest["THIRD"]["MODEL_SHA256"],
+          }, sort_keys=True))
+          PY
+
       - name: Encrypt the completed runtime state
+        if: inputs.source_state_cache_key == ''
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
