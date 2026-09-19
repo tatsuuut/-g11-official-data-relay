@@ -197,17 +197,19 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Checkout hash-locked TRUE AI model only
+      - name: Checkout hash-locked research runtime
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
           ref: ${{ env.G11_RUNTIME_BRANCH }}
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-model
-          persist-credentials: false
-          fetch-depth: 1
+          persist-credentials: true
+          fetch-depth: 0
           sparse-checkout: |
             g11/true-ai-models
+            g11/true-ai-history
+            g11/wild-pack-history
 
       - name: Resolve immutable private source identity
         id: source
@@ -218,9 +220,19 @@ jobs:
           source_sha="$(git -C .g11-private rev-parse HEAD)"
           printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
 
-      - name: Stage the hash-locked TRUE AI model
+      - name: Hydrate append-only research history and stage the model
         run: |
           set -euo pipefail
+          mkdir -p .relay-state/store/g11/true-ai-history
+          if [ -d .g11-model/g11/true-ai-history ]; then
+            cp -a .g11-model/g11/true-ai-history/. \
+              .relay-state/store/g11/true-ai-history/
+          fi
+          mkdir -p .relay-state/store/g11/wild-pack-history
+          if [ -d .g11-model/g11/wild-pack-history ]; then
+            cp -a .g11-model/g11/wild-pack-history/. \
+              .relay-state/store/g11/wild-pack-history/
+          fi
           day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
           if [ ! -f "${day_root}/morning-predictions.manifest.json" ]; then
             model_source=".g11-model/g11/true-ai-models"
@@ -249,6 +261,7 @@ jobs:
             g11.relay.test_v1 \
             g11.wild_pack.v1.test_governance_v1 \
             g11.wild_pack.v1.test_public_position_bootstrap_v1 \
+            g11.wild_pack.v1.test_runtime_collection_v1 \
             g11.canonical.test_integrated_authority_status_v1
 
       - name: Run the private fail-closed relay
@@ -273,6 +286,66 @@ jobs:
             --oidc-audience "${G11_OIDC_AUDIENCE}"
           )
           python3 -m g11.relay.v1 "${args[@]}" | tee ../.relay-output/result.json
+
+      - name: Persist verified nightly research ledgers
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'night'
+        working-directory: .g11-private
+        env:
+          RUNTIME_WORKTREE: ${{ github.workspace }}/.g11-model
+          STATE_STORE: ${{ github.workspace }}/.relay-state/store
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          year="${OPERATIONAL_DATE:0:4}"
+          month="${OPERATIONAL_DATE:5:2}"
+          day="${OPERATIONAL_DATE:8:2}"
+          true_source="${STATE_STORE}/g11/true-ai-history/${OPERATIONAL_DATE}"
+          wild_source="${STATE_STORE}/g11/wild-pack-history/${OPERATIONAL_DATE}"
+          true_target="${RUNTIME_WORKTREE}/g11/true-ai-history/${year}/${month}/${day}"
+          wild_target="${RUNTIME_WORKTREE}/g11/wild-pack-history/${year}/${month}/${day}"
+          test -f "${true_source}/day-records.manifest.json"
+          test -f "${wild_source}/factual-paths.manifest.json"
+
+          changed=false
+          if [ ! -d "${true_target}" ] || ! diff -qr "${true_source}" "${true_target}" >/dev/null; then
+            changed=true
+          fi
+          if [ ! -d "${wild_target}" ] || ! diff -qr "${wild_source}" "${wild_target}" >/dev/null; then
+            changed=true
+          fi
+          if [ "${changed}" = false ]; then
+            exit 0
+          fi
+
+          mkdir -p "${true_target}" "${wild_target}"
+          cp -a "${true_source}/." "${true_target}/"
+          cp -a "${wild_source}/." "${wild_target}/"
+          python3 - "${RUNTIME_WORKTREE}" <<'PY'
+          import pathlib
+          import sys
+          from g11.true_ai.v1.src import true_ai_research_inference_v1 as inference
+          from g11.true_ai.v1.src import true_ai_runtime_v1 as true_runtime
+          from g11.wild_pack.v1 import runtime_collection_v1 as wild_runtime
+
+          root = pathlib.Path(sys.argv[1]) / "g11"
+          true_runtime._write_json_atomic(
+              root / "true-ai-history" / "status.json",
+              true_runtime.collection_status(root / "true-ai-history"),
+          )
+          true_runtime._write_json_atomic(
+              root / "true-ai-history" / "shadow-status.json",
+              inference.shadow_status(root / "true-ai-history"),
+          )
+          wild_runtime._write_json_atomic(
+              root / "wild-pack-history" / "status.json",
+              wild_runtime.collection_status(root / "wild-pack-history"),
+          )
+          PY
+          git -C "${RUNTIME_WORKTREE}" add g11/true-ai-history g11/wild-pack-history
+          git -C "${RUNTIME_WORKTREE}" -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "wild: capture NIGHT ${OPERATIONAL_DATE}"
+          git -C "${RUNTIME_WORKTREE}" push origin HEAD:g11-runtime
 
       - name: Encrypt changed state before persistence
         if: always()
