@@ -1,0 +1,42 @@
+name: G11 night result backfill 2026-09-17 to 2026-09-19
+
+on:
+  # This bounded recovery runs when this file is first committed. It has no
+  # schedule and cannot expand to dates outside the explicit allowlist below.
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/g11-night-backfill-20260917-20260919.yml
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: g11-night-backfill-20260917-20260919
+  cancel-in-progress: false
+
+jobs:
+  dispatch-bounded-night-backfill:
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Dispatch the three missing NIGHT dates
+        run: |
+          set -euo pipefail
+          for operational_date in 2026-09-17 2026-09-18 2026-09-19; do
+            payload="$(jq -cn --arg day "${operational_date}" \
+              '{ref:"main",inputs:{phase:"night",operational_date:$day}}')"
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+              -d "${payload}"
+          done
