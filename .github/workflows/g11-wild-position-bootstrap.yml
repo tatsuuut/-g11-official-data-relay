@@ -28,12 +28,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve the encrypted state date
+        id: state-date
+        run: printf 'state_date=%s\n' "$(TZ=Asia/Tokyo date +%F)" >> "${GITHUB_OUTPUT}"
+
       - name: Restore latest encrypted runtime state
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-wild-position-${{ github.run_id }}
+          key: g11-state-v2-${{ steps.state-date.outputs.state_date }}-${{ github.run_id }}-wild-position
           restore-keys: |
+            g11-state-v2-${{ steps.state-date.outputs.state_date }}-
             g11-state-v2-
 
       - name: Require the existing private read credential
@@ -253,4 +258,4 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-wild-position-${{ github.run_id }}
+          key: g11-state-v2-${{ steps.state-date.outputs.state_date }}-${{ github.run_id }}-wild-position
