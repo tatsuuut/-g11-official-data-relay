@@ -289,6 +289,8 @@ jobs:
 
       - name: Persist verified nightly research ledgers
         if: steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'night'
+        # The private runtime later projects only hash-verified cumulative
+        # counts; this step never changes the app production-pack pointer.
         working-directory: .g11-private
         env:
           RUNTIME_WORKTREE: ${{ github.workspace }}/.g11-model
