@@ -2,7 +2,7 @@ name: G11 night result backfill 2026-09-17 to 2026-09-19
 
 on:
   # This bounded recovery runs only when this exact file changes or by an
-  # explicit manual dispatch. Revision 5 runs after projected feed readback verification.
+  # explicit manual dispatch. Revision 6 skips an already complete immutable NIGHT snapshot.
   # It has no schedule and cannot expand its dates.
   push:
     branches:
@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
+      G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
     steps:
       - name: Dispatch and verify each missing NIGHT date in order
         run: |
@@ -34,6 +35,21 @@ jobs:
           prior_run_id=""
 
           for operational_date in 2026-09-17 2026-09-18 2026-09-19; do
+            if stored="$(curl --fail-with-body --silent --show-error --location \
+              "${G11_APP_ORIGIN}/api/g11-feed?date=${operational_date}")" &&
+               jq -e --arg day "${operational_date}" '
+                 .operational_date_jst == $day
+                 and .stage == "NIGHT"
+                 and .status == "PASS"
+                 and (.counts.races | type == "number")
+                 and .counts.races > 0
+                 and .counts.results == .counts.races
+               ' <<<"${stored}" >/dev/null; then
+              printf 'NIGHT_BACKFILL_ALREADY_COMPLETE date=%s races=%s\n' \
+                "${operational_date}" "$(jq -r '.counts.races' <<<"${stored}")"
+              continue
+            fi
+
             marker_epoch="$(date -u +%s)"
             payload="$(jq -cn --arg day "${operational_date}"               '{ref:"main",inputs:{phase:"night",operational_date:$day}}')"
             curl --fail-with-body --silent --show-error               -X POST               -H "Authorization: Bearer ${GH_TOKEN}"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "${api}/actions/workflows/g11-free-runner.yml/dispatches"               -d "${payload}"
