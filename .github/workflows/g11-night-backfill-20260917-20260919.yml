@@ -2,7 +2,7 @@ name: G11 night result backfill 2026-09-17 to 2026-09-19
 
 on:
   # This bounded recovery runs only when this exact file changes or by an
-  # explicit manual dispatch. Revision 3 preserves truthful recovery timestamps.
+  # explicit manual dispatch. Revision 4 runs after the V2 feed safety update.
   # It has no schedule and cannot expand its dates.
   push:
     branches:
