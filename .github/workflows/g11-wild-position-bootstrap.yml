@@ -1,0 +1,256 @@
+name: G11 Wild conditional position bootstrap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: g11-wild-conditional-position-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  train-freeze-and-encrypt:
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      G11_PRIVATE_REPOSITORY: tatsuuut/boat-brain-lab
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      TZ: Asia/Tokyo
+
+    steps:
+      - name: Checkout relay authority
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Restore latest encrypted runtime state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-wild-position-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-
+
+      - name: Require the existing private read credential
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: test -n "${G11_PRIVATE_REPO_TOKEN}"
+
+      - name: Decrypt and validate inherited state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p .relay-state
+          encrypted=.relay-cache/state.tgz.gpg
+          if [ ! -f "${encrypted}" ]; then
+            exit 0
+          fi
+          archive="${RUNNER_TEMP}/g11-relay-state.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${archive}" "${encrypted}"
+          exec 3<&-
+          python3 - "${archive}" <<'PY'
+          import pathlib
+          import sys
+          import tarfile
+
+          archive = pathlib.Path(sys.argv[1])
+          with tarfile.open(archive, "r:gz") as handle:
+              members = handle.getmembers()
+              if not members:
+                  raise SystemExit("G11_RELAY_EMPTY_STATE_ARCHIVE")
+              for member in members:
+                  path = pathlib.PurePosixPath(member.name)
+                  if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
+                      raise SystemExit("G11_RELAY_UNSAFE_STATE_ARCHIVE")
+              handle.extractall(".relay-state", filter="data")
+          PY
+
+      - name: Checkout private model authority
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout public official-source history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: BoatraceCSV/boatracecsv.github.io
+          ref: fea7ba7d5c09ff2019adb0461bb91081fe57144f
+          path: .public-data
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install the pinned existing backend
+        run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
+
+      - name: Verify conditional model contracts
+        working-directory: .g11-private
+        run: |
+          python3 -m unittest \
+            g11.wild_pack.v1.test_governance_v1 \
+            g11.wild_pack.v1.test_public_position_bootstrap_v1 \
+            g11.wild_pack.v1.test_runtime_collection_v1 \
+            g11.wild_pack.v1.test_conditional_position_model_v1
+
+      - name: Rebuild the hash-bound factual dataset
+        working-directory: .g11-private
+        env:
+          BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
+        run: |
+          set -euo pipefail
+          mkdir -p "${BOOTSTRAP_ROOT}"
+          python3 -m g11.true_ai.v1.src.public_backfill_v1 \
+            --public-repo "${GITHUB_WORKSPACE}/.public-data" \
+            --dataset-output "${BOOTSTRAP_ROOT}/head-dataset.json" \
+            --audit-output "${BOOTSTRAP_ROOT}/head-audit.json" \
+            --end 2026-09-19
+          python3 -m g11.wild_pack.v1.public_position_bootstrap_v1 \
+            --head-dataset "${BOOTSTRAP_ROOT}/head-dataset.json" \
+            --public-repo "${GITHUB_WORKSPACE}/.public-data" \
+            --overlay-output "${BOOTSTRAP_ROOT}/position-overlay.json" \
+            --audit-output "${BOOTSTRAP_ROOT}/position-audit.json"
+          python3 -m g11.wild_pack.v1.conditional_position_model_v1 verify \
+            --dataset "${BOOTSTRAP_ROOT}/head-dataset.json" \
+            --overlay "${BOOTSTRAP_ROOT}/position-overlay.json" \
+            --contract g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json
+
+      - name: Train and freeze WILD SECOND and THIRD
+        working-directory: .g11-private
+        env:
+          BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
+          MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          rm -rf "${MODEL_ROOT}.candidate"
+          mkdir -p "${MODEL_ROOT}.candidate/WILD_SECOND" "${MODEL_ROOT}.candidate/WILD_THIRD"
+          for wild_id in WILD_SECOND WILD_THIRD; do
+            python3 -m g11.wild_pack.v1.conditional_position_model_v1 train \
+              --dataset "${BOOTSTRAP_ROOT}/head-dataset.json" \
+              --overlay "${BOOTSTRAP_ROOT}/position-overlay.json" \
+              --contract g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json \
+              --wild-id "${wild_id}" \
+              --output-dir "${MODEL_ROOT}.candidate/${wild_id}" \
+              --code-commit "${source_sha}"
+          done
+          cp g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json "${MODEL_ROOT}.candidate/"
+          cp "${BOOTSTRAP_ROOT}/head-audit.json" "${MODEL_ROOT}.candidate/"
+          cp "${BOOTSTRAP_ROOT}/position-audit.json" "${MODEL_ROOT}.candidate/"
+
+      - name: Prove full 30 and 120 path inference
+        working-directory: .g11-private
+        env:
+          BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
+          MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning.candidate
+        run: |
+          set -euo pipefail
+          race_id="$(jq -r '.SPLIT_RACE_IDS.FUTURE_HOLDOUT[0]' "${BOOTSTRAP_ROOT}/position-overlay.json")"
+          for wild_id in WILD_SECOND WILD_THIRD; do
+            python3 -m g11.wild_pack.v1.conditional_position_model_v1 predict \
+              --dataset "${BOOTSTRAP_ROOT}/head-dataset.json" \
+              --overlay "${BOOTSTRAP_ROOT}/position-overlay.json" \
+              --contract g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json \
+              --wild-id "${wild_id}" \
+              --model-dir "${MODEL_ROOT}/${wild_id}" \
+              --registry "${MODEL_ROOT}/${wild_id}/registry-entry.json" \
+              --race-id "${race_id}" \
+              --output "${MODEL_ROOT}/${wild_id}/inference-readback.json"
+          done
+          jq -e '.STATUS == "SHADOW_PREDICTION_LOCKED" and .GROUP_COUNT == 6 and .PATH_COUNT == 30 and .MID_PATH_PRUNING_COUNT == 0 and .PRODUCTION_MUTATED == false' \
+            "${MODEL_ROOT}/WILD_SECOND/inference-readback.json" >/dev/null
+          jq -e '.STATUS == "SHADOW_PREDICTION_LOCKED" and .GROUP_COUNT == 30 and .PATH_COUNT == 120 and .MID_PATH_PRUNING_COUNT == 0 and .PRODUCTION_MUTATED == false' \
+            "${MODEL_ROOT}/WILD_THIRD/inference-readback.json" >/dev/null
+
+      - name: Build and verify the immutable model manifest
+        working-directory: .g11-private
+        env:
+          MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning.candidate
+        run: |
+          set -euo pipefail
+          python3 - "${MODEL_ROOT}" "$(git rev-parse HEAD)" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          source_sha = sys.argv[2]
+          def load(path):
+              return json.loads(path.read_text(encoding="utf-8"))
+          def file_sha(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+          second = load(root / "WILD_SECOND/registry-entry.json")
+          third = load(root / "WILD_THIRD/registry-entry.json")
+          for name, registry in (("WILD_SECOND", second), ("WILD_THIRD", third)):
+              if file_sha(root / name / "model.cbm") != registry["MODEL_SHA256"]:
+                  raise SystemExit(f"{name}_MODEL_HASH")
+          manifest = {
+              "SCHEMA": "G11_WILD_POSITION_MODEL_PACK_MANIFEST_V1",
+              "STATUS": "HISTORICAL_SHADOW_ARTIFACTS_FROZEN",
+              "SOURCE_COMMIT": source_sha,
+              "PREDICTION_STAGE": "MORNING",
+              "SECOND": second,
+              "THIRD": third,
+              "FULL_PATH_READBACK": {"SECOND": 30, "THIRD": 120},
+              "P3_MUTATED": False,
+              "APP_PUBLISHED": False,
+              "FULL_PACK_READY": False,
+          }
+          payload = json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+          (root / "manifest.json").write_text(payload, encoding="utf-8")
+          print(json.dumps({
+              "STATUS": manifest["STATUS"],
+              "SECOND_MODEL_SHA256": second["MODEL_SHA256"],
+              "SECOND_HOLDOUT_TOP1": second["FUTURE_HOLDOUT_EVALUATION"]["TOP1_HIT_RATE"],
+              "THIRD_MODEL_SHA256": third["MODEL_SHA256"],
+              "THIRD_HOLDOUT_TOP1": third["FUTURE_HOLDOUT_EVALUATION"]["TOP1_HIT_RATE"],
+              "FULL_PATH_READBACK": manifest["FULL_PATH_READBACK"],
+              "FULL_PACK_READY": False,
+          }, sort_keys=True))
+          PY
+          test -s "${MODEL_ROOT}/manifest.json"
+          final_root="${MODEL_ROOT%.candidate}"
+          rm -rf "${final_root}.previous"
+          if [ -d "${final_root}" ]; then
+            mv "${final_root}" "${final_root}.previous"
+          fi
+          mv "${MODEL_ROOT}" "${final_root}"
+          rm -rf "${final_root}.previous"
+
+      - name: Encrypt the completed runtime state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p .relay-cache
+          encrypted=.relay-cache/state.tgz.gpg
+          temporary="${encrypted}.tmp"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . | \
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+              --symmetric --cipher-algo AES256 --output "${temporary}"
+          exec 3<&-
+          mv "${temporary}" "${encrypted}"
+          test -s "${encrypted}"
+
+      - name: Save only encrypted model and runtime state
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-wild-position-${{ github.run_id }}
