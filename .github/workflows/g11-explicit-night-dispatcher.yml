@@ -1,8 +1,8 @@
 name: G11 explicit night dispatcher
 
 on:
-  # This file is allowlisted by the public-surface audit. Creating or repairing
-  # it during the result window validates the NIGHT dispatch immediately.
+  # This file is allowlisted by the public-surface audit. Push validates the
+  # workflow only; scheduled NIGHT dispatch starts at 22:00 JST.
   push:
     branches:
       - main
@@ -10,9 +10,8 @@ on:
       - .github/workflows/g11-explicit-night-dispatcher.yml
   workflow_dispatch:
   schedule:
-    # 21:30-23:30 and 00:30-01:30 JST. The dispatcher may itself start late;
-    # it still sends an explicit NIGHT phase to the bounded relay.
-    - cron: "30 12-16 * * *"
+    # 22:00-01:30 JST, every 30 minutes. The first NIGHT run is 22:00.
+    - cron: "0,30 13-16 * * *"
 
 permissions:
   actions: write
@@ -34,6 +33,9 @@ jobs:
       - name: Dispatch explicit NIGHT phase
         run: |
           set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            exit 0
+          fi
           now_hour="$(date +%H)"
           if [ "${now_hour}" -lt 5 ]; then
             operational_date="$(date --date='yesterday' +%F)"
