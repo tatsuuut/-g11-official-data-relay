@@ -170,12 +170,16 @@ jobs:
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
             --decrypt --output "${archive}" "${encrypted}"
           exec 3<&-
-          python3 - "${archive}" <<'PY'
+          python3 - "${archive}" "${{ steps.due.outputs.operational_date }}" <<'PY'
+          import json
           import pathlib
+          import shutil
           import sys
           import tarfile
 
           archive = pathlib.Path(sys.argv[1])
+          operational_date = sys.argv[2]
+          state_root = pathlib.Path(".relay-state")
           with tarfile.open(archive, "r:gz") as handle:
               members = handle.getmembers()
               if not members:
@@ -184,7 +188,34 @@ jobs:
                   path = pathlib.PurePosixPath(member.name)
                   if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
                       raise SystemExit("G11_RELAY_UNSAFE_STATE_ARCHIVE")
-              handle.extractall(".relay-state", filter="data")
+              handle.extractall(state_root, filter="data")
+
+          metadata_path = state_root / "relay-state.json"
+          if metadata_path.is_file():
+              metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+              if metadata.get("OPERATIONAL_DATE_JST") != operational_date:
+                  store = state_root / "store"
+                  for name in (
+                      "manifest.json", "scope.json", "responses", "rejected-responses",
+                      "snapshots", "ledger",
+                  ):
+                      target = store / name
+                      if target.is_dir():
+                          shutil.rmtree(target)
+                      elif target.exists():
+                          target.unlink()
+                  metadata = {
+                      "SCHEMA": "G11_PRIVATE_PUBLIC_RELAY_STATE_V1",
+                      "OPERATIONAL_DATE_JST": operational_date,
+                      "MORNING_COMPLETE": False,
+                      "LAST_PHASE": None,
+                      "LAST_STORE_SHA256": None,
+                      "LAST_PUBLISHED_FEED_SHA256": None,
+                  }
+                  metadata_path.write_text(
+                      json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n",
+                      encoding="utf-8",
+                  )
           PY
 
       - name: Checkout private G11 runtime
