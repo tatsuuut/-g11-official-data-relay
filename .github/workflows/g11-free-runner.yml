@@ -502,6 +502,15 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
           set -euo pipefail
+          # A same-day rescue NIGHT is intentionally nonresearch. It can attach
+          # the complete official result set and publish score-only display
+          # without creating canonical TRUE-AI/WILD research ledgers.
+          if [ -f ../.relay-output/result.json ] && \
+             jq -e '.STATUS == "SAME_DAY_RESCUE_NIGHT_RESULTS_COMPLETE"' \
+               ../.relay-output/result.json >/dev/null 2>&1; then
+            echo "RESCUE_NIGHT_RESEARCH_LEDGER_CHECK=NOT_APPLICABLE"
+            exit 0
+          fi
           true_source="${STATE_STORE}/g11/true-ai-history/${OPERATIONAL_DATE}"
           wild_source="${STATE_STORE}/g11/wild-pack-history/${OPERATIONAL_DATE}"
           test -f "${true_source}/day-records.manifest.json"
