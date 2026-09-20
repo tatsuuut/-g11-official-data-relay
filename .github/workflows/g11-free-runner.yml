@@ -112,8 +112,8 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # One bounded acceptance run validates the real predeadline path.
-            # This is reverted to dry-run immediately after readback.
+            # One bounded acceptance retry validates the corrected V2 display
+            # readback on the real predeadline path. Revert after readback.
             phase="predeadline"
           elif [ "${now_hour}" -ge 5 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
