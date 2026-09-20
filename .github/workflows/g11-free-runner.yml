@@ -391,6 +391,41 @@ jobs:
           wild_bet._write_json_atomic(root / "bet-status.json", status)
           PY
 
+      - name: Verify encrypted WILD CURRENT app projection
+        working-directory: .g11-private
+        env:
+          STATE_STORE: ${{ github.workspace }}/.relay-state/store
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          python3 - "${STATE_STORE}" "${OPERATIONAL_DATE}" <<'PY'
+          import pathlib
+          import sys
+          from g11.canonical import public_app_feed
+
+          root = pathlib.Path(sys.argv[1]).resolve()
+          projection, _ = public_app_feed._wild_pack_public_projection(
+              root, sys.argv[2], None
+          )
+          assert projection is not None
+          assert projection["status"] == "PASS"
+          assert projection["morning"]["STATUS"] == "CURRENT"
+          assert projection["pre_race"]["STATUS"] == "CURRENT"
+          assert projection["pre_race"]["ELIGIBLE_RACES"] >= 10000
+          assert projection["authority"]["morning_full_pack_ready"] is True
+          assert projection["authority"]["pre_race_full_pack_ready"] is True
+          assert projection["wild4"]["formal_eligible"] >= 4020
+          assert projection["wild4"]["target"] == 10000
+          assert projection["counter_reset"] is False
+          assert projection["p3_mutated"] is False
+          print({
+              "WILD_CURRENT_APP_PROJECTION": "PASS",
+              "PRE_RACE_ELIGIBLE": projection["pre_race"]["ELIGIBLE_RACES"],
+              "WILD4_ELIGIBLE": projection["wild4"]["formal_eligible"],
+              "WILD4_REMAINING": projection["wild4"]["remaining"],
+          })
+          PY
+
       - name: Verify relay schedule and authority contracts
         working-directory: .g11-private
         env:
