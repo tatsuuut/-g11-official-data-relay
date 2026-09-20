@@ -414,6 +414,8 @@ jobs:
           PY
           # Run each module in a fresh interpreter so test-local module state
           # cannot leak into later runtime contract checks on long-lived schedules.
+          # The Growth P3 suite also proves confidence is read-only and that
+          # legacy locks can append pre-result RAW confidence evidence.
           for module in \
             g11.relay.test_v1 \
             g11.wild_pack.v1.test_governance_v1 \
