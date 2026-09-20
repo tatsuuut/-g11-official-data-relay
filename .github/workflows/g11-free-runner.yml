@@ -577,6 +577,55 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
+          if [ -f .relay-output/stored-feed.json ]; then
+            python3 - "${FEED}" .relay-output/stored-feed.json <<'PY'
+          import json
+          import sys
+
+          incoming = json.load(open(sys.argv[1], encoding="utf-8"))
+          stored = json.load(open(sys.argv[2], encoding="utf-8"))
+          old = {item["key"]: item for item in stored.get("races", [])}
+          diagnostics = []
+          for race in incoming.get("races", []):
+              prior = old.get(race.get("key"))
+              if not isinstance(prior, dict):
+                  continue
+              extra = sorted(set(race) - set(prior))
+              missing = sorted(set(prior) - set(race))
+              pre = race.get("predeadline")
+              old_pre = prior.get("predeadline")
+              pre_extra = (
+                  sorted(set(pre) - set(old_pre))
+                  if isinstance(pre, dict) and isinstance(old_pre, dict)
+                  else []
+              )
+              pre_missing = (
+                  sorted(set(old_pre) - set(pre))
+                  if isinstance(pre, dict) and isinstance(old_pre, dict)
+                  else []
+              )
+              if extra or missing or pre_extra or pre_missing:
+                  diagnostics.append({
+                      "key": race.get("key"),
+                      "extra": extra,
+                      "missing": missing,
+                      "pre_extra": pre_extra,
+                      "pre_missing": pre_missing,
+                  })
+          print("G11_FEED_SCHEMA_DIFF=" + json.dumps(
+              diagnostics[:10], ensure_ascii=False, sort_keys=True
+          ))
+          if incoming.get("races"):
+              print("G11_INCOMING_RACE_FIELDS=" + json.dumps(
+                  sorted(incoming["races"][0]), ensure_ascii=False
+              ))
+          if stored.get("races"):
+              print("G11_STORED_RACE_FIELDS=" + json.dumps(
+                  sorted(stored["races"][0]), ensure_ascii=False
+              ))
+          PY
+          fi
+
           # Night transport uses the canonical unavailable shape for the
           # original-display research sidecar. The complete captured evidence
           # remains in the encrypted state store; live/predeadline runs are not
