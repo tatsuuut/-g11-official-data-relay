@@ -874,6 +874,19 @@ jobs:
           expected_source_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           actual_readback_sha="$(sha256sum .relay-output/readback.json | cut -d' ' -f1)"
 
+          printf 'G11_READBACK_SOURCE_SHA=%s\n' "${source_sha}"
+          printf 'G11_READBACK_EXPECTED_SOURCE_SHA=%s\n' "${expected_source_sha}"
+          printf 'G11_READBACK_FEED_SHA=%s\n' "${readback_sha}"
+          printf 'G11_READBACK_ACTUAL_FEED_SHA=%s\n' "${actual_readback_sha}"
+          printf 'G11_READBACK_AUTHORITY_SOURCE=%s\n' "${authority_source}"
+          jq -c '{
+            operational_date_jst,
+            stage,
+            growth_p3: .canonical_authorities.growth_p3,
+            wild_pack_present: (.canonical_authorities.wild_pack | type == "object"),
+            canonical_capability: .capabilities.canonical_authorities
+          }' .relay-output/readback.json
+
           test -n "${source_sha}"
           test -n "${readback_sha}"
           test "${source_sha}" = "${expected_source_sha}"
