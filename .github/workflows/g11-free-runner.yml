@@ -112,8 +112,8 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # One bounded acceptance publish projects the verified WILD BET
-            # bootstrap status; revert to dry-run immediately after readback.
+            # One bounded acceptance retry verifies WILD BET status through
+            # the isolated rescue feed; revert to dry-run after readback.
             phase="predeadline"
           elif [ "${now_hour}" -ge 5 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
