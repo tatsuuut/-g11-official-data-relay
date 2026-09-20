@@ -204,6 +204,14 @@ jobs:
                           shutil.rmtree(target)
                       elif target.exists():
                           target.unlink()
+                  # A rescue snapshot is date-bound and non-promotable. Never
+                  # carry yesterday's complete rescue envelope into a new race
+                  # day where it could be mistaken for today's fallback.
+                  rescue = state_root / "rescue"
+                  if rescue.is_dir():
+                      shutil.rmtree(rescue)
+                  elif rescue.exists():
+                      rescue.unlink()
                   metadata = {
                       "SCHEMA": "G11_PRIVATE_PUBLIC_RELAY_STATE_V1",
                       "OPERATIONAL_DATE_JST": operational_date,
