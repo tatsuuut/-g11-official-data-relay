@@ -114,6 +114,27 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Checkout reusable runtime model assets
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          ref: g11-runtime
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-runtime-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Align reusable MORNING model bytes with their frozen registries
+        run: |
+          set -euo pipefail
+          source_root="${GITHUB_WORKSPACE}/.g11-runtime-source/g11/wild-pack-models/morning"
+          state_root="${GITHUB_WORKSPACE}/.relay-state/store/g11/wild-pack-models/morning"
+          for wild_id in WILD_SECOND WILD_THIRD; do
+            if [ -d "${source_root}/${wild_id}" ] && [ -d "${state_root}/${wild_id}" ]; then
+              rsync -a "${source_root}/${wild_id}/" "${state_root}/${wild_id}/"
+            fi
+          done
+
       - name: Install the pinned existing backend
         run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
 
@@ -296,7 +317,10 @@ jobs:
           if manifest.get("P3_MUTATED") is not False or manifest.get("APP_PUBLISHED") is not False:
               raise SystemExit("WILD_POSITION_REUSE_BACKFLOW")
           for name in ("WILD_SECOND", "WILD_THIRD"):
-              registry = manifest["SECOND" if name == "WILD_SECOND" else "THIRD"]
+              manifest_registry = manifest["SECOND" if name == "WILD_SECOND" else "THIRD"]
+              registry = position.load_json(root / name / "registry-entry.json")
+              if registry != manifest_registry:
+                  raise SystemExit(f"{name}_REUSE_REGISTRY_MISMATCH")
               position.validate_registry(registry, contract, name)
               model = root / name / "model.cbm"
               with chunked.materialize_verified(model, registry["MODEL_SHA256"]):
