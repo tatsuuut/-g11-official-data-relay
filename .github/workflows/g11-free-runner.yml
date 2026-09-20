@@ -667,8 +667,10 @@ jobs:
               | .races |= map(
                   . as $incoming
                   | ($old[.key] // null) as $prior
-                  | if (($prior | type) == "object")
+                  | if (($prior | type) == "object") and ($prior | has("abeken_shadow"))
                     then .abeken_shadow = $prior.abeken_shadow
+                    elif (($prior | type) == "object")
+                    then del(.abeken_shadow)
                     else .
                     end
                 )
