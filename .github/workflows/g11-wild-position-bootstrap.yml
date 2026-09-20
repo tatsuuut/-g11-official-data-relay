@@ -1,6 +1,10 @@
 name: G11 Wild conditional position bootstrap
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/g11-wild-position-bootstrap.yml
   workflow_dispatch:
     inputs:
       source_state_cache_key:
@@ -92,7 +96,6 @@ jobs:
           PY
 
       - name: Checkout private model authority
-        if: inputs.source_state_cache_key == ''
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
@@ -103,7 +106,6 @@ jobs:
           fetch-depth: 1
 
       - name: Checkout public official-source history
-        if: inputs.source_state_cache_key == ''
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: BoatraceCSV/boatracecsv.github.io
@@ -113,11 +115,9 @@ jobs:
           fetch-depth: 0
 
       - name: Install the pinned existing backend
-        if: inputs.source_state_cache_key == ''
         run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
 
       - name: Verify conditional model contracts
-        if: inputs.source_state_cache_key == ''
         working-directory: .g11-private
         run: |
           python3 -m unittest \
@@ -126,8 +126,21 @@ jobs:
             g11.wild_pack.v1.test_runtime_collection_v1 \
             g11.wild_pack.v1.test_conditional_position_model_v1
 
+      - name: Detect reusable MORNING model state
+        id: existing
+        shell: bash
+        run: |
+          root=.relay-state/store/g11/wild-pack-models/morning
+          reusable=false
+          if [ -s "${root}/manifest.json" ] \
+            && [ -s "${root}/WILD_SECOND/model.cbm" ] \
+            && [ -s "${root}/WILD_THIRD/model.cbm" ]; then
+            reusable=true
+          fi
+          echo "morning=${reusable}" >> "${GITHUB_OUTPUT}"
+
       - name: Rebuild the hash-bound factual dataset
-        if: inputs.source_state_cache_key == ''
+        if: steps.existing.outputs.morning != 'true'
         working-directory: .g11-private
         env:
           BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
@@ -150,7 +163,7 @@ jobs:
             --contract g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json
 
       - name: Train and freeze WILD SECOND and THIRD
-        if: inputs.source_state_cache_key == ''
+        if: steps.existing.outputs.morning != 'true'
         working-directory: .g11-private
         env:
           BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
@@ -174,7 +187,7 @@ jobs:
           cp "${BOOTSTRAP_ROOT}/position-audit.json" "${MODEL_ROOT}.candidate/"
 
       - name: Prove full 30 and 120 path inference
-        if: inputs.source_state_cache_key == ''
+        if: steps.existing.outputs.morning != 'true'
         working-directory: .g11-private
         env:
           BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-position
@@ -199,7 +212,7 @@ jobs:
             "${MODEL_ROOT}/WILD_THIRD/inference-readback.json" >/dev/null
 
       - name: Build and verify the immutable model manifest
-        if: inputs.source_state_cache_key == ''
+        if: steps.existing.outputs.morning != 'true'
         working-directory: .g11-private
         env:
           MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning.candidate
@@ -260,7 +273,7 @@ jobs:
           rm -rf "${final_root}.previous"
 
       - name: Verify reusable frozen model state
-        if: inputs.source_state_cache_key != ''
+        if: steps.existing.outputs.morning == 'true'
         env:
           SOURCE_STATE_CACHE_KEY: ${{ inputs.source_state_cache_key }}
         run: |
@@ -299,8 +312,170 @@ jobs:
           }, sort_keys=True))
           PY
 
+      - name: Register proven MORNING WILD1 2 3 as FIRST CURRENT
+        working-directory: .g11-private
+        env:
+          STORE: ${{ github.workspace }}/.relay-state/store
+        run: |
+          set -euo pipefail
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 \
+            register-morning-current \
+            --store "${STORE}" \
+            --code-commit "$(git rev-parse HEAD)" \
+            > "${RUNNER_TEMP}/wild-morning-current.json"
+          jq -e '.STATUS == "CURRENT" and (.MODELS | length) == 3' \
+            "${STORE}/g11/wild-pack-models/morning/current-pack.json" >/dev/null
+
+      - name: Detect existing PRE_RACE FIRST CURRENT
+        id: pre-current
+        shell: bash
+        run: |
+          manifest=.relay-state/store/g11/wild-pack-models/pre_race/manifest.json
+          ready=false
+          if [ -s "${manifest}" ] \
+            && jq -e '.STATUS == "CURRENT" and .ELIGIBLE_RACES >= 10000' "${manifest}" >/dev/null; then
+            ready=true
+          fi
+          echo "ready=${ready}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build time-safe PRE_RACE historical bootstrap
+        if: steps.pre-current.outputs.ready != 'true'
+        working-directory: .g11-private
+        env:
+          BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-pre-race
+        run: |
+          set -euo pipefail
+          mkdir -p "${BOOTSTRAP_ROOT}"
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 build-dataset \
+            --public-repo "${GITHUB_WORKSPACE}/.public-data" \
+            --dataset-output "${BOOTSTRAP_ROOT}/dataset.json" \
+            --audit-output "${BOOTSTRAP_ROOT}/audit.json"
+          jq -e '.STATUS == "PASS_INITIAL_10000_AVAILABLE" \
+            and .PRE_RACE_ELIGIBLE_RACES >= 10000 \
+            and .PRE_RACE_MISSING_TO_10000 == 0 \
+            and .COUNTER_RESET == false \
+            and .P3_AS_WILD_FEATURE == false \
+            and .ABEKEN_AS_WILD_FEATURE == false' \
+            "${BOOTSTRAP_ROOT}/audit.json" >/dev/null
+
+      - name: Train and freeze independent PRE_RACE WILD1 2 3 FIRST CURRENT
+        if: steps.pre-current.outputs.ready != 'true'
+        working-directory: .g11-private
+        env:
+          BOOTSTRAP_ROOT: ${{ runner.temp }}/g11-wild-pre-race
+          FINAL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/pre_race
+        run: |
+          set -euo pipefail
+          candidate="${FINAL_ROOT}.candidate"
+          rm -rf "${candidate}"
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 train-pack \
+            --dataset "${BOOTSTRAP_ROOT}/dataset.json" \
+            --model-root "${candidate}" \
+            --code-commit "$(git rev-parse HEAD)"
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 verify-current \
+            --model-root "${candidate}"
+          cp "${BOOTSTRAP_ROOT}/audit.json" "${candidate}/historical-bootstrap-audit.json"
+          rm -rf "${FINAL_ROOT}.previous"
+          if [ -d "${FINAL_ROOT}" ]; then mv "${FINAL_ROOT}" "${FINAL_ROOT}.previous"; fi
+          mv "${candidate}" "${FINAL_ROOT}"
+          rm -rf "${FINAL_ROOT}.previous"
+
+      - name: Smoke full PRE_RACE 6 30 120 path runtime readback
+        working-directory: .g11-private
+        env:
+          MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/pre_race
+          DATASET: ${{ runner.temp }}/g11-wild-pre-race/dataset.json
+        run: |
+          set -euo pipefail
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 verify-current \
+            --model-root "${MODEL_ROOT}"
+          if [ -s "${DATASET}" ]; then
+            python3 - "${DATASET}" "${MODEL_ROOT}" <<'PY'
+          import json,pathlib,sys
+          from g11.wild_pack.v1.pre_race_position_v1 import predict_live
+          dataset=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          race_id=dataset['SPLIT_RACE_IDS']['HISTORICAL_HOLDOUT'][0]
+          record=next(row for row in dataset['RECORDS'] if row['RACE_ID']==race_id)
+          boats={row['BOAT']:row['FEATURES'] for row in record['BOATS']}; first=boats[1]
+          parsed={
+              'RACERS':[{
+                  'BOAT':boat,'COURSE':boats[boat]['course'],
+                  'START_TIMING':boats[boat]['start_timing'],
+                  'WEIGHT':boats[boat]['weight'],
+                  'EXHIBITION_TIME':boats[boat]['exhibition_time'],
+                  'TILT':boats[boat]['tilt'],
+              } for boat in range(1,7)],
+              'WEATHER':first['weather'],'AIR_TEMPERATURE':first['air_temperature'],
+              'WIND_SPEED':first['wind_speed'],
+              'WIND_DIRECTION_CODE':first['wind_direction_code'],
+              'WATER_TEMPERATURE':first['water_temperature'],
+              'WAVE_HEIGHT':first['wave_height'],
+          }
+          output=predict_live(parsed,race_id,record['FEATURE_ASOF_TIME'],record['DEADLINE_JST'],pathlib.Path(sys.argv[2]))
+          assert output['STATUS']=='CURRENT'
+          assert output['FULL_PATH_COUNTS']=={'HEAD':6,'SECOND':30,'THIRD':120}
+          assert output['MORNING_MODEL_REUSED'] is False
+          assert output['RESULT_USED_AS_PREDICTION_FEATURE'] is False
+          assert output['P3_USED_AS_FEATURE'] is False
+          pathlib.Path(sys.argv[2],'runtime-readback.json').write_text(
+              json.dumps(output,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n',
+              encoding='utf-8')
+          PY
+          fi
+
+      - name: Persist compact WILD acceptance readback
+        working-directory: .g11-private
+        env:
+          STORE: ${{ github.workspace }}/.relay-state/store
+        run: |
+          python3 - "${STORE}" <<'PY'
+          import json,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          morning=json.loads((root/'g11/wild-pack-models/morning/current-pack.json').read_text())
+          pre=json.loads((root/'g11/wild-pack-models/pre_race/manifest.json').read_text())
+          bet=json.loads(pathlib.Path('g11/wild_pack/v1/audits/WILD_BET_ELIGIBLE_READBACK_AUDIT_20260920.json').read_text())
+          value={
+              'SCHEMA':'G11_WILD_PACK_ACCEPTANCE_READBACK_V1','STATUS':'PASS',
+              'MORNING':morning,'PRE_RACE':pre,
+              'WILD4_CANDIDATES':bet['GENERATED_UPSTREAM_PACKETS'],
+              'WILD4_FORMAL_ELIGIBLE':bet['FORMAL_WILD_BET_ELIGIBLE_RACES'],
+              'WILD4_REJECTED':sum(bet['REJECTED'].values()),
+              'WILD4_REJECTION_REASONS':bet['REJECTED'],
+              'WILD4_CURRENT':False,'COUNTER_RESET':False,
+              'P3_MUTATED':False,'OLD_P3_USED':False,'ABEKEN_USED':False,
+          }
+          path=root/'g11/wild-pack-models/acceptance-readback.json'
+          path.parent.mkdir(parents=True,exist_ok=True)
+          path.write_text(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n',encoding='utf-8')
+          PY
+
+      - name: Checkout private runtime branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          ref: g11-runtime
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-runtime
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Publish verified WILD model state to runtime
+        env:
+          SOURCE: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models
+          RUNTIME: ${{ github.workspace }}/.g11-runtime
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNTIME}/g11/wild-pack-models"
+          rsync -a --delete "${SOURCE}/" "${RUNTIME}/g11/wild-pack-models/"
+          git -C "${RUNTIME}" add g11/wild-pack-models
+          if ! git -C "${RUNTIME}" diff --cached --quiet; then
+            git -C "${RUNTIME}" -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'wild-pack: publish MORNING and PRE_RACE first CURRENT'
+            git -C "${RUNTIME}" push origin HEAD:g11-runtime
+          fi
+
       - name: Encrypt the completed runtime state
-        if: inputs.source_state_cache_key == ''
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
