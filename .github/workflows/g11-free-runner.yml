@@ -26,9 +26,9 @@ on:
         required: false
         type: string
   schedule:
-    # 05:25-07:05 JST: bounded morning acquisition and safe retry window.
-    - cron: "25-55/5 20 * * *"
-    - cron: "*/5 21 * * *"
+    # 02:15-07:05 JST: morning start plus bounded official-data retries.
+    - cron: "15-55/5 17 * * *"
+    - cron: "*/5 18-21 * * *"
     - cron: "0-5/5 22 * * *"
     # 08:00-20:55 JST: official predeadline data and EV-only odds capture.
     - cron: "*/5 23 * * *"
@@ -85,7 +85,7 @@ jobs:
           set -euo pipefail
           now_hour="$(date +%H)"
           now_minute="$(date +%M)"
-          if [ "${now_hour}" -lt 5 ]; then
+          if [ "${now_hour}" -lt 2 ]; then
             operational_date="$(date --date='yesterday' +%F)"
           else
             operational_date="$(date +%F)"
@@ -101,7 +101,7 @@ jobs:
             # cron expression so a delayed predeadline job can never enter the
             # night result path before the official K file exists.
             case "${SCHEDULE_EXPRESSION}" in
-              "25-55/5 20 * * *"|"*/5 21 * * *"|"0-5/5 22 * * *")
+              "15-55/5 17 * * *"|"*/5 18-21 * * *"|"0-5/5 22 * * *")
                 phase="morning"
                 ;;
               "*/5 23 * * *"|"*/5 0-11 * * *")
@@ -117,7 +117,7 @@ jobs:
             # slots (or an explicit night dispatch), so a code push can never
             # fail merely because the official K file is not published yet.
             phase="dry-run"
-          elif [ "${now_hour}" -ge 5 ] && [ "${now_hour}" -le 7 ]; then
+          elif [ "${now_hour}" -ge 2 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
             phase="predeadline"
