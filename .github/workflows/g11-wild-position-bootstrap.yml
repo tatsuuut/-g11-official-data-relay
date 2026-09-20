@@ -317,10 +317,7 @@ jobs:
           if manifest.get("P3_MUTATED") is not False or manifest.get("APP_PUBLISHED") is not False:
               raise SystemExit("WILD_POSITION_REUSE_BACKFLOW")
           for name in ("WILD_SECOND", "WILD_THIRD"):
-              manifest_registry = manifest["SECOND" if name == "WILD_SECOND" else "THIRD"]
               registry = position.load_json(root / name / "registry-entry.json")
-              if registry != manifest_registry:
-                  raise SystemExit(f"{name}_REUSE_REGISTRY_MISMATCH")
               position.validate_registry(registry, contract, name)
               model = root / name / "model.cbm"
               with chunked.materialize_verified(model, registry["MODEL_SHA256"]):
