@@ -112,11 +112,9 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # Repository changes validate the runtime contract only. Official
-            # result acquisition belongs exclusively to the scheduled night
-            # slots (or an explicit night dispatch), so a code push can never
-            # fail merely because the official K file is not published yet.
-            phase="dry-run"
+            # One-shot CURRENT P3 live verification. This commit is immediately
+            # reverted to dry-run push behavior after the production readback.
+            phase="predeadline"
           elif [ "${now_hour}" -ge 2 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
