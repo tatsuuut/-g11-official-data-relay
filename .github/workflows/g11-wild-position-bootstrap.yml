@@ -279,13 +279,15 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib
           import json
           import os
           import pathlib
+          from g11.wild_pack.v1 import chunked_artifact_v1 as chunked
+          from g11.wild_pack.v1 import conditional_position_model_v1 as position
 
           root = pathlib.Path(".relay-state/store/g11/wild-pack-models/morning")
           manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          contract = position.load_json(pathlib.Path("g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json"))
           if manifest.get("STATUS") != "HISTORICAL_SHADOW_ARTIFACTS_FROZEN":
               raise SystemExit("WILD_POSITION_REUSE_STATUS")
           if manifest.get("FULL_PATH_READBACK") != {"SECOND": 30, "THIRD": 120}:
@@ -294,10 +296,10 @@ jobs:
               raise SystemExit("WILD_POSITION_REUSE_BACKFLOW")
           for name in ("WILD_SECOND", "WILD_THIRD"):
               registry = manifest["SECOND" if name == "WILD_SECOND" else "THIRD"]
+              position.validate_registry(registry, contract, name)
               model = root / name / "model.cbm"
-              digest = hashlib.sha256(model.read_bytes()).hexdigest()
-              if digest != registry["MODEL_SHA256"]:
-                  raise SystemExit(f"{name}_REUSE_MODEL_HASH")
+              with chunked.materialize_verified(model, registry["MODEL_SHA256"]):
+                  pass
               readback = json.loads((root / name / "inference-readback.json").read_text(encoding="utf-8"))
               expected = 30 if name == "WILD_SECOND" else 120
               if readback.get("STATUS") != "SHADOW_PREDICTION_LOCKED" or readback.get("PATH_COUNT") != expected:
@@ -474,6 +476,15 @@ jobs:
               commit -m 'wild-pack: publish MORNING and PRE_RACE first CURRENT'
             git -C "${RUNTIME}" push origin HEAD:g11-runtime
           fi
+
+      - name: Publish CURRENT WILD app feed
+        env:
+          GH_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run g11-app-feed-publish.yml \
+            --repo "${G11_PRIVATE_REPOSITORY}" \
+            --ref main
 
       - name: Encrypt the completed runtime state
         env:
