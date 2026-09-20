@@ -468,6 +468,28 @@ jobs:
           path.write_text(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n',encoding='utf-8')
           PY
 
+      - name: Encrypt completed WILD state before private publish
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p .relay-cache
+          encrypted=.relay-cache/state.tgz.gpg
+          temporary="${encrypted}.tmp"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . | \
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+              --symmetric --cipher-algo AES256 --output "${temporary}"
+          exec 3<&-
+          mv "${temporary}" "${encrypted}"
+          test -s "${encrypted}"
+
+      - name: Save encrypted WILD state before private publish
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ steps.state-date.outputs.state_date }}-${{ github.run_id }}-wild-position
+
       - name: Checkout private runtime branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -479,6 +501,7 @@ jobs:
           fetch-depth: 1
 
       - name: Publish verified WILD model state to runtime
+        continue-on-error: true
         env:
           SOURCE: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models
           RUNTIME: ${{ github.workspace }}/.g11-runtime
@@ -495,6 +518,7 @@ jobs:
           fi
 
       - name: Publish CURRENT WILD app feed
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -503,24 +527,3 @@ jobs:
             --repo "${G11_PRIVATE_REPOSITORY}" \
             --ref main
 
-      - name: Encrypt the completed runtime state
-        env:
-          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p .relay-cache
-          encrypted=.relay-cache/state.tgz.gpg
-          temporary="${encrypted}.tmp"
-          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-          tar -czf - -C .relay-state . | \
-            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-              --symmetric --cipher-algo AES256 --output "${temporary}"
-          exec 3<&-
-          mv "${temporary}" "${encrypted}"
-          test -s "${encrypted}"
-
-      - name: Save only encrypted model and runtime state
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.state-date.outputs.state_date }}-${{ github.run_id }}-wild-position
