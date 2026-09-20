@@ -555,7 +555,9 @@ jobs:
               | .races |= map(
                   . as $incoming
                   | ($prior[.key] // null) as $old
-                  | if (($old | type) == "object")
+                  | if (.p3_logic_id == "CURRENT_GROWTH_P3")
+                    then .
+                    elif (($old | type) == "object")
                        and (($old.odds_captured_at_jst | type) == "string")
                        and (($old.predeadline | type) == "object")
                     then .odds_merit = $old.odds_merit
@@ -563,10 +565,7 @@ jobs:
                       | .best_ev = $old.best_ev
                       | .value_bets = $old.value_bets
                       | .odds_captured_at_jst = $old.odds_captured_at_jst
-                      | if $current_p3 and (.p3_logic_id == "CURRENT_GROWTH_P3")
-                        then .
-                        else .predeadline = $old.predeadline
-                        end
+                      | .predeadline = $old.predeadline
                     else .
                     end
                 )
