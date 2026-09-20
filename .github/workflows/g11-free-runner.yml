@@ -543,7 +543,12 @@ jobs:
             "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
             -o .relay-output/stored-feed.json; then
             jq -c --slurpfile stored .relay-output/stored-feed.json '
-              ($stored[0].races | map({key: .key, value: .}) | from_entries) as $prior
+              (.canonical_authorities.growth_p3 // {}) as $growth
+              | (($growth.logic_id == "CURRENT_GROWTH_P3")
+                  and ($growth.status == "LOCKED")
+                  and ($growth.production_ready == true)
+                  and ($growth.app_readback_status == "PASS")) as $current_p3
+              | ($stored[0].races | map({key: .key, value: .}) | from_entries) as $prior
               | .races |= map(
                   . as $incoming
                   | ($prior[.key] // null) as $old
@@ -555,7 +560,10 @@ jobs:
                       | .best_ev = $old.best_ev
                       | .value_bets = $old.value_bets
                       | .odds_captured_at_jst = $old.odds_captured_at_jst
-                      | .predeadline = $old.predeadline
+                      | if $current_p3 and (.p3_logic_id == "CURRENT_GROWTH_P3")
+                        then .
+                        else .predeadline = $old.predeadline
+                        end
                     else .
                     end
                 )
