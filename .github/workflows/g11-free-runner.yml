@@ -112,9 +112,9 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # One-shot CURRENT P3 live verification. This commit is immediately
-            # reverted to dry-run push behavior after the production readback.
-            phase="predeadline"
+            # One-shot manual NIGHT completion for the 2026-09-20 rescue day.
+            # Revert to predeadline push behavior immediately after readback.
+            phase="night"
           elif [ "${now_hour}" -ge 2 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
