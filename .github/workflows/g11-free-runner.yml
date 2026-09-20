@@ -285,6 +285,48 @@ jobs:
             cp -a "${model_source}/." .relay-state/store/g11/true-ai-models/
           fi
 
+      - name: Materialize hash-verified chunked WILD models
+        working-directory: .g11-private
+        env:
+          WILD_MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning
+        run: |
+          python3 - "${WILD_MODEL_ROOT}" <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import tempfile
+          import sys
+
+          from g11.wild_pack.v1 import chunked_artifact_v1 as chunks
+
+          root = pathlib.Path(sys.argv[1])
+          for wild_id in ("WILD_SECOND", "WILD_THIRD"):
+              model_root = root / wild_id
+              registry = json.loads(
+                  (model_root / "registry-entry.json").read_text(encoding="utf-8")
+              )
+              target = model_root / str(registry["MODEL_FILE"])
+              expected_sha = str(registry["MODEL_SHA256"])
+              value = chunks.read_verified(target, expected_sha)
+              if not target.is_file():
+                  descriptor, temporary = tempfile.mkstemp(
+                      prefix=f".{target.name}.",
+                      dir=target.parent,
+                  )
+                  try:
+                      with os.fdopen(descriptor, "wb") as handle:
+                          handle.write(value)
+                          handle.flush()
+                          os.fsync(handle.fileno())
+                      os.replace(temporary, target)
+                  finally:
+                      if os.path.exists(temporary):
+                          os.unlink(temporary)
+              if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha:
+                  raise SystemExit(f"{wild_id}_MATERIALIZED_MODEL_HASH")
+          PY
+
       - name: Install pinned private runtime dependencies
         run: |
           set -euo pipefail
