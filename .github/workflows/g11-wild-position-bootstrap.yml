@@ -274,6 +274,7 @@ jobs:
 
       - name: Verify reusable frozen model state
         if: steps.existing.outputs.morning == 'true'
+        working-directory: .g11-private
         env:
           SOURCE_STATE_CACHE_KEY: ${{ inputs.source_state_cache_key }}
         run: |
@@ -285,7 +286,7 @@ jobs:
           from g11.wild_pack.v1 import chunked_artifact_v1 as chunked
           from g11.wild_pack.v1 import conditional_position_model_v1 as position
 
-          root = pathlib.Path(".relay-state/store/g11/wild-pack-models/morning")
+          root = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / ".relay-state/store/g11/wild-pack-models/morning"
           manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
           contract = position.load_json(pathlib.Path("g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json"))
           if manifest.get("STATUS") != "HISTORICAL_SHADOW_ARTIFACTS_FROZEN":
