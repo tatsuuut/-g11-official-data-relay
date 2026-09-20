@@ -112,9 +112,9 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # One-shot rescue NIGHT refresh so the post-result three-engine
-            # comparison is republished immediately.
-            phase="night"
+            # Push is diagnostic only; production timing remains owned by the
+            # fixed morning/predeadline/night schedules.
+            phase="predeadline"
           elif [ "${now_hour}" -ge 2 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
