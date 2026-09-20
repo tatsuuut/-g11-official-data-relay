@@ -654,6 +654,35 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
+          # A rescue NIGHT may only add official result/score fields.
+          # Preserve prediction-side immutable data exactly as it was already
+          # accepted by the app, including ABEKEN.  Also keep the stored schema
+          # for this legacy rescue day; WILD CURRENT becomes visible on the next
+          # fresh operational day instead of rewriting 2026-09-20.
+          if [ "${{ steps.due.outputs.phase }}" = "night" ] && \
+             [ -f .relay-output/stored-feed.json ]; then
+            jq -c --slurpfile stored .relay-output/stored-feed.json '
+              ($stored[0].races | map({key: .key, value: .}) | from_entries) as $old
+              | .abeken = $stored[0].abeken
+              | .races |= map(
+                  . as $incoming
+                  | ($old[.key] // null) as $prior
+                  | if (($prior | type) == "object")
+                    then .abeken_shadow = $prior.abeken_shadow
+                    else .
+                    end
+                )
+              | if ($stored[0] | has("wild_pack"))
+                then .
+                else del(.wild_pack)
+                  | .races |= map(del(.wild_pack))
+                  | .capabilities = $stored[0].capabilities
+                  | .canonical_authorities = $stored[0].canonical_authorities
+                end
+            ' "${FEED}" > .relay-output/feed-night-immutable.json
+            mv .relay-output/feed-night-immutable.json "${FEED}"
+          fi
+
           if [ -f .relay-output/stored-feed.json ]; then
             python3 - "${FEED}" .relay-output/stored-feed.json <<'PY'
           import json
