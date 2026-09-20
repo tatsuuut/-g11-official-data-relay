@@ -274,9 +274,16 @@ jobs:
               .relay-state/store/g11/wild-pack-history/
           fi
           mkdir -p .relay-state/store/g11/wild-pack-models
-          if [ -d .g11-model/g11/wild-pack-models ]; then
+          # The encrypted state is the authoritative handoff for a newly
+          # trained FIRST CURRENT.  The read-only g11-runtime checkout may lag
+          # when its PAT cannot push, so never overwrite a verified CURRENT
+          # pack that already survived the encrypted checkpoint.
+          if [ -s .relay-state/store/g11/wild-pack-models/acceptance-readback.json ]; then
+            echo "WILD_CURRENT_SOURCE=ENCRYPTED_STATE"
+          elif [ -d .g11-model/g11/wild-pack-models ]; then
             cp -a .g11-model/g11/wild-pack-models/. \
               .relay-state/store/g11/wild-pack-models/
+            echo "WILD_CURRENT_SOURCE=RUNTIME_BRANCH"
           fi
           mkdir -p .relay-state/store/g11/wild-pack-oos
           if [ -d .g11-model/g11/wild-pack-oos ]; then
