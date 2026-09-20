@@ -374,12 +374,7 @@ jobs:
             --public-repo "${GITHUB_WORKSPACE}/.public-data" \
             --dataset-output "${BOOTSTRAP_ROOT}/dataset.json" \
             --audit-output "${BOOTSTRAP_ROOT}/audit.json"
-          jq -e '.STATUS == "PASS_INITIAL_10000_AVAILABLE" \
-            and .PRE_RACE_ELIGIBLE_RACES >= 10000 \
-            and .PRE_RACE_MISSING_TO_10000 == 0 \
-            and .COUNTER_RESET == false \
-            and .P3_AS_WILD_FEATURE == false \
-            and .ABEKEN_AS_WILD_FEATURE == false' \
+          jq -e '.STATUS == "PASS_INITIAL_10000_AVAILABLE" and .PRE_RACE_ELIGIBLE_RACES >= 10000 and .PRE_RACE_MISSING_TO_10000 == 0 and .COUNTER_RESET == false and .P3_AS_WILD_FEATURE == false and .ABEKEN_AS_WILD_FEATURE == false' \
             "${BOOTSTRAP_ROOT}/audit.json" >/dev/null
 
       - name: Train and freeze independent PRE_RACE WILD1 2 3 FIRST CURRENT
