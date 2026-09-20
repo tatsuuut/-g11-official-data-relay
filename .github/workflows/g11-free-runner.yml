@@ -308,6 +308,11 @@ jobs:
               )
               target = model_root / str(registry["MODEL_FILE"])
               expected_sha = str(registry["MODEL_SHA256"])
+              # Restored encrypted state may still contain the previous direct
+              # file. When the immutable runtime branch now supplies a parts
+              # manifest, the verified chunk representation is authoritative.
+              if chunks.manifest_path(target).is_file() and target.exists():
+                  target.unlink()
               value = chunks.read_verified(target, expected_sha)
               if not target.is_file():
                   descriptor, temporary = tempfile.mkstemp(
