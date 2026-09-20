@@ -112,9 +112,11 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # One bounded acceptance retry verifies WILD BET status through
-            # the isolated rescue feed; revert to dry-run after readback.
-            phase="predeadline"
+            # Repository changes validate the runtime contract only. Official
+            # result acquisition belongs exclusively to the scheduled night
+            # slots (or an explicit night dispatch), so a code push can never
+            # fail merely because the official K file is not published yet.
+            phase="dry-run"
           elif [ "${now_hour}" -ge 5 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
