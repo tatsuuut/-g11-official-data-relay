@@ -646,6 +646,21 @@ jobs:
                     else .
                     end
                 )
+              # ABEKEN predictions are immutable once accepted by the app.
+              # Later morning/predeadline reruns may add WILD or P3 sidecars,
+              # but they must never replace the already-published 剥きけん
+              # prediction payload.
+              | .abeken = $stored[0].abeken
+              | .races |= map(
+                  . as $incoming
+                  | ($prior[.key] // null) as $old
+                  | if (($old | type) == "object") and ($old | has("abeken_shadow"))
+                    then .abeken_shadow = $old.abeken_shadow
+                    elif (($old | type) == "object")
+                    then del(.abeken_shadow)
+                    else .
+                    end
+                )
               | ([.races[] | select(.research_eligible == true and .odds_captured_at_jst != null)] | length) as $enriched
               | .counts.odds_enriched = $enriched
               | .counts.odds_waiting = (.counts.formal - $enriched)
