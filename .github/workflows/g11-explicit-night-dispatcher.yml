@@ -10,8 +10,8 @@ on:
       - .github/workflows/g11-explicit-night-dispatcher.yml
   workflow_dispatch:
   schedule:
-    # 22:00-01:30 JST, every 30 minutes. The first NIGHT run is 22:00.
-    - cron: "0,30 13-16 * * *"
+    # 22:00-01:55 JST, every 5 minutes until the app confirms NIGHT complete.
+    - cron: "*/5 13-16 * * *"
 
 permissions:
   actions: write
@@ -29,6 +29,7 @@ jobs:
     env:
       TZ: Asia/Tokyo
       GH_TOKEN: ${{ github.token }}
+      G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
     steps:
       - name: Dispatch explicit NIGHT phase
         run: |
@@ -42,6 +43,21 @@ jobs:
           else
             operational_date="$(date +%F)"
           fi
+
+          # Once NIGHT is already complete in the app, stop dispatching for
+          # the remainder of the window. A transient readback failure does not
+          # block the retry; it simply falls through to another NIGHT dispatch.
+          current_feed="$(mktemp)"
+          if curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${operational_date}" \
+            -o "${current_feed}"; then
+            if jq -e '.stage == "NIGHT" and .counts.pending == 0' \
+              "${current_feed}" >/dev/null 2>&1; then
+              echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
+              exit 0
+            fi
+          fi
+
           payload="$(jq -cn --arg day "${operational_date}" \
             '{ref:"main",inputs:{phase:"night",operational_date:$day}}')"
           curl --fail-with-body --silent --show-error \
