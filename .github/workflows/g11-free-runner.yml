@@ -112,9 +112,9 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # One-shot manual NIGHT completion for the 2026-09-20 rescue day.
-            # Revert to predeadline push behavior immediately after readback.
-            phase="night"
+            # Push is diagnostic only; production timing remains owned by the
+            # fixed morning/predeadline/night schedules.
+            phase="predeadline"
           elif [ "${now_hour}" -ge 2 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
