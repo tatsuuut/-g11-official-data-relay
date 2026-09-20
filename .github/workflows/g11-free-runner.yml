@@ -302,7 +302,28 @@ jobs:
         working-directory: .g11-private
         env:
           G11_PRIVATE_REPO_TOKEN: ""
+          WILD_MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning
         run: |
+          python3 - "${WILD_MODEL_ROOT}" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          for wild_id in ("WILD_SECOND", "WILD_THIRD"):
+              model_root = root / wild_id
+              registry = json.loads(
+                  (model_root / "registry-entry.json").read_text(encoding="utf-8")
+              )
+              if hashlib.sha256((model_root / "model.cbm").read_bytes()).hexdigest() != registry["MODEL_SHA256"]:
+                  raise SystemExit(f"{wild_id}_MODEL_HASH")
+              calibration = json.loads(
+                  (model_root / "calibration.json").read_text(encoding="utf-8")
+              )
+              if calibration["CALIBRATION_SHA256"] != registry["CALIBRATION_SHA256"]:
+                  raise SystemExit(f"{wild_id}_CALIBRATION_HASH")
+          PY
           python3 -m unittest \
             g11.relay.test_v1 \
             g11.wild_pack.v1.test_governance_v1 \
