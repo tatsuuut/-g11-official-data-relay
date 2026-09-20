@@ -211,6 +211,8 @@ jobs:
             g11/true-ai-models
             g11/true-ai-history
             g11/wild-pack-history
+            g11/wild-pack-models
+            g11/wild-pack-oos
 
       - name: Resolve immutable private source identity
         id: source
@@ -234,6 +236,16 @@ jobs:
             cp -a .g11-model/g11/wild-pack-history/. \
               .relay-state/store/g11/wild-pack-history/
           fi
+          mkdir -p .relay-state/store/g11/wild-pack-models
+          if [ -d .g11-model/g11/wild-pack-models ]; then
+            cp -a .g11-model/g11/wild-pack-models/. \
+              .relay-state/store/g11/wild-pack-models/
+          fi
+          mkdir -p .relay-state/store/g11/wild-pack-oos
+          if [ -d .g11-model/g11/wild-pack-oos ]; then
+            cp -a .g11-model/g11/wild-pack-oos/. \
+              .relay-state/store/g11/wild-pack-oos/
+          fi
           day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
           if [ ! -f "${day_root}/morning-predictions.manifest.json" ]; then
             model_source=".g11-model/g11/true-ai-models"
@@ -247,9 +259,11 @@ jobs:
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
           day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
+          wild_admission=".relay-state/store/g11/wild-pack-oos/morning/${{ steps.due.outputs.operational_date }}/position-oos-admission.manifest.json"
           if [ "${{ steps.due.outputs.phase }}" = "morning" ] || \
              { [ "${{ steps.due.outputs.phase }}" = "predeadline" ] && \
-               [ ! -f "${day_root}/morning-predictions.manifest.json" ]; }; then
+               { [ ! -f "${day_root}/morning-predictions.manifest.json" ] || \
+                 [ ! -f "${wild_admission}" ]; }; }; then
             python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
           fi
 
@@ -264,6 +278,9 @@ jobs:
             g11.wild_pack.v1.test_public_position_bootstrap_v1 \
             g11.wild_pack.v1.test_runtime_collection_v1 \
             g11.wild_pack.v1.test_conditional_position_model_v1 \
+            g11.wild_pack.v1.test_prospective_oos_v1 \
+            g11.wild_pack.v1.test_bet_oos_collection_v1 \
+            g11.wild_pack.v1.test_runtime_orchestrator_v1 \
             g11.canonical.test_integrated_authority_status_v1
 
       - name: Run the private fail-closed relay
@@ -307,22 +324,32 @@ jobs:
           import sys
           from g11.true_ai.v1.src import true_ai_research_inference_v1 as inference
           from g11.true_ai.v1.src import true_ai_runtime_v1 as true_runtime
+          from g11.wild_pack.v1 import bet_oos_collection_v1 as wild_bet
+          from g11.wild_pack.v1 import prospective_oos_v1 as wild_oos
           from g11.wild_pack.v1 import runtime_collection_v1 as wild_runtime
 
           root = pathlib.Path(sys.argv[1]) / "g11"
           true_status = true_runtime.collection_status(root / "true-ai-history")
           shadow_status = inference.shadow_status(root / "true-ai-history")
           wild_status = wild_runtime.collection_status(root / "wild-pack-history")
+          oos_root = root / "wild-pack-oos" / "morning"
+          oos_status = wild_oos.status(oos_root)
+          bet_status = wild_bet.status(oos_root)
           assert true_status["DATA_LEAK_COUNT"] == 0
           assert shadow_status["DATA_LEAK_COUNT"] == 0
           assert wild_status["COUNTERFACTUAL_TARGET_COUNT"] == 0
-          assert wild_status["BET_ELIGIBLE_RACES"] == 0
           assert wild_status["FULL_PACK_READY"] is False
+          assert oos_status["P3_MUTATED"] is False
+          assert oos_status["APP_PRODUCTION_SOURCE_CHANGED"] is False
+          assert bet_status["PRODUCTION_MONETARY_ACTION"] == "PROHIBITED"
+          assert bet_status["FIRST_CURRENT_READY"] is False
           print(json.dumps({
               "TRUE_AI_FORMAL_PAIRED_RACES": true_status["FORMAL_PAIRED_RACES"],
               "WILD_SECOND_ELIGIBLE_RACES": wild_status["SECOND_ELIGIBLE_RACES"],
               "WILD_THIRD_ELIGIBLE_RACES": wild_status["THIRD_ELIGIBLE_RACES"],
-              "WILD_BET_ELIGIBLE_RACES": wild_status["BET_ELIGIBLE_RACES"],
+              "WILD_POSITION_OOS_ADMITTED_RACES": oos_status["ADMITTED_RACE_COUNT"],
+              "WILD_POSITION_OOS_SETTLED_RACES": oos_status["SETTLED_RACE_COUNT"],
+              "WILD_BET_ELIGIBLE_RACES": bet_status["BET_ELIGIBLE_RACES"],
           }, sort_keys=True))
           PY
 
