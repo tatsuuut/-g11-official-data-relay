@@ -553,7 +553,7 @@ jobs:
               | .races |= map(
                   . as $incoming
                   | ($prior[.key] // null) as $old
-                  | if (((.caution // "") | tostring) | startswith("CURRENT成長型P3"))
+                  | if (.p3_logic_id == "CURRENT_GROWTH_P3")
                     then .
                     elif (($old | type) == "object")
                        and (($old.odds_captured_at_jst | type) == "string")
