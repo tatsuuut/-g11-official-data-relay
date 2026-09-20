@@ -646,6 +646,11 @@ jobs:
                     else .
                     end
                 )
+              # TRUE AI / 野生成長AI HEAD morning predictions are immutable
+              # once accepted by the app. Later predeadline reruns may attach
+              # PRE_RACE/WILD/P3 data, but must keep the exact accepted morning
+              # prediction packet.
+              | .true_ai = $stored[0].true_ai
               # ABEKEN predictions are immutable once accepted by the app.
               # Later morning/predeadline reruns may add WILD or P3 sidecars,
               # but they must never replace the already-published 剥きけん
