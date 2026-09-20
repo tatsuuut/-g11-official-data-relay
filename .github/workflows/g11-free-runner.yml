@@ -2,7 +2,7 @@ name: G11 free official-data runner
 
 on:
   # Immediately validate a runner change without waiting for GitHub's delayed cron.
-  # 2026-09-15: run final future-only morning rescue after K no-race fix.
+  # 2026-09-20: verify prospective WILD OOS wiring and safe daily rollover.
   push:
     branches:
       - main
