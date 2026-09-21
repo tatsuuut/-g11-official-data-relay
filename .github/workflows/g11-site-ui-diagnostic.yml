@@ -18,7 +18,7 @@ jobs:
     env:
       G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
     steps:
-      - name: Inspect public VALUE ALERTS bundle
+      - name: Inspect public feed refresh bundle
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --location             "${G11_APP_ORIGIN}/" -o index.html
@@ -37,14 +37,20 @@ jobs:
               if url not in assets:
                   assets.append(url)
           print("G11_SITE_JS_ASSETS=" + repr(assets))
+
           needles = [
-              "対象の◎はありません",
-              "VALUE ALERTS",
-              "value_alert_supported",
-              "CURRENT_GROWTH_P3",
-              "odds_merit",
-              "formal_status",
-              "research_eligible",
+              "/api/g11-feed",
+              "setInterval",
+              "visibilitychange",
+              "pageshow",
+              "addEventListener(`focus`",
+              'addEventListener("focus"',
+              "cache:`no-store`",
+              'cache:"no-store"',
+              "function Hf",
+              "latest",
+              "selectedDate",
+              "operational_date_jst",
           ]
           for idx, url in enumerate(assets):
               path = Path(f"asset-{idx}.js")
@@ -52,16 +58,20 @@ jobs:
                   ["curl","--fail-with-body","--silent","--show-error","--location",url,"-o",str(path)],
                   check=True,
               )
-              text = path.read_text(encoding="utf-8", errors="replace")
+              source = path.read_text(encoding="utf-8", errors="replace")
               for needle in needles:
                   start = 0
+                  found = 0
                   while True:
-                      pos = text.find(needle, start)
+                      pos = source.find(needle, start)
                       if pos < 0:
                           break
-                      lo = max(0, pos - 1800)
-                      hi = min(len(text), pos + len(needle) + 1800)
-                      snippet = text[lo:hi].replace("\n", " ")
-                      print(f"G11_SITE_MATCH asset={idx} needle={needle!r} context={snippet}")
+                      found += 1
+                      lo = max(0, pos - 3500)
+                      hi = min(len(source), pos + len(needle) + 3500)
+                      snippet = source[lo:hi].replace("\n", " ")
+                      print(f"G11_REFRESH_MATCH asset={idx} needle={needle!r} occurrence={found} context={snippet}")
                       start = pos + len(needle)
+                      if found >= 6:
+                          break
           PY
