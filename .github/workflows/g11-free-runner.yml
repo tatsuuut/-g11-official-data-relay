@@ -957,7 +957,26 @@ jobs:
               }
               if set(shadow) != expected or shadow.get("production_mutated") is not False:
                   raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_SHADOW_SCHEMA")
+          captured=sum(
+              isinstance(r.get("original_display_shadow"),dict)
+              and r["original_display_shadow"].get("status")=="CAPTURED_RESEARCH_ONLY"
+              for r in feed.get("races",[])
+          )
+          settled=sum(
+              isinstance(r.get("original_display_shadow"),dict)
+              and isinstance(r["original_display_shadow"].get("night_execution"),dict)
+              for r in feed.get("races",[])
+          )
           print("G11_NIGHT_ORIGINAL_DISPLAY_TRANSPORT=PRESERVED")
+          print("G11_NIGHT_ORIGINAL_DISPLAY_SUMMARY="+json.dumps({
+              "available":research.get("available"),
+              "status":research.get("status"),
+              "captures":research.get("captures"),
+              "night_settlements":research.get("night_settlements"),
+              "daily_aggregate_present":research.get("daily_aggregate") is not None,
+              "captured_races":captured,
+              "settled_races":settled,
+          },ensure_ascii=False,sort_keys=True))
           PY
           fi
 
