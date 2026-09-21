@@ -73,8 +73,19 @@ jobs:
             if curl --fail-with-body --silent --show-error --location \
               "${G11_APP_ORIGIN}/api/g11-feed?date=${operational_date}" \
               -o "${current_feed}"; then
-              if jq -e '.stage == "NIGHT" and .counts.pending == 0' \
-                "${current_feed}" >/dev/null 2>&1; then
+              if jq -e '
+                .stage == "NIGHT"
+                and .status == "PASS"
+                and .counts.pending == 0
+                and .counts.results == .counts.formal
+                and .counts.research_samples == .counts.formal
+                and .research_db.available == true
+                and .research_db.formal_races == .counts.formal
+                and ([.races[]
+                      | select(.research_eligible == true)
+                      | select((.research_finance.status // "") != "VERIFIED")]
+                     | length) == 0
+              ' "${current_feed}" >/dev/null 2>&1; then
                 echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
                 exit 0
               fi
