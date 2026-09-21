@@ -80,6 +80,24 @@ jobs:
               print(value)
           PY
           matched=0
+          # One-shot route audit for the deployed Site bundle.
+          while IFS= read -r asset; do
+            [ -n "${asset}" ] || continue
+            case "${asset}" in
+              http*) url="${asset}" ;;
+              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
+              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+            esac
+            js="$(mktemp)"
+            curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
+            python3 - "${js}" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding="utf-8",errors="replace")
+          routes=sorted(set(re.findall(r'["\x60\x27](/api/[A-Za-z0-9_?=&./:-]+)',text)))
+          if routes:
+              print("SITE_API_ROUTES",routes)
+          PY
+          done < "${RUNNER_TEMP}/assets.txt"
           while IFS= read -r asset; do
             [ -n "${asset}" ] || continue
             case "${asset}" in
