@@ -618,6 +618,10 @@ jobs:
                       | .prediction = $old.prediction
                       | .caution = $old.caution
                       | .odds_merit = $old.odds_merit
+                      | .legacy_odds_merit = $old.legacy_odds_merit
+                      | .value_alert = $old.value_alert
+                      | .value_alert_type = $old.value_alert_type
+                      | .production_mean_ev = $old.production_mean_ev
                       | .best_ev_bet = $old.best_ev_bet
                       | .best_ev = $old.best_ev
                       | .value_bets = $old.value_bets
@@ -651,6 +655,10 @@ jobs:
                       | .prediction = $old.prediction
                       | .caution = $old.caution
                       | .odds_merit = $old.odds_merit
+                      | .legacy_odds_merit = $old.legacy_odds_merit
+                      | .value_alert = $old.value_alert
+                      | .value_alert_type = $old.value_alert_type
+                      | .production_mean_ev = $old.production_mean_ev
                       | .best_ev_bet = $old.best_ev_bet
                       | .best_ev = $old.best_ev
                       | .value_bets = $old.value_bets
@@ -682,7 +690,7 @@ jobs:
               | ([.races[] | select(.research_eligible == true and .odds_captured_at_jst != null)] | length) as $enriched
               | .counts.odds_enriched = $enriched
               | .counts.odds_waiting = (.counts.formal - $enriched)
-              | .counts.win_candidates = ([.races[] | select(.research_eligible == true and .odds_merit == "◎")] | length)
+              | .counts.win_candidates = ([.races[] | select(.research_eligible == true and .value_alert == true)] | length)
             ' "${FEED}" > .relay-output/feed-reconciled.json
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
