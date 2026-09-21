@@ -69,19 +69,56 @@ jobs:
           set -euo pipefail
           page="$(mktemp)"
           curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site" -o "${page}"
-          grep -oE 'src="[^"]+\.js[^"]*"' "${page}"             | sed -E 's/^src="//;s/"$//'             | while read -r asset; do
-                case "${asset}" in
-                  http*) url="${asset}" ;;
-                  /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
-                  *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
-                esac
-                js="$(mktemp)"
-                curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
-                if grep -qE '夜結果待ち|変更案の提示|本番採用審査|original_display_research|original_display_shadow|night_execution' "${js}"; then
-                  echo "ASSET=${url}"
-                  grep -oE '.{0,500}(夜結果待ち|変更案の提示|本番採用審査|original_display_research|original_display_shadow|night_execution).{0,1200}' "${js}"                     | head -n 80
-                fi
-              done
+          python3 - "${page}" <<'PY' > "${RUNNER_TEMP}/assets.txt"
+          import pathlib,re,sys
+          html=pathlib.Path(sys.argv[1]).read_text(encoding="utf-8",errors="replace")
+          assets=[]
+          for value in re.findall(r'''(?:src|href)=["']([^"']+\.js(?:\?[^"']*)?)["']''', html):
+              if value not in assets:
+                  assets.append(value)
+          for value in assets:
+              print(value)
+          PY
+          matched=0
+          while IFS= read -r asset; do
+            [ -n "${asset}" ] || continue
+            case "${asset}" in
+              http*) url="${asset}" ;;
+              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
+              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+            esac
+            js="$(mktemp)"
+            curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
+            if grep -qE '夜結果待ち|変更案の提示|本番採用審査|処刑監査室|night_execution|TRIFECTA_NOT_ESTABLISHED|result_trifecta' "${js}"; then
+              matched=1
+              echo "ASSET=${url}"
+              python3 - "${js}" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding="utf-8",errors="replace")
+          needles=["夜結果待ち","変更案の提示","本番採用審査","処刑監査室","night_execution","TRIFECTA_NOT_ESTABLISHED","result_trifecta"]
+          for needle in needles:
+              start=0
+              shown=0
+              while shown<8:
+                  pos=text.find(needle,start)
+                  if pos<0: break
+                  print("MATCH",needle,repr(text[max(0,pos-900):pos+2200]))
+                  start=pos+len(needle)
+                  shown+=1
+          PY
+            fi
+          done < "${RUNNER_TEMP}/assets.txt"
+          echo "MATCHED_ASSET=${matched}"
+          current="$(mktemp)"
+          curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-21"             -o "${current}"
+          jq -c '{
+            stage,status,counts,research_db,
+            with_result_trifecta:([.races[]|select(.result_trifecta!=null)]|length),
+            final_established:([.races[]|select((.result_meta.result_status//"")=="ESTABLISHED")]|length),
+            final_no_trifecta:([.races[]|select((.result_meta.result_status//"")=="TRIFECTA_NOT_ESTABLISHED")]|length),
+            unresolved:([.races[]|select(((.result_meta.result_status//"")!="ESTABLISHED") and ((.result_meta.result_status//"")!="TRIFECTA_NOT_ESTABLISHED"))]|length),
+            shadow_night_execution:([.races[]|select((.original_display_shadow.night_execution//null)!=null)]|length)
+          }' "${current}"
 
       - name: Dispatch explicit NIGHT phase
         env:
