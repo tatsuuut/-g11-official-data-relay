@@ -760,6 +760,16 @@ jobs:
           print("G11_PREDEADLINE_VALUE_DIFF=" + json.dumps(
               pre_diffs[:5], ensure_ascii=False, sort_keys=True
           ))
+          new_pre = []
+          for race in incoming.get("races", []):
+              prior = old.get(race.get("key"))
+              pre = race.get("predeadline")
+              old_pre = prior.get("predeadline") if isinstance(prior, dict) else None
+              if isinstance(pre, dict) and not isinstance(old_pre, dict):
+                  new_pre.append({"key": race.get("key"), "predeadline": pre})
+          print("G11_NEW_PREDEADLINE_OBJECTS=" + json.dumps(
+              new_pre[:5], ensure_ascii=False, sort_keys=True
+          ))
           if incoming.get("races"):
               print("G11_INCOMING_RACE_FIELDS=" + json.dumps(
                   sorted(incoming["races"][0]), ensure_ascii=False
