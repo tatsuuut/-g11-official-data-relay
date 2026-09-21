@@ -66,6 +66,7 @@ jobs:
           print("ODDS_OUTCOMES",json.dumps(Counter(x["outcome"] for x in outcomes if str(x["source"]).startswith("odds3t-")),sort_keys=True))
           bad=[x for x in outcomes if x["outcome"]!="HTTP_200"]
           from collections import Counter
-          print("BAD_REASON_COUNTS",json.dumps(Counter((x["source"].split("-")[0] if x["source"] else "none", x["reason"]) for x in bad),ensure_ascii=False,sort_keys=True))
+          pairs=Counter((x["source"].split("-")[0] if x["source"] else "none", x["reason"]) for x in bad)
+          print("BAD_REASON_COUNTS",json.dumps([{"kind":k[0],"reason":k[1],"count":v} for k,v in pairs.items()],ensure_ascii=False,sort_keys=True))
           print("BAD",json.dumps(bad,ensure_ascii=False))
           PY
