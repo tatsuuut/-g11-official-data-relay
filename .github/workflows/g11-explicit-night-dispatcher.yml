@@ -32,9 +32,11 @@ jobs:
       G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
     steps:
       - name: Dispatch explicit NIGHT phase
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" != *"[night-republish]"* ]]; then
             exit 0
           fi
           now_hour="$(date +%H)"
