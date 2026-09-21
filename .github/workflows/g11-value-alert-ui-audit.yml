@@ -1,0 +1,54 @@
+name: G11 value alert UI audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/g11-value-alert-ui-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
+    steps:
+      - name: Inspect deployed UI alert logic
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location "${ORIGIN}/" -o index.html
+          python3 - <<'PY'
+          import html, re, subprocess
+          from pathlib import Path
+          from urllib.parse import urljoin
+
+          origin = "https://g11-race-lab.higatatsunori2.chatgpt.site/"
+          page = Path("index.html").read_text(encoding="utf-8", errors="replace")
+          assets = []
+          for m in re.finditer(r'(?:src|href)=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']', page):
+              u = urljoin(origin, html.unescape(m.group(1)))
+              if u not in assets:
+                  assets.append(u)
+          print("ASSETS", assets)
+          needles = [
+              "value_alert", "value_alert_type", "production_mean_ev",
+              "odds_merit", "win_candidates", "VALUE ALERTS",
+              "対象の◎はありません", "新P3", "最高EV"
+          ]
+          for i,u in enumerate(assets):
+              p=Path(f"a{i}.js")
+              subprocess.run(["curl","--fail-with-body","--silent","--show-error","--location",u,"-o",str(p)],check=True)
+              t=p.read_text(encoding="utf-8",errors="replace")
+              for needle in needles:
+                  pos=0
+                  while True:
+                      j=t.find(needle,pos)
+                      if j<0: break
+                      lo=max(0,j-1200); hi=min(len(t),j+len(needle)+1800)
+                      print(f"MATCH asset={i} needle={needle!r} context={t[lo:hi].replace(chr(10),' ')}")
+                      pos=j+len(needle)
+          PY
