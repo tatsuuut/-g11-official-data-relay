@@ -743,6 +743,23 @@ jobs:
           print("G11_FEED_SCHEMA_DIFF=" + json.dumps(
               diagnostics[:10], ensure_ascii=False, sort_keys=True
           ))
+          pre_diffs = []
+          for race in incoming.get("races", []):
+              prior = old.get(race.get("key"))
+              if not isinstance(prior, dict):
+                  continue
+              pre = race.get("predeadline")
+              old_pre = prior.get("predeadline")
+              if isinstance(pre, dict) and isinstance(old_pre, dict) and pre != old_pre:
+                  changed = {
+                      key: {"stored": old_pre.get(key), "incoming": pre.get(key)}
+                      for key in sorted(set(pre) | set(old_pre))
+                      if pre.get(key) != old_pre.get(key)
+                  }
+                  pre_diffs.append({"key": race.get("key"), "changed": changed})
+          print("G11_PREDEADLINE_VALUE_DIFF=" + json.dumps(
+              pre_diffs[:5], ensure_ascii=False, sort_keys=True
+          ))
           if incoming.get("races"):
               print("G11_INCOMING_RACE_FIELDS=" + json.dumps(
                   sorted(incoming["races"][0]), ensure_ascii=False
