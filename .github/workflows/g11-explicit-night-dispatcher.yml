@@ -63,6 +63,26 @@ jobs:
             }' "${file}"
           done
 
+      - name: Audit deployed research UI selectors
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[ui-research-audit]')
+        run: |
+          set -euo pipefail
+          page="$(mktemp)"
+          curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site" -o "${page}"
+          grep -oE 'src="[^"]+\.js[^"]*"' "${page}"             | sed -E 's/^src="//;s/"$//'             | while read -r asset; do
+                case "${asset}" in
+                  http*) url="${asset}" ;;
+                  /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
+                  *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+                esac
+                js="$(mktemp)"
+                curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
+                if grep -qE '夜結果待ち|変更案の提示|本番採用審査|original_display_research|original_display_shadow|night_execution' "${js}"; then
+                  echo "ASSET=${url}"
+                  grep -oE '.{0,500}(夜結果待ち|変更案の提示|本番採用審査|original_display_research|original_display_shadow|night_execution).{0,1200}' "${js}"                     | head -n 80
+                fi
+              done
+
       - name: Dispatch explicit NIGHT phase
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
