@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   train-freeze-and-encrypt:
-    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[wild4-fast]'))
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || (!contains(github.event.head_commit.message, '[wild4-fast]') && !contains(github.event.head_commit.message, '[wild-distribution-audit]')))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -529,3 +529,84 @@ jobs:
 
 
 
+
+
+  wild-distribution-audit:
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[wild-distribution-audit]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Restore latest encrypted state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-21-${{ github.run_id }}-wild-distribution
+          restore-keys: |
+            g11-state-v2-2026-09-21-
+            g11-state-v2-
+
+      - name: Decrypt and inspect WILD selections
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s .relay-cache/state.tgz.gpg
+          rm -rf .relay-state
+          mkdir -p .relay-state
+          archive="${RUNNER_TEMP}/state.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${archive}" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          tar -xzf "${archive}" -C .relay-state
+          python3 - <<'PY'
+          import json, pathlib, collections, gzip
+          root=pathlib.Path(".relay-state/store")
+          day="2026-09-21"
+          pre=root/"g11/wild-pack-oos/pre_race"/day
+          combos=[]; heads=[]; rows=[]
+          if pre.is_dir():
+              for p in sorted(pre.glob("collection-packet-*.json")):
+                  try:
+                      v=json.loads(p.read_text())
+                  except Exception:
+                      continue
+                  if v.get("STATUS")!="CURRENT":
+                      continue
+                  s=v.get("SELECTED") or {}
+                  h=s.get("HEAD"); sec=s.get("SECOND"); th=s.get("THIRD")
+                  if all(isinstance(x,int) for x in (h,sec,th)):
+                      combo=f"{h}-{sec}-{th}"
+                      combos.append(combo); heads.append(h)
+                      rows.append((v.get("RACE_ID"),combo,s.get("PROBABILITY")))
+          print("PRE_RACE_CURRENT_COUNT",len(combos))
+          print("HEAD_COUNTS",json.dumps(dict(sorted(collections.Counter(heads).items())),sort_keys=True))
+          print("HEAD_PERCENT",json.dumps({str(k):round(v/len(heads)*100,1) for k,v in sorted(collections.Counter(heads).items())} if heads else {},sort_keys=True))
+          print("TOP_COMBOS",json.dumps(collections.Counter(combos).most_common(20),ensure_ascii=False))
+          print("SAMPLE_ROWS",json.dumps(rows[:200],ensure_ascii=False))
+          # Inspect available morning head prediction artifacts generically.
+          tr=root/"g11/true-ai-history"/day
+          morning=[]
+          if tr.is_dir():
+              for p in tr.glob("*.json.gz"):
+                  try:
+                      v=json.loads(gzip.decompress(p.read_bytes()))
+                  except Exception:
+                      continue
+                  for key in ("PREDICTIONS","RECORDS","PUBLIC_PREDICTIONS"):
+                      arr=v.get(key)
+                      if not isinstance(arr,list): continue
+                      for r in arr:
+                          if not isinstance(r,dict): continue
+                          h=r.get("AI_HEAD",r.get("ai_head",r.get("HEAD")))
+                          rid=r.get("RACE_ID",r.get("race_id",r.get("STANDARD_RACE_KEY")))
+                          if isinstance(h,int) and 1<=h<=6:
+                              morning.append((rid,h))
+          if morning:
+              mh=collections.Counter(h for _,h in morning)
+              print("MORNING_HEAD_RECORDS",len(morning))
+              print("MORNING_HEAD_COUNTS",json.dumps(dict(sorted(mh.items())),sort_keys=True))
+              print("MORNING_HEAD_PERCENT",json.dumps({str(k):round(v/len(morning)*100,1) for k,v in sorted(mh.items())},sort_keys=True))
+          else:
+              print("MORNING_HEAD_RECORDS",0)
+          PY
