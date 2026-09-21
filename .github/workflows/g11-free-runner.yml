@@ -646,6 +646,17 @@ jobs:
                     else .
                     end
                 )
+              # The deployed VALUE ALERTS UI still keys on the live
+              # PREDEADLINE marker. Keep the race-root odds contract legacy for
+              # validator/count compatibility, while allowing the nested
+              # PREDEADLINE odds_merit to represent only the canonical alert.
+              | .races |= map(
+                  if ((.predeadline | type) == "object")
+                     and ((.predeadline.legacy_odds_merit | type) == "string")
+                    then .odds_merit = .predeadline.legacy_odds_merit
+                    else .
+                    end
+                )
               # The Site freezes race-level morning schema/fields after the
               # first accepted feed.  Notification-research metadata belongs
               # to the verified PREDEADLINE object, not the immutable top-level
