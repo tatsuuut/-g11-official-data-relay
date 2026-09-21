@@ -951,10 +951,52 @@ jobs:
                       "research_eligible":r.get("research_eligible"),
                       "research_finance":rf,
                   })
+          verified=[
+              r for r in feed.get("races",[])
+              if (r.get("research_finance") or {}).get("status")=="VERIFIED"
+          ]
+          invariant_bad=[]
+          for r in verified:
+              rf=r["research_finance"]
+              expected_keys={
+                  "status","race_refund_occurred","gross_stake","refund_amount",
+                  "net_investment","prize_return","profit","source"
+              }
+              valid=(
+                  set(rf)==expected_keys
+                  and type(rf.get("race_refund_occurred")) is bool
+                  and all(type(rf.get(k)) is int for k in (
+                      "gross_stake","refund_amount","net_investment",
+                      "prize_return","profit"
+                  ))
+                  and rf.get("source")=="RESEARCH_LEDGER60"
+                  and rf["gross_stake"]-rf["refund_amount"]==rf["net_investment"]
+                  and rf["prize_return"]-rf["net_investment"]==rf["profit"]
+                  and rf["gross_stake"]==len(r.get("practical_bets") or [])*100
+              )
+              if not valid:
+                  invariant_bad.append({
+                      "key":r.get("key"),
+                      "practical_bets":r.get("practical_bets"),
+                      "research_finance":rf,
+                  })
+          refund_cases=[
+              {"key":r.get("key"),"research_finance":r.get("research_finance"),"result_meta":r.get("result_meta")}
+              for r in verified
+              if r["research_finance"].get("race_refund_occurred") is True
+          ]
           print("G11_NIGHT_FINANCE_STATUS_COUNTS="+json.dumps(dict(statuses),ensure_ascii=False,sort_keys=True))
           print("G11_NIGHT_FINANCE_BAD_ELIGIBLE="+json.dumps(bad_eligible[:30],ensure_ascii=False,sort_keys=True))
           print("G11_NIGHT_FINANCE_BAD_ESTABLISHED="+json.dumps(bad_established[:30],ensure_ascii=False,sort_keys=True))
+          print("G11_NIGHT_FINANCE_INVARIANT_BAD="+json.dumps(invariant_bad[:30],ensure_ascii=False,sort_keys=True))
+          print("G11_NIGHT_FINANCE_SAMPLE="+json.dumps([
+              {"key":r.get("key"),"practical_bets":r.get("practical_bets"),"research_finance":r.get("research_finance")}
+              for r in verified[:3]
+          ],ensure_ascii=False,sort_keys=True))
+          print("G11_NIGHT_REFUND_CASES="+json.dumps(refund_cases[:30],ensure_ascii=False,sort_keys=True))
           print("G11_NIGHT_COUNTS="+json.dumps(feed.get("counts"),ensure_ascii=False,sort_keys=True))
+          print("G11_NIGHT_RESEARCH="+json.dumps(feed.get("research"),ensure_ascii=False,sort_keys=True))
+          print("G11_NIGHT_RESEARCH_DB="+json.dumps(feed.get("research_db"),ensure_ascii=False,sort_keys=True))
           PY
           fi
 
