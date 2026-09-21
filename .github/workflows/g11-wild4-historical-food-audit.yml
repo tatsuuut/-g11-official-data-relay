@@ -30,7 +30,7 @@ jobs:
           ref: fea7ba7d5c09ff2019adb0461bb91081fe57144f
           path: public-data
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
       - name: Build historical authority inputs and audit thresholds
         working-directory: private
         env:
