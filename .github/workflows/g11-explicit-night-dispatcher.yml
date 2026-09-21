@@ -31,6 +31,25 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
     steps:
+      - name: Audit accepted research-finance schema
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[finance-schema-audit]')
+        run: |
+          set -euo pipefail
+          for day in 2026-09-20 2026-09-21; do
+            file="$(mktemp)"
+            curl --fail-with-body --silent --show-error --location \
+              "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=${day}" \
+              -o "${file}"
+            echo "DAY=${day}"
+            jq -c '{
+              stage:.stage,
+              counts:.counts,
+              finance_statuses:([.races[].research_finance.status] | group_by(.) | map({status:.[0],count:length})),
+              finance_sample:(.races | map(select(.research_finance.status=="VERIFIED")) | .[0].research_finance),
+              result_sample:(.races | map(select(.result_trifecta != null)) | .[0] | {key,result_trifecta,payout,research_eligible,research_finance,result_meta})
+            }' "${file}"
+          done
+
       - name: Dispatch explicit NIGHT phase
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
