@@ -604,9 +604,11 @@ jobs:
               | .races |= map(
                   . as $incoming
                   | ($prior[.key] // null) as $old
+                  # Root prediction fields are the immutable morning
+                  # projection. LIVE/CURRENT recalculation is carried only by
+                  # .predeadline plus the legacy root odds mirror. Preserve the
+                  # accepted morning prediction for every already-stored race.
                   | if (($old | type) == "object")
-                       and (.p3_logic_id != "CURRENT_GROWTH_P3")
-                       and ($old.p3_logic_id == "CURRENT_GROWTH_P3")
                     then
                       .top_boat = $old.top_boat
                       | .second_boat = $old.second_boat
@@ -617,16 +619,6 @@ jobs:
                       | .production_points = $old.production_points
                       | .prediction = $old.prediction
                       | .caution = $old.caution
-                      | .odds_merit = $old.odds_merit
-                      | .legacy_odds_merit = $old.legacy_odds_merit
-                      | .value_alert = $old.value_alert
-                      | .value_alert_type = $old.value_alert_type
-                      | .production_mean_ev = $old.production_mean_ev
-                      | .best_ev_bet = $old.best_ev_bet
-                      | .best_ev = $old.best_ev
-                      | .value_bets = $old.value_bets
-                      | .odds_captured_at_jst = $old.odds_captured_at_jst
-                      | .predeadline = $old.predeadline
                       | .p3_head = $old.p3_head
                       | .p3_logic_id = $old.p3_logic_id
                       | .p3_production_bets = $old.p3_production_bets
@@ -645,53 +637,12 @@ jobs:
                   # FEED_PREDEADLINE_FIELDS.
                   | if (($old | type) == "object")
                        and (($old.predeadline | type) == "object")
-                    then .top_boat = $old.top_boat
-                      | .second_boat = $old.second_boat
-                      | .axis = $old.axis
-                      | .quality = $old.quality
-                      | .turbulence = $old.turbulence
-                      | .practical_bets = $old.practical_bets
-                      | .production_points = $old.production_points
-                      | .prediction = $old.prediction
-                      | .caution = $old.caution
-                      | .odds_merit = $old.odds_merit
-                      | .legacy_odds_merit = $old.legacy_odds_merit
-                      | .value_alert = $old.value_alert
-                      | .value_alert_type = $old.value_alert_type
-                      | .production_mean_ev = $old.production_mean_ev
+                    then .odds_merit = $old.odds_merit
                       | .best_ev_bet = $old.best_ev_bet
                       | .best_ev = $old.best_ev
                       | .value_bets = $old.value_bets
                       | .odds_captured_at_jst = $old.odds_captured_at_jst
                       | .predeadline = $old.predeadline
-                    else .
-                    end
-                )
-              # Keep the top-level race projection and the immutable
-              # PREDEADLINE object byte-for-byte consistent. The Site validates
-              # these duplicated public fields as one accepted live snapshot.
-              # A newly completed PREDEADLINE may be added, but once present its
-              # values are the authority for the duplicated race-level fields.
-              | .races |= map(
-                  if ((.predeadline | type) == "object")
-                    then .top_boat = .predeadline.top_boat
-                      | .second_boat = .predeadline.second_boat
-                      | .axis = .predeadline.axis
-                      | .quality = .predeadline.quality
-                      | .turbulence = .predeadline.turbulence
-                      | .practical_bets = .predeadline.practical_bets
-                      | .production_points = .predeadline.production_points
-                      | .prediction = .predeadline.prediction
-                      | .caution = .predeadline.caution
-                      | .odds_merit = .predeadline.odds_merit
-                      | .legacy_odds_merit = (.predeadline.legacy_odds_merit // .legacy_odds_merit)
-                      | .value_alert = (.predeadline.value_alert // .value_alert)
-                      | .value_alert_type = (.predeadline.value_alert_type // .value_alert_type)
-                      | .production_mean_ev = (.predeadline.production_mean_ev // .production_mean_ev)
-                      | .best_ev_bet = .predeadline.best_ev_bet
-                      | .best_ev = .predeadline.best_ev
-                      | .value_bets = .predeadline.value_bets
-                      | .odds_captured_at_jst = .predeadline.odds_captured_at_jst
                     else .
                     end
                 )
