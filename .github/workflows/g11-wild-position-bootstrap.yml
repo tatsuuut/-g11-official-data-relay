@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   train-freeze-and-encrypt:
-    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[wild4-fast]'))
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || (!contains(github.event.head_commit.message, '[wild4-fast]') && !contains(github.event.head_commit.message, '[wild4-finalize]')))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -862,6 +862,308 @@ jobs:
               commit -m 'wild4: expand historical fully-OOS food with 5000-prior crossfit'
             git -C "${RUNTIME}" push origin HEAD:g11-runtime
           fi
+
+      - name: Dispatch production readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+            -d '{"ref":"main","inputs":{"phase":"predeadline"}}'
+
+
+  wild4-fast-finalize:
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[wild4-finalize]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: g11-free-official-data-runner
+      cancel-in-progress: false
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      TZ: Asia/Tokyo
+      SOURCE_RUN_ID: "35593504044"
+      STATE_DATE: "2026-09-21"
+    steps:
+      - name: Checkout private authority
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: private
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout pinned official-source history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: BoatraceCSV/boatracecsv.github.io
+          ref: fea7ba7d5c09ff2019adb0461bb91081fe57144f
+          path: public-data
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Restore latest encrypted production state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ env.STATE_DATE }}-${{ github.run_id }}-wild4-finalize
+          restore-keys: |
+            g11-state-v2-${{ env.STATE_DATE }}-
+            g11-state-v2-
+
+      - name: Decrypt production state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s .relay-cache/state.tgz.gpg
+          rm -rf .relay-state
+          mkdir -p .relay-state
+          archive="${RUNNER_TEMP}/state.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${archive}" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          tar -xzf "${archive}" -C .relay-state
+          test -d .relay-state/store/g11/wild-pack-oos/morning
+
+      - name: Restore historical fold 1
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold1
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-1
+          fail-on-cache-miss: true
+
+      - name: Restore historical fold 2
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold2
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-2
+          fail-on-cache-miss: true
+
+      - name: Restore historical fold 3
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold3
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-3
+          fail-on-cache-miss: true
+
+      - name: Restore historical fold 4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold4
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-4
+          fail-on-cache-miss: true
+
+      - name: Restore historical fold 5
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold5
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-5
+          fail-on-cache-miss: true
+
+      - name: Restore historical fold 6
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold6
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-6
+          fail-on-cache-miss: true
+
+      - name: Restore historical fold 7
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold7
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-7
+          fail-on-cache-miss: true
+
+      - name: Restore historical fold 8
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold8
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-8
+          fail-on-cache-miss: true
+
+      - name: Restore historical fold 9
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .fold-cache/fold9
+          key: g11-wild4-fast-${{ env.SOURCE_RUN_ID }}-fold-9
+          fail-on-cache-miss: true
+
+      - name: Merge folds and rebuild expanded WILD4 dataset
+        working-directory: private
+        env:
+          PYTHONPATH: .
+          PUBLIC: ${{ github.workspace }}/public-data
+          FOLDS: ${{ github.workspace }}/.fold-cache
+          OUT: ${{ runner.temp }}/wild4-final
+        run: |
+          set -euo pipefail
+          mkdir -p "${OUT}/eligible"
+          python3 - "${FOLDS}" "${OUT}" <<'PY'
+          import gzip,hashlib,json,pathlib,sys
+          from g11.wild_pack.v1 import historical_upstream_crossfit_v1 as hist
+          folds=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
+          records=[]
+          for i in range(1,10):
+              root=folds/f"fold{i}"
+              packet=json.loads(gzip.decompress((root/"historical-upstream-packets.json.gz").read_bytes()))
+              audit=json.loads((root/"historical-crossfit-audit.json").read_text())
+              assert packet["SCHEMA"] == hist.PACKET_SCHEMA
+              assert packet["STATUS"] == "HISTORICAL_FULLY_OOS_UPSTREAM_LOCKED"
+              assert audit["MINIMUM_PRIOR_RACES"] == 5000
+              assert audit["DATA_LEAK_COUNT"] == 0
+              records.extend(packet["RECORDS"])
+          assert len(records) == len({r["STANDARD_RACE_KEY"] for r in records}) == 9136
+          payload={
+              "SCHEMA":hist.PACKET_SCHEMA,
+              "STATUS":"HISTORICAL_FULLY_OOS_UPSTREAM_LOCKED",
+              "PREDICTION_STAGE":"MORNING",
+              "RACE_COUNT":9136,
+              "FULL_PATHS":{"HEAD":6,"SECOND":30,"THIRD":120,"JOINT":120},
+              "MID_PATH_PRUNING_COUNT":0,
+              "RESULT_DATA_PRESENT":False,
+              "ODDS_DATA_PRESENT":False,
+              "RECORDS":sorted(records,key=lambda r:r["STANDARD_RACE_KEY"]),
+              "PRODUCTION_PROMOTION_ELIGIBLE":False,
+              "PRODUCTION_MUTATED":False,
+          }
+          payload["CONTENT_SHA256"]=hist._sha(payload)
+          data=gzip.compress(hist._canonical_bytes(payload),compresslevel=9,mtime=0)
+          (out/"historical-upstream-packets.json.gz").write_bytes(data)
+          summary={
+              "SCHEMA":"G11_WILD4_HISTORICAL_FAST_CROSSFIT_MERGE_V1",
+              "STATUS":"PASS",
+              "MINIMUM_PRIOR_RACES":5000,
+              "FOLD_COUNT":9,
+              "GENERATED_PACKET_RACES":9136,
+              "ARTIFACT_SHA256":hashlib.sha256(data).hexdigest(),
+              "DATA_LEAK_COUNT":0,
+              "RESULT_USED_AS_PREDICTION_FEATURE":False,
+              "ODDS_USED_AS_UPSTREAM_POSITION_FEATURE":False,
+              "P3_USED_AS_FEATURE":False,
+              "PRODUCTION_MUTATED":False,
+          }
+          (out/"historical-crossfit-audit.json").write_text(
+              json.dumps(summary,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n",
+              encoding="utf-8",
+          )
+          print("WILD4_FAST_FINAL_MERGE",len(records))
+          PY
+          python3 -m g11.wild_pack.v1.wild_bet_bootstrap_v1 build-dataset \
+            --public-repo "${PUBLIC}" \
+            --upstream "${OUT}/historical-upstream-packets.json.gz" \
+            --contract g11/wild_pack/v1/BET_MODEL_CONTRACT_V1.json \
+            --output-dir "${OUT}/eligible"
+          python3 - "${OUT}" <<'PY'
+          import json,pathlib,sys
+          out=pathlib.Path(sys.argv[1])
+          audit=json.loads((out/"eligible/wild-bet-eligible-readback-audit.json").read_text())
+          assert audit["FORMAL_WILD_BET_ELIGIBLE_RACES"] == 9119
+          assert audit["DATA_LEAK_COUNT"] == 0
+          assert audit["RESULT_USED_AS_PREDICTION_FEATURE"] is False
+          assert audit["PAYOUT_USED_AS_PREDICTION_FEATURE"] is False
+          assert audit["P3_USED_AS_FEATURE"] is False
+          value={
+              "SCHEMA":"G11_WILD4_HISTORICAL_FAST_BACKFILL_AUDIT_V1",
+              "STATUS":"PASS",
+              "MINIMUM_PRIOR_RACES":5000,
+              "GENERATED_UPSTREAM_PACKETS":9136,
+              "FORMAL_ELIGIBLE_RACES":9119,
+              "TARGET_RACES":10000,
+              "REMAINING_TO_10000":881,
+              "REJECTED":audit["REJECTED"],
+              "DATA_LEAK_COUNT":0,
+              "RESULT_USED_AS_PREDICTION_FEATURE":False,
+              "PAYOUT_USED_AS_PREDICTION_FEATURE":False,
+              "P3_USED_AS_FEATURE":False,
+              "PRODUCTION_MUTATED":False,
+          }
+          (out/"fast-backfill-audit.json").write_text(
+              json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n",
+              encoding="utf-8",
+          )
+          print("WILD4_FAST_FINAL="+json.dumps(value,ensure_ascii=False,sort_keys=True))
+          PY
+
+      - name: Verify historical fast-lane contracts
+        working-directory: private
+        run: |
+          python3 -m unittest \
+            g11.wild_pack.v1.test_historical_upstream_crossfit_v1 \
+            g11.wild_pack.v1.test_wild_bet_bootstrap_v1 \
+            g11.wild_pack.v1.test_bet_oos_collection_v1
+
+      - name: Install expanded bootstrap into encrypted authority
+        working-directory: private
+        env:
+          OUT: ${{ runner.temp }}/wild4-final
+          STATE: ${{ github.workspace }}/.relay-state/store
+        run: |
+          set -euo pipefail
+          python3 -m g11.wild_pack.v1.chunked_artifact_v1 \
+            "${OUT}/eligible/wild-bet-eligible-dataset.json.gz" \
+            "${OUT}/eligible" >/dev/null
+          rm "${OUT}/eligible/wild-bet-eligible-dataset.json.gz"
+          target="${STATE}/g11/wild-pack-oos/morning/bootstrap"
+          mkdir -p "${target}"
+          rm -f "${target}"/wild-bet-eligible-dataset.json.gz \
+                "${target}"/wild-bet-eligible-dataset.json.gz.part* \
+                "${target}"/wild-bet-eligible-dataset.json.gz.parts.json
+          cp "${OUT}/eligible"/wild-bet-eligible-dataset.json.gz.part* "${target}/"
+          cp "${OUT}/eligible/wild-bet-eligible-dataset.json.gz.parts.json" "${target}/"
+          cp "${OUT}/eligible/wild-bet-eligible-dataset.manifest.json" "${target}/"
+          cp "${OUT}/eligible/wild-bet-eligible-readback-audit.json" "${target}/"
+          cp "${OUT}/historical-crossfit-audit.json" "${target}/"
+          mkdir -p "${STATE}/g11/wild-pack-audits"
+          cp "${OUT}/fast-backfill-audit.json" \
+             "${STATE}/g11/wild-pack-audits/WILD4_HISTORICAL_FAST_BACKFILL_20260921.json"
+          python3 - "${STATE}" <<'PY'
+          import json,pathlib,sys
+          from g11.wild_pack.v1 import bet_oos_collection_v1 as wild_bet
+          root=pathlib.Path(sys.argv[1])/"g11/wild-pack-oos/morning"
+          status=wild_bet.status(root)
+          assert status["HISTORICAL_FULLY_OOS_ELIGIBLE_RACES"] == 9119
+          assert status["BET_ELIGIBLE_RACES"] >= 9119
+          assert status["TARGET_RACES"] == 10000
+          assert status["REMAINING_RACES"] <= 881
+          assert status["P3_MUTATED"] is False
+          wild_bet._write_json_atomic(root/"bet-status.json",status)
+          print("WILD4_ENCRYPTED_AUTHORITY="+json.dumps({
+              "BET_ELIGIBLE_RACES":status["BET_ELIGIBLE_RACES"],
+              "HISTORICAL_FULLY_OOS_ELIGIBLE_RACES":status["HISTORICAL_FULLY_OOS_ELIGIBLE_RACES"],
+              "PROSPECTIVE_FULLY_OOS_ELIGIBLE_RACES":status["PROSPECTIVE_FULLY_OOS_ELIGIBLE_RACES"],
+              "REMAINING_RACES":status["REMAINING_RACES"],
+          },sort_keys=True))
+          PY
+
+      - name: Encrypt expanded production state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p .relay-cache
+          temporary=.relay-cache/state.tgz.gpg.tmp
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . | \
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+              --symmetric --cipher-algo AES256 --output "${temporary}"
+          exec 3<&-
+          mv "${temporary}" .relay-cache/state.tgz.gpg
+          test -s .relay-cache/state.tgz.gpg
+
+      - name: Save expanded encrypted authority
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ env.STATE_DATE }}-${{ github.run_id }}-wild4-fast
 
       - name: Dispatch production readback
         env:
