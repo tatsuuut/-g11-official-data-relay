@@ -641,8 +641,47 @@ jobs:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
 
-      - name: Publish a newly verified feed through OIDC
+      - name: Gate NIGHT publication on fully settled research
+        id: night-ready
         if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != ''
+        env:
+          FEED: .relay-output/feed.json
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.due.outputs.phase }}" != "night" ]; then
+            echo 'allowed=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if jq -e '
+            .stage == "NIGHT"
+            and .status == "PASS"
+            and .counts.pending == 0
+            and .counts.results == .counts.formal
+            and .counts.research_samples == .counts.formal
+            and .research_db.available == true
+            and .research_db.formal_races == .counts.formal
+            and ([.races[]
+                  | select(.research_eligible == true)
+                  | select((.research_finance.status // "") != "VERIFIED")]
+                 | length) == 0
+          ' "${FEED}" >/dev/null; then
+            echo 'allowed=true' >> "${GITHUB_OUTPUT}"
+            echo 'G11_NIGHT_PUBLICATION_GATE=PASS'
+          else
+            echo 'allowed=false' >> "${GITHUB_OUTPUT}"
+            echo 'G11_NIGHT_PUBLICATION_GATE=DEFER_INCOMPLETE'
+            jq -c '{
+              stage,status,counts,research_db,
+              unverified_research_finance:
+                ([.races[]
+                  | select(.research_eligible == true)
+                  | select((.research_finance.status // "") != "VERIFIED")]
+                 | length)
+            }' "${FEED}"
+          fi
+
+      - name: Publish a newly verified feed through OIDC
+        if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != '' && steps.night-ready.outputs.allowed == 'true'
         id: publish
         env:
           FEED: .relay-output/feed.json
