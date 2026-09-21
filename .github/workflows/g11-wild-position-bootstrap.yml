@@ -609,4 +609,26 @@ jobs:
               print("MORNING_HEAD_PERCENT",json.dumps({str(k):round(v/len(morning)*100,1) for k,v in sorted(mh.items())},sort_keys=True))
           else:
               print("MORNING_HEAD_RECORDS",0)
+
+          def show_registry(label,path):
+              if not path.is_file():
+                  print(label+"_MISSING",str(path)); return
+              v=json.loads(path.read_text())
+              keys=[
+                  "MODEL_VERSION","UNDERLYING_MODEL_VERSION","TRAINING_RACES",
+                  "VALIDATION_RACES","FUTURE_HOLDOUT_RACES","HOLDOUT_RACES",
+                  "VALIDATION_EVALUATION","FUTURE_HOLDOUT_EVALUATION",
+                  "FEATURE_NAMES","CATEGORICAL_FEATURES","MODEL_ROLE",
+                  "ELIGIBLE_RACES","OOS_VALIDATION_STATUS"
+              ]
+              print(label,json.dumps({k:v.get(k) for k in keys if k in v},ensure_ascii=False,sort_keys=True))
+
+          show_registry(
+              "MORNING_WILD_HEAD_REGISTRY",
+              root/"g11/wild-pack-models/morning/WILD_HEAD/current-registry.json"
+          )
+          show_registry(
+              "PRE_RACE_WILD_HEAD_REGISTRY",
+              root/"g11/wild-pack-models/pre_race/WILD_HEAD/registry-entry.json"
+          )
           PY
