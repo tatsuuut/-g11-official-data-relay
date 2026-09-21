@@ -477,6 +477,14 @@ jobs:
             python3 -m unittest "${module}"
           done
 
+          # PREDEADLINE feed is also WILD4 training-food infrastructure.
+          # Keep the widened incomplete-HTML retry policy under focused CI
+          # without running the entire canonical suite every two minutes.
+          python3 -m unittest \
+            g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_urls_and_dynamic_budget_cover_168_races \
+            g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_incomplete_http_200_is_evidence_not_canonical_and_can_retry \
+            g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_predeadline_content_has_wider_bounded_retry_budget
+
       - name: Run the private fail-closed relay
         id: runtime
         continue-on-error: true
