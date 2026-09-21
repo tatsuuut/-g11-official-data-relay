@@ -21,7 +21,7 @@ jobs:
           restore-keys: |
             g11-state-v2-2026-09-21-
             g11-state-v2-
-      - name: Inspect missing WILD odds
+      - name: Classify missing WILD odds
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -33,32 +33,34 @@ jobs:
           exec 3<&-
           tar -xzf "${archive}" -C .relay-state
           python3 - <<'PY'
-          import gzip, json
+          import gzip,json
           from pathlib import Path
-          from datetime import datetime
+          from datetime import datetime,timezone
           root=Path(".relay-state/store")
           d=root/"g11/wild-pack-oos/morning/2026-09-21"
           up=json.loads(gzip.decompress((d/"bet-upstream.json.gz").read_bytes()))
           od=json.loads(gzip.decompress((d/"bet-prediction-time-odds.json.gz").read_bytes()))
           up_by={r["PAYLOAD"]["STANDARD_RACE_KEY"]:r["PAYLOAD"] for r in up["RECORDS"]}
           got={r["STANDARD_RACE_KEY"] for r in od["RECORDS"]}
-          missing=sorted(set(up_by)-got)
-          now=datetime.now().astimezone()
-          past=[]; future=[]; snapshot_exists=[]
-          for k in missing:
-              deadline=datetime.fromisoformat(up_by[k]["RACE_DEADLINE_AT"])
-              item=(k,deadline.isoformat())
-              (past if deadline<=now else future).append(item)
-              p=root/"snapshots/predeadline"/f"odds3t-{k.lower()}.json"
-              if p.is_file(): snapshot_exists.append(item)
-          print("NOW",now.isoformat())
-          print("UPSTREAM",len(up_by))
-          print("ODDS",len(got))
-          print("MISSING",len(missing))
-          print("MISSING_PAST_DEADLINE",len(past))
-          print("MISSING_FUTURE",len(future))
-          print("MISSING_WITH_OFFICIAL_ODDS_SNAPSHOT_ALREADY_PRESENT",len(snapshot_exists))
-          print("PAST_KEYS",json.dumps(past,ensure_ascii=False))
-          print("FUTURE_KEYS",json.dumps(future,ensure_ascii=False))
-          print("SNAPSHOT_PRESENT_KEYS",json.dumps(snapshot_exists,ensure_ascii=False))
+          now=datetime.now(timezone.utc)
+          past=[]
+          for k,payload in up_by.items():
+              if k in got: continue
+              dl=datetime.fromisoformat(payload["RACE_DEADLINE_AT"])
+              if dl.astimezone(timezone.utc) <= now: past.append(k)
+          stats={"beforeinfo":0,"odds3t":0,"predeadline_prediction":0,"current_p3_live":0}
+          rows=[]
+          for k in sorted(past):
+              snap=root/"snapshots/predeadline"
+              flags={
+                "beforeinfo":(snap/f"beforeinfo-{k.lower()}.json").is_file(),
+                "odds3t":(snap/f"odds3t-{k.lower()}.json").is_file(),
+                "predeadline_prediction":(snap/f"predeadline-prediction-{k.lower()}.json").is_file(),
+                "current_p3_live":(snap/f"current-growth-p3-{k.lower()}.json").is_file(),
+              }
+              for key,val in flags.items(): stats[key]+=int(val)
+              rows.append([k,flags])
+          print("PAST_MISSING",len(past))
+          print("ARTIFACT_COUNTS",json.dumps(stats,sort_keys=True))
+          print("ROWS",json.dumps(rows,ensure_ascii=False))
           PY
