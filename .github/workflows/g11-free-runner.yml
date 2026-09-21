@@ -632,7 +632,7 @@ jobs:
                       | .p3_status = $old.p3_status
                     else .
                     end
-                  # Once the app has accepted a race's PREDEADLINE
+                  # Once the app has accepted a race PREDEADLINE
                   # snapshot, keep that exact live object immutable on every
                   # later relay pass. Only races that still have no stored
                   # predeadline object may receive a newly completed live
