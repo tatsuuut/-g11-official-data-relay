@@ -55,7 +55,7 @@ jobs:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" != *"[night-republish]"* ]]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" != *"[night-republish]"* ]] && [[ "${COMMIT_MESSAGE}" != *"[wild-night-settle]"* ]]; then
             exit 0
           fi
           now_hour="$(date +%H)"
@@ -69,13 +69,15 @@ jobs:
           # the remainder of the window. A transient readback failure does not
           # block the retry; it simply falls through to another NIGHT dispatch.
           current_feed="$(mktemp)"
-          if curl --fail-with-body --silent --show-error --location \
-            "${G11_APP_ORIGIN}/api/g11-feed?date=${operational_date}" \
-            -o "${current_feed}"; then
-            if jq -e '.stage == "NIGHT" and .counts.pending == 0' \
-              "${current_feed}" >/dev/null 2>&1; then
-              echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
-              exit 0
+          if [[ "${COMMIT_MESSAGE}" != *"[wild-night-settle]"* ]]; then
+            if curl --fail-with-body --silent --show-error --location \
+              "${G11_APP_ORIGIN}/api/g11-feed?date=${operational_date}" \
+              -o "${current_feed}"; then
+              if jq -e '.stage == "NIGHT" and .counts.pending == 0' \
+                "${current_feed}" >/dev/null 2>&1; then
+                echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
+                exit 0
+              fi
             fi
           fi
 
