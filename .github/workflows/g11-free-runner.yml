@@ -510,6 +510,47 @@ jobs:
           )
           python3 -m g11.relay.v1 "${args[@]}" | tee ../.relay-output/result.json
 
+      - name: Audit WILD4 training-food capture
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run'
+        working-directory: .g11-private
+        env:
+          STATE_STORE: ${{ github.workspace }}/.relay-state/store
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          python3 - "${STATE_STORE}" "${OPERATIONAL_DATE}" <<'PY'
+          import gzip
+          import json
+          import pathlib
+          import sys
+
+          from g11.wild_pack.v1 import bet_oos_collection_v1 as wild_bet
+
+          store = pathlib.Path(sys.argv[1])
+          operational_date = sys.argv[2]
+          history = store / "g11" / "wild-pack-oos" / "morning"
+          day = history / operational_date
+          status = wild_bet.status(history)
+
+          def artifact(name):
+              path = day / name
+              if not path.is_file():
+                  return None
+              return json.loads(gzip.decompress(path.read_bytes()))
+
+          upstream = artifact("bet-upstream.json.gz")
+          odds = artifact("bet-prediction-time-odds.json.gz")
+          eligible = artifact("bet-eligible.json.gz")
+          print(json.dumps({
+              "G11_WILD4_FOOD_STATUS": "PASS",
+              "CUMULATIVE_ELIGIBLE": status["BET_ELIGIBLE_RACES"],
+              "REMAINING_TO_10000": status["REMAINING_RACES"],
+              "TODAY_UPSTREAM": None if upstream is None else upstream["RACE_COUNT"],
+              "TODAY_ODDS_READY": None if odds is None else odds["ODDS_PACKET_RACE_COUNT"],
+              "TODAY_ODDS_MISSING": None if odds is None else odds["ODDS_MISSING_RACE_COUNT"],
+              "TODAY_SETTLED_ELIGIBLE": None if eligible is None else eligible["BET_ELIGIBLE_RACES"],
+          }, sort_keys=True))
+          PY
+
       - name: Verify nightly research ledgers before encrypted persistence
         if: steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'night'
         working-directory: .g11-private
