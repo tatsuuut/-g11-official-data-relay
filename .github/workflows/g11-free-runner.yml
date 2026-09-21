@@ -922,44 +922,43 @@ jobs:
           PY
           fi
 
-          # Night transport uses the canonical unavailable shape for the
-          # original-display research sidecar. The complete captured evidence
-          # remains in the encrypted state store; live/predeadline runs are not
-          # affected. This preserves the app validator's exact object contract
-          # while leaving room for official night results.
+          # Preserve the verified original-display NIGHT research emitted by
+          # the private canonical feed builder.  Do not replace settled
+          # CAPTURED_RESEARCH_ONLY / daily_aggregate evidence with the
+          # NOT_YET_ISSUED placeholder: the app uses this surface for the
+          # 朝A / 直前P / 展示B-G night comparison.
           if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
-            jq -c '
-              .races |= map(
-                .original_display_shadow = {
-                  status: "NOT_YET_ISSUED",
-                  source: "BOAT_RACE_OFFICIAL_BOATCAST",
-                  captured_at_jst: null,
-                  top_display_boat: null,
-                  rising_boats: [],
-                  falling_boats: [],
-                  boats: [],
-                  last_minute_inputs: null,
-                  profile_projections: null,
-                  night_execution: null,
-                  production_mutated: false
-                }
-              )
-              | .original_display_research = {
-                  available: false,
-                  status: "NOT_YET_ISSUED",
-                  source: "BOAT_RACE_OFFICIAL_BOATCAST",
-                  boaters_used: false,
-                  morning_audits: 0,
-                  captures: 0,
-                  night_settlements: 0,
-                  profiles: ["A","P","B","C","D","E","F","G"],
-                  promotion_gate: null,
-                  proposal_gate_300r: null,
-                  daily_aggregate: null,
-                  production_mutated: false
-                }
-            ' "${FEED}" > .relay-output/feed-transport.json
-            mv .relay-output/feed-transport.json "${FEED}"
+            python3 - "${FEED}" <<'PY'
+          import json
+          import sys
+
+          path = sys.argv[1]
+          feed = json.load(open(path, encoding="utf-8"))
+          research = feed.get("original_display_research")
+          if not isinstance(research, dict):
+              raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_RESEARCH_MISSING")
+          required = {
+              "available","status","source","boaters_used","morning_audits",
+              "captures","night_settlements","profiles","promotion_gate",
+              "proposal_gate_300r","daily_aggregate","production_mutated",
+          }
+          if set(research) != required:
+              raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_RESEARCH_SCHEMA")
+          if research.get("boaters_used") is not False or research.get("production_mutated") is not False:
+              raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_RESEARCH_SAFETY")
+          for race in feed.get("races", []):
+              shadow = race.get("original_display_shadow")
+              if not isinstance(shadow, dict):
+                  raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_SHADOW_MISSING")
+              expected = {
+                  "status","source","captured_at_jst","top_display_boat",
+                  "rising_boats","falling_boats","boats","last_minute_inputs",
+                  "profile_projections","night_execution","production_mutated",
+              }
+              if set(shadow) != expected or shadow.get("production_mutated") is not False:
+                  raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_SHADOW_SCHEMA")
+          print("G11_NIGHT_ORIGINAL_DISPLAY_TRANSPORT=PRESERVED")
+          PY
           fi
 
           # Re-settle display-only NIGHT finance against the exact immutable
