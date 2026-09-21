@@ -155,6 +155,10 @@ jobs:
               print("DISPLAY_AUDIT_FUNCTION",repr(text[start:end]))
           PY
           done < "${RUNNER_TEMP}/assets.txt"
+          release="$(mktemp)"
+          if curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-app-release?client=ios"             -o "${release}"; then
+            echo "G11_APP_RELEASE=$(tr -d '\n' < "${release}")"
+          fi
           current="$(mktemp)"
           curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-21"             -o "${current}"
           jq -c '{
