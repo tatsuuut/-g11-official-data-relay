@@ -109,6 +109,34 @@ jobs:
             fi
           done < "${RUNNER_TEMP}/assets.txt"
           echo "MATCHED_ASSET=${matched}"
+          while IFS= read -r asset; do
+            [ -n "${asset}" ] || continue
+            case "${asset}" in
+              http*) url="${asset}" ;;
+              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
+              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+            esac
+            js="$(mktemp)"
+            curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
+            python3 - "${js}" <<'PY'
+          import pathlib,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding="utf-8",errors="replace")
+          phrase="処刑監査室"
+          pos=text.find(phrase)
+          if pos>=0:
+              start=text.rfind("function ",0,pos)
+              if start<0: start=max(0,pos-10000)
+              end=min(len(text),start+24000)
+              print("EXECUTION_FUNCTION",repr(text[start:end]))
+          phrase="朝・直前・展示の処刑比較"
+          pos=text.find(phrase)
+          if pos>=0:
+              start=text.rfind("function ",0,pos)
+              if start<0: start=max(0,pos-10000)
+              end=min(len(text),start+20000)
+              print("DISPLAY_AUDIT_FUNCTION",repr(text[start:end]))
+          PY
+          done < "${RUNNER_TEMP}/assets.txt"
           current="$(mktemp)"
           curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-21"             -o "${current}"
           jq -c '{
