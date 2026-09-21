@@ -349,13 +349,19 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
-          day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
-          wild_admission=".relay-state/store/g11/wild-pack-oos/morning/${{ steps.due.outputs.operational_date }}/position-oos-admission.manifest.json"
-          if [ "${{ steps.due.outputs.phase }}" = "morning" ] || \
-             { [ "${{ steps.due.outputs.phase }}" = "predeadline" ] && \
-               { [ ! -f "${day_root}/morning-predictions.manifest.json" ] || \
-                 [ ! -f "${wild_admission}" ]; }; }; then
-            python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
+
+          # WILD runtime inference is used after the morning admission is
+          # already present too.  Do not key CatBoost installation to missing
+          # artifacts: PREDEADLINE and NIGHT can still load CURRENT .cbm
+          # models. Verify the exact interpreter that later executes relay.v1.
+          if [ "${{ steps.due.outputs.phase }}" != "dry-run" ]; then
+            if ! python3 -c 'import catboost' >/dev/null 2>&1; then
+              python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
+            fi
+            python3 - <<'PY'
+          import catboost
+          print("G11_CATBOOST_RUNTIME_PASS", catboost.__version__)
+          PY
           fi
 
       - name: Read back verified WILD BET bootstrap evidence
