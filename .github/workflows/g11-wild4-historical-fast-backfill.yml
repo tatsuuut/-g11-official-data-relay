@@ -1,0 +1,182 @@
+name: G11 WILD4 historical fast backfill
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/g11-wild4-historical-fast-backfill.yml
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: g11-wild4-historical-fast-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Checkout private authority
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: private
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout pinned official-source history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: BoatraceCSV/boatracecsv.github.io
+          ref: fea7ba7d5c09ff2019adb0461bb91081fe57144f
+          path: public-data
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Checkout private runtime branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: g11-runtime
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: runtime
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Install pinned model backend
+        run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
+
+      - name: Build 5000-prior time-safe historical packets
+        working-directory: private
+        env:
+          PYTHONPATH: .
+          OUT: ${{ runner.temp }}/wild4-fast
+          PUBLIC: ${{ github.workspace }}/public-data
+        run: |
+          set -euo pipefail
+          mkdir -p "${OUT}/crossfit" "${OUT}/eligible"
+          python3 -m g11.true_ai.v1.src.public_backfill_v1 \
+            --public-repo "${PUBLIC}" \
+            --dataset-output "${OUT}/head-dataset.json" \
+            --audit-output "${OUT}/head-audit.json" \
+            --end 2026-09-19
+          python3 -m g11.wild_pack.v1.public_position_bootstrap_v1 \
+            --head-dataset "${OUT}/head-dataset.json" \
+            --public-repo "${PUBLIC}" \
+            --overlay-output "${OUT}/position-overlay.json" \
+            --audit-output "${OUT}/position-audit.json"
+          python3 - "${OUT}" "${PUBLIC}" <<'PY'
+          import json,pathlib,sys
+          from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as bet
+          out=pathlib.Path(sys.argv[1]); public=pathlib.Path(sys.argv[2])
+          dataset=json.loads((out/"head-dataset.json").read_text())
+          odds=bet.public_odds_candidates(public)
+          targets=sorted({r["RACE_ID"] for r in dataset["RECORDS"]} & set(odds["RECORDS"]))
+          contract=bet.load_json(pathlib.Path("g11/wild_pack/v1/BET_MODEL_CONTRACT_V1.json"))
+          plan=bet.walk_forward_plan(
+              dataset["RECORDS"],targets,
+              fold_days=int(contract["BOOTSTRAP"]["FOLD_LENGTH_DAYS"]),
+              minimum_prior_races=5000,
+          )
+          assert plan["READY_TARGET_RACE_COUNT"] == len(targets) == 9136
+          (out/"plan.json").write_text(
+              json.dumps(plan,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n",
+              encoding="utf-8",
+          )
+          print("WILD4_FAST_PLAN",plan["READY_TARGET_RACE_COUNT"],plan["MINIMUM_PRIOR_RACES"])
+          PY
+          python3 -m g11.wild_pack.v1.historical_upstream_crossfit_v1 \
+            --dataset "${OUT}/head-dataset.json" \
+            --overlay "${OUT}/position-overlay.json" \
+            --plan "${OUT}/plan.json" \
+            --contract g11/wild_pack/v1/POSITION_MODEL_CONTRACT_V1.json \
+            --output-dir "${OUT}/crossfit" \
+            --code-commit "$(git rev-parse HEAD)"
+          python3 -m g11.wild_pack.v1.wild_bet_bootstrap_v1 build-dataset \
+            --public-repo "${PUBLIC}" \
+            --upstream "${OUT}/crossfit/historical-upstream-packets.json.gz" \
+            --contract g11/wild_pack/v1/BET_MODEL_CONTRACT_V1.json \
+            --output-dir "${OUT}/eligible"
+          python3 - "${OUT}" <<'PY'
+          import json,pathlib,sys
+          out=pathlib.Path(sys.argv[1])
+          cross=json.loads((out/"crossfit/historical-crossfit-audit.json").read_text())
+          audit=json.loads((out/"eligible/wild-bet-eligible-readback-audit.json").read_text())
+          eligible=int(audit["FORMAL_WILD_BET_ELIGIBLE_RACES"])
+          assert cross["MINIMUM_PRIOR_RACES"] == 5000
+          assert cross["GENERATED_PACKET_RACES"] == 9136
+          assert cross["DATA_LEAK_COUNT"] == 0
+          assert eligible >= 9000
+          assert audit["DATA_LEAK_COUNT"] == 0
+          assert audit["RESULT_USED_AS_PREDICTION_FEATURE"] is False
+          assert audit["PAYOUT_USED_AS_PREDICTION_FEATURE"] is False
+          assert audit["P3_USED_AS_FEATURE"] is False
+          summary={
+              "SCHEMA":"G11_WILD4_HISTORICAL_FAST_BACKFILL_AUDIT_V1",
+              "STATUS":"PASS",
+              "MINIMUM_PRIOR_RACES":5000,
+              "GENERATED_UPSTREAM_PACKETS":cross["GENERATED_PACKET_RACES"],
+              "FORMAL_ELIGIBLE_RACES":eligible,
+              "TARGET_RACES":10000,
+              "REMAINING_TO_10000":max(0,10000-eligible),
+              "REJECTED":audit["REJECTED"],
+              "DATA_LEAK_COUNT":0,
+              "RESULT_USED_AS_PREDICTION_FEATURE":False,
+              "PAYOUT_USED_AS_PREDICTION_FEATURE":False,
+              "P3_USED_AS_FEATURE":False,
+              "PRODUCTION_MUTATED":False,
+          }
+          (out/"fast-backfill-audit.json").write_text(
+              json.dumps(summary,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n",
+              encoding="utf-8",
+          )
+          print("WILD4_FAST_BACKFILL="+json.dumps(summary,ensure_ascii=False,sort_keys=True))
+          PY
+
+      - name: Chunk and publish expanded immutable bootstrap
+        working-directory: private
+        env:
+          OUT: ${{ runner.temp }}/wild4-fast
+          RUNTIME: ${{ github.workspace }}/runtime
+        run: |
+          set -euo pipefail
+          python3 -m g11.wild_pack.v1.chunked_artifact_v1 \
+            "${OUT}/eligible/wild-bet-eligible-dataset.json.gz" \
+            "${OUT}/eligible" >/dev/null
+          rm "${OUT}/eligible/wild-bet-eligible-dataset.json.gz"
+          target="${RUNTIME}/g11/wild-pack-oos/morning/bootstrap"
+          mkdir -p "${target}"
+          rm -f "${target}"/wild-bet-eligible-dataset.json.gz \
+                "${target}"/wild-bet-eligible-dataset.json.gz.part* \
+                "${target}"/wild-bet-eligible-dataset.json.gz.parts.json
+          cp "${OUT}/eligible"/wild-bet-eligible-dataset.json.gz.part* "${target}/"
+          cp "${OUT}/eligible/wild-bet-eligible-dataset.json.gz.parts.json" "${target}/"
+          cp "${OUT}/eligible/wild-bet-eligible-dataset.manifest.json" "${target}/"
+          cp "${OUT}/eligible/wild-bet-eligible-readback-audit.json" "${target}/"
+          cp "${OUT}/crossfit/historical-crossfit-audit.json" "${target}/"
+          mkdir -p "${RUNTIME}/g11/wild-pack-audits"
+          cp "${OUT}/fast-backfill-audit.json" \
+             "${RUNTIME}/g11/wild-pack-audits/WILD4_HISTORICAL_FAST_BACKFILL_20260921.json"
+          git -C "${RUNTIME}" add g11/wild-pack-oos/morning/bootstrap g11/wild-pack-audits/WILD4_HISTORICAL_FAST_BACKFILL_20260921.json
+          git -C "${RUNTIME}" -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'wild4: expand historical fully-OOS food with 5000-prior crossfit'
+          git -C "${RUNTIME}" push origin HEAD:g11-runtime
+
+      - name: Dispatch normal relay readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+            -d '{"ref":"main","inputs":{"phase":"predeadline"}}'
