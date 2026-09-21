@@ -923,6 +923,102 @@ jobs:
             mv .relay-output/feed-transport.json "${FEED}"
           fi
 
+          # NIGHT research finance must be settled against the same immutable
+          # root practical_bets the Site already accepted that morning. The
+          # canonical parent ledger may still carry an older lock representation
+          # on migration days; never mix that stake with a different displayed
+          # bet set. Recompute only the transport finance/hit aggregates from
+          # official settlements and refund boats. Canonical ledgers remain
+          # untouched in encrypted state.
+          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+            python3 - "${FEED}" .relay-state/store/snapshots/night/workbook-ledger-projection.json <<'PY'
+          import json, pathlib, sys
+          feed_path=pathlib.Path(sys.argv[1])
+          night_path=pathlib.Path(sys.argv[2])
+          feed=json.loads(feed_path.read_text(encoding="utf-8"))
+          if not night_path.is_file():
+              raise SystemExit("G11_NIGHT_TRANSPORT_LEDGER_MISSING")
+          envelope=json.loads(night_path.read_text(encoding="utf-8"))
+          payload=envelope.get("PAYLOAD")
+          if not isinstance(payload,dict):
+              raise SystemExit("G11_NIGHT_TRANSPORT_LEDGER_PAYLOAD")
+          fields=payload.get("RESEARCH_LEDGER60_FIELDS")
+          rows=payload.get("RESEARCH_LEDGER60_ROWS")
+          if not isinstance(fields,list) or not isinstance(rows,list):
+              raise SystemExit("G11_NIGHT_TRANSPORT_LEDGER_ROWS")
+          by_key={}
+          for raw in rows:
+              row=dict(zip(fields,raw))
+              by_key[row["標準レースキー"]]=row
+          normalized=[]
+          for race in feed.get("races",[]):
+              if race.get("research_eligible") is not True:
+                  continue
+              key=race.get("key")
+              row=by_key.get(key)
+              if row is None:
+                  raise SystemExit(f"G11_NIGHT_TRANSPORT_LEDGER_KEY:{key}")
+              bets=race.get("practical_bets")
+              if not isinstance(bets,list):
+                  raise SystemExit(f"G11_NIGHT_TRANSPORT_BETS:{key}")
+              refund_text=row.get("返還艇")
+              refund_boats=set()
+              if isinstance(refund_text,str) and refund_text.strip():
+                  refund_boats={int(x) for x in refund_text.split(",") if x.strip()}
+              gross=len(bets)*100
+              refund_bets=[
+                  bet for bet in bets
+                  if any(str(boat) in str(bet).split("-") for boat in refund_boats)
+              ]
+              refund_amount=len(refund_bets)*100
+              settlements=(race.get("result_meta") or {}).get("trifecta_settlements") or []
+              payout_by={
+                  item.get("trifecta"):item.get("payout")
+                  for item in settlements
+                  if isinstance(item,dict)
+                  and isinstance(item.get("trifecta"),str)
+                  and type(item.get("payout")) is int
+              }
+              prize_return=sum(payout_by.get(bet,0) for bet in bets)
+              net_investment=gross-refund_amount
+              total_return=prize_return+refund_amount
+              profit=total_return-gross
+              practical_hit=prize_return>0
+              race["practical_hit"]=practical_hit
+              race["research_finance"]={
+                  "status":"VERIFIED",
+                  "race_refund_occurred":bool(refund_boats),
+                  "gross_stake":gross,
+                  "refund_amount":refund_amount,
+                  "net_investment":net_investment,
+                  "prize_return":prize_return,
+                  "profit":profit,
+                  "source":"RESEARCH_LEDGER60",
+              }
+              normalized.append((race,gross,total_return,profit,bool(refund_boats)))
+          counts=feed.get("counts")
+          if isinstance(counts,dict):
+              counts["practical_hits"]=sum(r[0].get("practical_hit") is True for r in normalized)
+          research_db=feed.get("research_db")
+          if isinstance(research_db,dict) and research_db.get("available") is True:
+              research_db["practical_hits"]=sum(r[0].get("practical_hit") is True for r in normalized)
+              research_db["practical_investment"]=sum(r[1] for r in normalized)
+              research_db["practical_return"]=sum(r[2] for r in normalized)
+              research_db["practical_profit"]=sum(r[3] for r in normalized)
+              research_db["refund_races"]=sum(r[4] for r in normalized)
+              research_db["rescue_hits"]=sum(
+                  r[0].get("validation_hit") is True
+                  and r[0].get("practical_hit") is not True
+                  for r in normalized
+              )
+          feed_path.write_text(
+              json.dumps(feed,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n",
+              encoding="utf-8",
+          )
+          print("G11_NIGHT_TRANSPORT_FINANCE_NORMALIZED",len(normalized))
+          PY
+          fi
+
           if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
             python3 - "${FEED}" <<'PY'
           import collections, json, sys
