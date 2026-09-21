@@ -922,11 +922,11 @@ jobs:
           PY
           fi
 
-          # Preserve the verified top-level original-display NIGHT aggregate,
-          # which powers the 朝A / 直前P / 展示B-G comparison card.  Keep the
-          # race-level shadow in the compact canonical placeholder at NIGHT so
-          # the public payload stays below the Site sync size ceiling. Full
-          # capture evidence remains immutable in encrypted state.
+          # Preserve verified original-display NIGHT research emitted by the
+          # private relay.  Do not replace settled CAPTURED_RESEARCH_ONLY /
+          # daily_aggregate evidence with NOT_YET_ISSUED placeholders.
+          # Race-level night_execution remains aggregate-only to stay under the
+          # Site sync payload ceiling.
           if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
             python3 - "${FEED}" <<'PY'
           import json
@@ -946,34 +946,32 @@ jobs:
               raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_RESEARCH_SCHEMA")
           if research.get("boaters_used") is not False or research.get("production_mutated") is not False:
               raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_RESEARCH_SAFETY")
-
-          placeholder = {
-              "status": "NOT_YET_ISSUED",
-              "source": "BOAT_RACE_OFFICIAL_BOATCAST",
-              "captured_at_jst": None,
-              "top_display_boat": None,
-              "rising_boats": [],
-              "falling_boats": [],
-              "boats": [],
-              "last_minute_inputs": None,
-              "profile_projections": None,
-              "night_execution": None,
-              "production_mutated": False,
+          captured = 0
+          settled = 0
+          expected = {
+              "status","source","captured_at_jst","top_display_boat",
+              "rising_boats","falling_boats","boats","last_minute_inputs",
+              "profile_projections","night_execution","production_mutated",
           }
           for race in feed.get("races", []):
-              race["original_display_shadow"] = dict(placeholder)
+              shadow = race.get("original_display_shadow")
+              if not isinstance(shadow, dict):
+                  raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_SHADOW_MISSING")
+              if set(shadow) != expected or shadow.get("production_mutated") is not False:
+                  raise SystemExit("G11_NIGHT_ORIGINAL_DISPLAY_SHADOW_SCHEMA")
+              captured += shadow.get("status") == "CAPTURED_RESEARCH_ONLY"
+              settled += isinstance(shadow.get("night_execution"), dict)
 
-          print("G11_NIGHT_ORIGINAL_DISPLAY_TRANSPORT=AGGREGATE_ONLY")
+          print("G11_NIGHT_ORIGINAL_DISPLAY_TRANSPORT=PRESERVED")
           print("G11_NIGHT_ORIGINAL_DISPLAY_SUMMARY="+json.dumps({
               "available":research.get("available"),
               "status":research.get("status"),
               "captures":research.get("captures"),
               "night_settlements":research.get("night_settlements"),
               "daily_aggregate_present":research.get("daily_aggregate") is not None,
+              "captured_races":captured,
+              "settled_races":settled,
           },ensure_ascii=False,sort_keys=True))
-          with open(path, "w", encoding="utf-8") as handle:
-              json.dump(feed, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-              handle.write("\n")
           PY
           fi
 
