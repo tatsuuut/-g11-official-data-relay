@@ -536,6 +536,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Checkout private authority
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: private
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout pinned official-source history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: BoatraceCSV/boatracecsv.github.io
+          ref: fea7ba7d5c09ff2019adb0461bb91081fe57144f
+          path: public-data
+          persist-credentials: false
+          fetch-depth: 0
+
       - name: Restore latest encrypted state
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -631,4 +650,29 @@ jobs:
               "PRE_RACE_WILD_HEAD_REGISTRY",
               root/"g11/wild-pack-models/pre_race/WILD_HEAD/registry-entry.json"
           )
+          PY
+
+      - name: Audit PRE_RACE target distribution
+        working-directory: private
+        env:
+          PYTHONPATH: .
+          PUBLIC: ${{ github.workspace }}/public-data
+          OUT: ${{ runner.temp }}/wild-head-audit
+        run: |
+          set -euo pipefail
+          mkdir -p "${OUT}"
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 build-dataset \
+            --public-repo "${PUBLIC}" \
+            --dataset-output "${OUT}/dataset.json" \
+            --audit-output "${OUT}/audit.json"
+          python3 - "${OUT}/dataset.json" <<'PY'
+          import collections,json,pathlib,sys
+          d=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          by={r["RACE_ID"]:r for r in d["RECORDS"]}
+          for split in ("TRAIN","VALIDATION","HISTORICAL_HOLDOUT"):
+              ids=d["SPLIT_RACE_IDS"].get(split,[])
+              labels=[int(by[r]["LABELS"]["WILD_HEAD"]) for r in ids]
+              c=collections.Counter(labels)
+              print(split+"_HEAD_LABEL_COUNTS",json.dumps(dict(sorted(c.items())),sort_keys=True))
+              print(split+"_HEAD_LABEL_PERCENT",json.dumps({str(k):round(v/len(labels)*100,1) for k,v in sorted(c.items())},sort_keys=True))
           PY
