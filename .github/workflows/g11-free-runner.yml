@@ -667,6 +667,34 @@ jobs:
                     else .
                     end
                 )
+              # Keep the top-level race projection and the immutable
+              # PREDEADLINE object byte-for-byte consistent. The Site validates
+              # these duplicated public fields as one accepted live snapshot.
+              # A newly completed PREDEADLINE may be added, but once present its
+              # values are the authority for the duplicated race-level fields.
+              | .races |= map(
+                  if ((.predeadline | type) == "object")
+                    then .top_boat = .predeadline.top_boat
+                      | .second_boat = .predeadline.second_boat
+                      | .axis = .predeadline.axis
+                      | .quality = .predeadline.quality
+                      | .turbulence = .predeadline.turbulence
+                      | .practical_bets = .predeadline.practical_bets
+                      | .production_points = .predeadline.production_points
+                      | .prediction = .predeadline.prediction
+                      | .caution = .predeadline.caution
+                      | .odds_merit = .predeadline.odds_merit
+                      | .legacy_odds_merit = (.predeadline.legacy_odds_merit // .legacy_odds_merit)
+                      | .value_alert = (.predeadline.value_alert // .value_alert)
+                      | .value_alert_type = (.predeadline.value_alert_type // .value_alert_type)
+                      | .production_mean_ev = (.predeadline.production_mean_ev // .production_mean_ev)
+                      | .best_ev_bet = .predeadline.best_ev_bet
+                      | .best_ev = .predeadline.best_ev
+                      | .value_bets = .predeadline.value_bets
+                      | .odds_captured_at_jst = .predeadline.odds_captured_at_jst
+                    else .
+                    end
+                )
               # TRUE AI / 野生成長AI HEAD morning predictions are immutable
               # once accepted by the app. Later predeadline reruns may attach
               # PRE_RACE/WILD/P3 data, but must keep the exact accepted morning
