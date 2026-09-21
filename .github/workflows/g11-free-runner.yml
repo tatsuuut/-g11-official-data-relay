@@ -770,6 +770,14 @@ jobs:
           print("G11_NEW_PREDEADLINE_OBJECTS=" + json.dumps(
               new_pre[:5], ensure_ascii=False, sort_keys=True
           ))
+          stored_pre = [
+              {"key": race.get("key"), "predeadline": race.get("predeadline")}
+              for race in stored.get("races", [])
+              if isinstance(race.get("predeadline"), dict)
+          ]
+          print("G11_STORED_PREDEADLINE_SAMPLE=" + json.dumps(
+              stored_pre[:5], ensure_ascii=False, sort_keys=True
+          ))
           if incoming.get("races"):
               print("G11_INCOMING_RACE_FIELDS=" + json.dumps(
                   sorted(incoming["races"][0]), ensure_ascii=False
