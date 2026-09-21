@@ -923,6 +923,41 @@ jobs:
             mv .relay-output/feed-transport.json "${FEED}"
           fi
 
+          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+            python3 - "${FEED}" <<'PY'
+          import collections, json, sys
+          feed=json.load(open(sys.argv[1],encoding="utf-8"))
+          statuses=collections.Counter(
+              (r.get("research_finance") or {}).get("status")
+              for r in feed.get("races",[])
+          )
+          bad_eligible=[]
+          bad_established=[]
+          for r in feed.get("races",[]):
+              rf=(r.get("research_finance") or {})
+              if r.get("result_trifecta") is not None and r.get("research_eligible") is True and rf.get("status")!="VERIFIED":
+                  bad_eligible.append({
+                      "key":r.get("key"),
+                      "result":r.get("result_trifecta"),
+                      "formal_status":r.get("formal_status"),
+                      "research_eligible":r.get("research_eligible"),
+                      "research_finance":rf,
+                  })
+              if (r.get("result_meta") or {}).get("result_status")=="ESTABLISHED" and rf.get("status")!="VERIFIED":
+                  bad_established.append({
+                      "key":r.get("key"),
+                      "result":r.get("result_trifecta"),
+                      "formal_status":r.get("formal_status"),
+                      "research_eligible":r.get("research_eligible"),
+                      "research_finance":rf,
+                  })
+          print("G11_NIGHT_FINANCE_STATUS_COUNTS="+json.dumps(dict(statuses),ensure_ascii=False,sort_keys=True))
+          print("G11_NIGHT_FINANCE_BAD_ELIGIBLE="+json.dumps(bad_eligible[:30],ensure_ascii=False,sort_keys=True))
+          print("G11_NIGHT_FINANCE_BAD_ESTABLISHED="+json.dumps(bad_established[:30],ensure_ascii=False,sort_keys=True))
+          print("G11_NIGHT_COUNTS="+json.dumps(feed.get("counts"),ensure_ascii=False,sort_keys=True))
+          PY
+          fi
+
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
