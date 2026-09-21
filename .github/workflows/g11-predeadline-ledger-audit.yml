@@ -58,11 +58,14 @@ jobs:
                       "outcome":pl.get("OUTCOME"),
                       "retry_at":pl.get("RETRY_AT_JST"),
                       "pause":pl.get("PAUSE_SECONDS"),
+                      "reason":pl.get("REJECTION_REASON"),
                   })
           from collections import Counter
           print("OUTCOME_COUNTS",json.dumps(Counter(x["outcome"] for x in outcomes),sort_keys=True))
           print("BEFOREINFO_OUTCOMES",json.dumps(Counter(x["outcome"] for x in outcomes if str(x["source"]).startswith("beforeinfo-")),sort_keys=True))
           print("ODDS_OUTCOMES",json.dumps(Counter(x["outcome"] for x in outcomes if str(x["source"]).startswith("odds3t-")),sort_keys=True))
           bad=[x for x in outcomes if x["outcome"]!="HTTP_200"]
+          from collections import Counter
+          print("BAD_REASON_COUNTS",json.dumps(Counter((x["source"].split("-")[0] if x["source"] else "none", x["reason"]) for x in bad),ensure_ascii=False,sort_keys=True))
           print("BAD",json.dumps(bad,ensure_ascii=False))
           PY
