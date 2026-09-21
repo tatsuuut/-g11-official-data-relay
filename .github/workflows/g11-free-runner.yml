@@ -1095,7 +1095,6 @@ jobs:
               jq -c '
                 del(.wild_pack)
                 | del(.capabilities.wild_pack)
-                | del(.canonical_authorities.wild_pack)
                 | .races |= map(del(.wild_pack))
               ' "${FEED}" > .relay-output/feed-site-compat.json
               mv .relay-output/feed-site-compat.json "${FEED}"
@@ -1210,7 +1209,7 @@ jobs:
             and (.canonical_authorities.growth_p3 | type == "object")
             and (
               if $wild_compat == "true"
-              then (.canonical_authorities.wild_pack | type) != "object"
+              then (.canonical_authorities.wild_pack | type) == "object"
                 and (.capabilities.wild_pack // null) == null
                 and (.wild_pack // null) == null
               else (.canonical_authorities.wild_pack | type == "object")
