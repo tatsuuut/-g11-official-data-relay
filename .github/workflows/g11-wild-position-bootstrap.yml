@@ -533,6 +533,7 @@ jobs:
 
 
 
+  # PRE_RACE V2 rerun binds the latest private authority.
   wild-head-repair:
     if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[wild-head-repair]')
     runs-on: ubuntu-24.04
