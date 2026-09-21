@@ -35,7 +35,7 @@ jobs:
         if: github.event_name == 'push' && contains(github.event.head_commit.message, '[finance-schema-audit]')
         run: |
           set -euo pipefail
-          for day in 2026-09-20 2026-09-21; do
+          for day in 2026-09-17 2026-09-18 2026-09-19 2026-09-20 2026-09-21; do
             file="$(mktemp)"
             curl --fail-with-body --silent --show-error --location \
               "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=${day}" \
