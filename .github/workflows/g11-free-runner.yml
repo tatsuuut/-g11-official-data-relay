@@ -695,6 +695,19 @@ jobs:
                     else .
                     end
                 )
+              # The Site freezes race-level morning schema/fields after the
+              # first accepted feed.  Notification-research metadata belongs
+              # to the verified PREDEADLINE object, not the immutable top-level
+              # morning projection. Strip only these newly-added transport
+              # helper fields from the race root before sync.
+              | .races |= map(
+                  del(
+                    .legacy_odds_merit,
+                    .value_alert,
+                    .value_alert_type,
+                    .production_mean_ev
+                  )
+                )
               # TRUE AI / 野生成長AI HEAD morning predictions are immutable
               # once accepted by the app. Later predeadline reruns may attach
               # PRE_RACE/WILD/P3 data, but must keep the exact accepted morning
