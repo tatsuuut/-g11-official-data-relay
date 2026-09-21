@@ -44,9 +44,22 @@ jobs:
             jq -c '{
               stage:.stage,
               counts:.counts,
+              top_keys:(keys | sort),
+              research:.research,
+              research_db:.research_db,
+              p3_verification:(.p3_verification // null),
+              research_pipeline:(.research_pipeline // null),
+              rank_upset_research:(.RANK_UPSET_RESEARCH // .rank_upset_research // null),
+              shadow_summary:(.original_display_shadow // null),
+              race_shadow_counts:{
+                with_shadow:([.races[] | select((.original_display_shadow | type)=="object")] | length),
+                with_result:([.races[] | select(.result_trifecta != null)] | length),
+                with_research_decision:([.races[] | select(.research_decision != null)] | length),
+                with_miss_classification:([.races[] | select(.miss_classification != null)] | length)
+              },
               finance_statuses:([.races[].research_finance.status] | group_by(.) | map({status:.[0],count:length})),
               finance_sample:(.races | map(select(.research_finance.status=="VERIFIED")) | .[0].research_finance),
-              result_sample:(.races | map(select(.result_trifecta != null)) | .[0] | {key,result_trifecta,payout,research_eligible,research_finance,result_meta})
+              result_sample:(.races | map(select(.result_trifecta != null)) | .[0] | {key,result_trifecta,payout,research_eligible,research_finance,result_meta,original_display_shadow,research_decision,miss_classification})
             }' "${file}"
           done
 
