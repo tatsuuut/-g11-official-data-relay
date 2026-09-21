@@ -773,6 +773,12 @@ jobs:
             jq -c --slurpfile stored .relay-output/stored-feed.json '
               ($stored[0].races | map({key: .key, value: .}) | from_entries) as $old
               | .abeken = $stored[0].abeken
+              | .capabilities = $stored[0].capabilities
+              | .canonical_authorities = $stored[0].canonical_authorities
+              | if ($stored[0] | has("wild_pack"))
+                then .wild_pack = $stored[0].wild_pack
+                else del(.wild_pack)
+                end
               | .races |= map(
                   . as $incoming
                   | ($old[.key] // null) as $prior
@@ -782,14 +788,13 @@ jobs:
                     then del(.abeken_shadow)
                     else .
                     end
+                  | if (($prior | type) == "object") and ($prior | has("wild_pack"))
+                    then .wild_pack = $prior.wild_pack
+                    elif (($prior | type) == "object")
+                    then del(.wild_pack)
+                    else .
+                    end
                 )
-              | if ($stored[0] | has("wild_pack"))
-                then .
-                else del(.wild_pack)
-                  | .races |= map(del(.wild_pack))
-                  | .capabilities = $stored[0].capabilities
-                  | .canonical_authorities = $stored[0].canonical_authorities
-                end
             ' "${FEED}" > .relay-output/feed-night-immutable.json
             mv .relay-output/feed-night-immutable.json "${FEED}"
           fi
