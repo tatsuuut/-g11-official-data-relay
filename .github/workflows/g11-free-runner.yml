@@ -287,7 +287,11 @@ jobs:
           fi
           mkdir -p .relay-state/store/g11/wild-pack-oos
           if [ -d .g11-model/g11/wild-pack-oos ]; then
-            cp -a .g11-model/g11/wild-pack-oos/. \
+            # Encrypted state is the live append-only authority.  Runtime
+            # branch OOS assets are a seed/fallback only and must never
+            # overwrite a newer historical bootstrap or same-day packets.
+            rsync -a --ignore-existing \
+              .g11-model/g11/wild-pack-oos/ \
               .relay-state/store/g11/wild-pack-oos/
           fi
           day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
