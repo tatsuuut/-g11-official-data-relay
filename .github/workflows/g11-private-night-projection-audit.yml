@@ -1,0 +1,34 @@
+name: G11 private night projection audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/g11-private-night-projection-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout private runtime
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: private
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Run night projection tests
+        working-directory: private
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python3 -m py_compile g11/canonical/official_pipeline.py
+          python3 -m unittest             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_rank_upset_research_detects_lower_p3_rank_beating_higher             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_rank_upset_research_summary_groups_wave_and_venue             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_night_sg_is_audit_retained_but_research_excluded             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_night_third_place_dead_heat_uses_all_winning_settlements_once             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_night_valid_partial_is_promoted_without_counting_pending_rows             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_research_ledger_row_sha_is_xlsx_roundtrip_stable
