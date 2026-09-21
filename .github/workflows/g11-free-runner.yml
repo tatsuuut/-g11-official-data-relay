@@ -632,12 +632,25 @@ jobs:
                       | .p3_status = $old.p3_status
                     else .
                     end
-                  | if (.p3_logic_id == "CURRENT_GROWTH_P3")
-                    then .
-                    elif (($old | type) == "object")
-                       and (($old.odds_captured_at_jst | type) == "string")
+                  # Once the app has accepted a race's PREDEADLINE
+                  # snapshot, keep that exact live object immutable on every
+                  # later relay pass. Only races that still have no stored
+                  # predeadline object may receive a newly completed live
+                  # snapshot. This prevents repeated CURRENT recomputation or
+                  # later transport enrichment from tripping
+                  # FEED_PREDEADLINE_FIELDS.
+                  | if (($old | type) == "object")
                        and (($old.predeadline | type) == "object")
-                    then .odds_merit = $old.odds_merit
+                    then .top_boat = $old.top_boat
+                      | .second_boat = $old.second_boat
+                      | .axis = $old.axis
+                      | .quality = $old.quality
+                      | .turbulence = $old.turbulence
+                      | .practical_bets = $old.practical_bets
+                      | .production_points = $old.production_points
+                      | .prediction = $old.prediction
+                      | .caution = $old.caution
+                      | .odds_merit = $old.odds_merit
                       | .best_ev_bet = $old.best_ev_bet
                       | .best_ev = $old.best_ev
                       | .value_bets = $old.value_bets
