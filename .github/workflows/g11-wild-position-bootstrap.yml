@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   train-freeze-and-encrypt:
-    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[wild4-fast]'))
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || (!contains(github.event.head_commit.message, '[wild4-fast]') && !contains(github.event.head_commit.message, '[wild-head-repair]')))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -531,3 +531,181 @@ jobs:
 
 
 
+
+
+  wild-head-repair:
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[wild-head-repair]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: g11-free-official-data-runner
+      cancel-in-progress: false
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      TZ: Asia/Tokyo
+      STATE_DATE: "2026-09-21"
+    steps:
+      - name: Checkout private authority
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: private
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout pinned official-source history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: BoatraceCSV/boatracecsv.github.io
+          ref: fea7ba7d5c09ff2019adb0461bb91081fe57144f
+          path: public-data
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Restore latest encrypted runtime state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ env.STATE_DATE }}-${{ github.run_id }}-wild-head-repair
+          restore-keys: |
+            g11-state-v2-${{ env.STATE_DATE }}-
+            g11-state-v2-
+
+      - name: Decrypt runtime state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s .relay-cache/state.tgz.gpg
+          rm -rf .relay-state
+          mkdir -p .relay-state
+          archive="${RUNNER_TEMP}/state.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3             --decrypt --output "${archive}" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          tar -xzf "${archive}" -C .relay-state
+
+      - name: Install pinned backend
+        run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
+
+      - name: Run focused PRE_RACE tests
+        working-directory: private
+        run: |
+          set -euo pipefail
+          python3 -m unittest             g11.wild_pack.v1.test_pre_race_position_v1             g11.wild_pack.v1.test_runtime_orchestrator_v1
+
+      - name: Build rich PRE_RACE V2 dataset
+        working-directory: private
+        env:
+          PYTHONPATH: .
+          OUT: ${{ runner.temp }}/wild-head-repair
+          PUBLIC: ${{ github.workspace }}/public-data
+        run: |
+          set -euo pipefail
+          mkdir -p "${OUT}"
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 build-dataset             --public-repo "${PUBLIC}"             --dataset-output "${OUT}/dataset.json"             --audit-output "${OUT}/audit.json"
+          jq -e '
+            .STATUS == "PASS_INITIAL_10000_AVAILABLE"
+            and .PRE_RACE_ELIGIBLE_RACES >= 10000
+            and .COUNTER_RESET == false
+            and .P3_AS_WILD_FEATURE == false
+            and .ABEKEN_AS_WILD_FEATURE == false
+            and .FEATURE_SCHEMA_VERSION == "WILD_PRE_RACE_OFFICIAL_BEFOREINFO_PLUS_MORNING_STATIC_V2"
+          ' "${OUT}/audit.json" >/dev/null
+
+      - name: Train candidate PRE_RACE V2 pack
+        working-directory: private
+        env:
+          PYTHONPATH: .
+          OUT: ${{ runner.temp }}/wild-head-repair
+        run: |
+          set -euo pipefail
+          candidate="${OUT}/candidate"
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 train-pack             --dataset "${OUT}/dataset.json"             --model-root "${candidate}"             --code-commit "$(git rev-parse HEAD)"
+          python3 -m g11.wild_pack.v1.pre_race_position_v1 verify-current             --model-root "${candidate}"
+          python3 - "${candidate}" <<'PY'
+          import json,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          h=json.loads((root/"WILD_HEAD/registry-entry.json").read_text())
+          gate=h.get("COURSE1_BASELINE_GATE")
+          assert gate and gate["PASS"] is True
+          v=gate["VALIDATION"]; o=gate["HISTORICAL_HOLDOUT"]
+          assert v["NET_UPLIFT_HITS"] > 0
+          assert o["NET_UPLIFT_HITS"] > 0
+          assert o["MODEL_COURSE1_SELECTION_RATE"] < 1.0
+          print("WILD_HEAD_REPAIR_METRICS="+json.dumps({
+              "MODEL_VERSION":h["MODEL_VERSION"],
+              "VALIDATION_EVALUATION":h["VALIDATION_EVALUATION"],
+              "HOLDOUT_EVALUATION":h["HOLDOUT_EVALUATION"],
+              "COURSE1_BASELINE_GATE":gate,
+              "ELIGIBLE_RACES":h["ELIGIBLE_RACES"],
+          },ensure_ascii=False,sort_keys=True))
+          PY
+
+      - name: Install candidate into encrypted CURRENT state
+        env:
+          OUT: ${{ runner.temp }}/wild-head-repair
+          STATE: ${{ github.workspace }}/.relay-state/store
+        run: |
+          set -euo pipefail
+          target="${STATE}/g11/wild-pack-models/pre_race"
+          candidate="${OUT}/candidate"
+          test -s "${candidate}/manifest.json"
+          rm -rf "${target}.previous"
+          if [ -d "${target}" ]; then mv "${target}" "${target}.previous"; fi
+          mv "${candidate}" "${target}"
+          python3 - "${target}" <<'PY'
+          import json,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          m=json.loads((root/"manifest.json").read_text())
+          assert m["STATUS"]=="CURRENT"
+          assert m["MORNING_MODEL_REUSED_AS_PRE_RACE_MODEL"] is False
+          h=json.loads((root/"WILD_HEAD/registry-entry.json").read_text())
+          assert h["COURSE1_BASELINE_GATE"]["PASS"] is True
+          assert "PRE_RACE_FACTUAL_CATBOOST_V2" in h["MODEL_VERSION"]
+          print("WILD_PRE_RACE_V2_INSTALL_PASS",h["MODEL_VERSION"])
+          PY
+          rm -rf "${target}.previous"
+
+      - name: Verify public WILD projection sees V2 CURRENT
+        working-directory: private
+        env:
+          PYTHONPATH: .
+          STATE: ${{ github.workspace }}/.relay-state/store
+        run: |
+          python3 - "${STATE}" <<'PY'
+          import pathlib,sys
+          from g11.canonical import public_app_feed
+          root=pathlib.Path(sys.argv[1])
+          projection,_=public_app_feed._wild_pack_public_projection(root,"2026-09-21",None)
+          assert projection["pre_race"]["STATUS"]=="CURRENT"
+          versions={
+              k:v["MODEL_VERSION"]
+              for k,v in projection["pre_race"]["MODELS"].items()
+          }
+          assert all("PRE_RACE_FACTUAL_CATBOOST_V2" in value for value in versions.values())
+          assert projection["wild4"]["formal_eligible"] >= 9119
+          print("WILD_PRE_RACE_V2_PUBLIC_PROJECTION_PASS",versions,projection["wild4"]["formal_eligible"])
+          PY
+
+      - name: Encrypt repaired runtime state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p .relay-cache
+          temporary=.relay-cache/state.tgz.gpg.tmp
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . |             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3               --symmetric --cipher-algo AES256 --output "${temporary}"
+          exec 3<&-
+          mv "${temporary}" .relay-cache/state.tgz.gpg
+          test -s .relay-cache/state.tgz.gpg
+
+      - name: Save repaired encrypted CURRENT
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ env.STATE_DATE }}-${{ github.run_id }}-wild-head-v2
