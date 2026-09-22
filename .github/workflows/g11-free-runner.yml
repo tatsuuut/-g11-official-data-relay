@@ -1069,6 +1069,27 @@ jobs:
             echo "G11_ACCEPTED_0921_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${previous_wild}")"
           fi
 
+          # The deployed Site still rejects the new top-level WILD capability
+          # envelope. Race-level WILD CURRENT is already accepted and required by
+          # the UI, so adapt only the transport envelope before the first POST.
+          # This also keeps the request below the Site body-size limit as more
+          # PRE_RACE CURRENT rows accumulate through the day.
+          if jq -e '
+            (.wild_pack | type) == "object"
+            and .capabilities.wild_pack == "G11_WILD_PACK_PUBLIC_CURRENT_V1"
+            and (.canonical_authorities.wild_pack | type) == "object"
+          ' "${FEED}" >/dev/null; then
+            echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=BEGIN'
+            jq -c '
+              del(.wild_pack)
+              | del(.capabilities.wild_pack)
+            ' "${FEED}" > .relay-output/feed-site-compat-preflight.json
+            mv .relay-output/feed-site-compat-preflight.json "${FEED}"
+            echo 'wild_compat=true' >> "${GITHUB_OUTPUT}"
+            echo "G11_WILD_SITE_COMPAT_PREFLIGHT_BYTES=$(wc -c < "${FEED}")"
+            echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
+          fi
+
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
