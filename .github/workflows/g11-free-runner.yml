@@ -368,6 +368,43 @@ jobs:
           PY
           fi
 
+      - name: Capture due PREDEADLINE official inputs before regression checks
+        if: steps.due.outputs.phase == 'predeadline'
+        working-directory: .g11-private
+        env:
+          STATE_STORE: ${{ github.workspace }}/.relay-state/store
+        run: |
+          set -euo pipefail
+          python3 - "${STATE_STORE}" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
+
+          store = pathlib.Path(sys.argv[1])
+          result = CanonicalRunner(OfficialArtifactStore(store)).run_due_predeadline(
+              max_requests=48
+          )
+          print(
+              "G11_EARLY_PREDEADLINE_CAPTURE="
+              + json.dumps(
+                  {
+                      "status": result.get("STATUS"),
+                      "acquired_count": len(result.get("ACQUIRED", [])),
+                      "missed_count": len(result.get("MISSED", [])),
+                      "unavailable_count": len(result.get("UNAVAILABLE", [])),
+                      "rejected_count": len(result.get("REJECTED", [])),
+                      "retryable_count": len(result.get("RETRYABLE_FAILURES", [])),
+                      "task_deferred_count": len(result.get("TASK_DEFERRED", [])),
+                      "deferred": result.get("DEFERRED"),
+                  },
+                  ensure_ascii=False,
+                  sort_keys=True,
+              )
+          )
+          PY
+
       - name: Read back verified WILD BET bootstrap evidence
         working-directory: .g11-private
         env:
@@ -437,6 +474,7 @@ jobs:
           PY
 
       - name: Verify relay schedule and authority contracts
+        if: github.event_name != 'schedule'
         working-directory: .g11-private
         env:
           G11_PRIVATE_REPO_TOKEN: ""
@@ -462,6 +500,9 @@ jobs:
               if calibration["CALIBRATION_SHA256"] != registry["CALIBRATION_SHA256"]:
                   raise SystemExit(f"{wild_id}_CALIBRATION_HASH")
           PY
+          # Scheduled PREDEADLINE is time-critical. Full regression checks run
+          # on push/manual invocations, while schedule invocations acquire first
+          # and avoid queueing behind a redundant test suite.
           # Run each module in a fresh interpreter so test-local module state
           # cannot leak into later runtime contract checks on long-lived schedules.
           # The Growth P3 suite proves confidence is read-only, pending ranks
