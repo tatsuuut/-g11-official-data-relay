@@ -1095,7 +1095,6 @@ jobs:
               jq -c '
                 del(.wild_pack)
                 | del(.capabilities.wild_pack)
-                | .races |= map(del(.wild_pack))
               ' "${FEED}" > .relay-output/feed-site-compat.json
               mv .relay-output/feed-site-compat.json "${FEED}"
               feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
