@@ -1123,6 +1123,48 @@ jobs:
             echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
           fi
 
+          # NIGHT transport compaction: keep the verified canonical evidence
+          # in encrypted/artifact storage, but omit fields the deployed UI does
+          # not read. This is a public-transport reduction only and does not
+          # mutate morning locks, research ledgers, result settlement, or model
+          # outputs.
+          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+            jq -c '
+              .races |= map(
+                if ((.original_display_shadow.boats | type) == "array")
+                then .original_display_shadow.boats |= map(
+                  del(.metric_ranks,.metric_values,.course_changed,.front_entry,.weight)
+                )
+                else .
+                end
+                | if ((.original_display_shadow.last_minute_inputs | type) == "object")
+                  then .original_display_shadow.last_minute_inputs |= del(.odds_role)
+                  else .
+                  end
+                | if ((.original_display_shadow.profile_projections | type) == "object")
+                  then .original_display_shadow.profile_projections |= with_entries(
+                    .value |= {practical_bets}
+                  )
+                  else .
+                  end
+                | if ((.wild_pack.morning | type) == "object")
+                  then .wild_pack.morning |= del(.full_path_counts,.model_versions)
+                  else .
+                  end
+                | if ((.wild_pack.pre_race | type) == "object")
+                  then .wild_pack.pre_race |= del(.model_versions,.current_ids,.full_path_counts)
+                  else .
+                  end
+                | if ((.wild_pack | type) == "object")
+                  then .wild_pack |= del(.wild4)
+                  else .
+                  end
+              )
+            ' "${FEED}" > .relay-output/feed-night-transport-compact.json
+            mv .relay-output/feed-night-transport-compact.json "${FEED}"
+            printf 'G11_NIGHT_TRANSPORT_COMPACT_BYTES=%s\n' "$(wc -c < "${FEED}")"
+          fi
+
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
