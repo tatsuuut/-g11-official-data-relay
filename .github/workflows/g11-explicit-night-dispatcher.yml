@@ -176,7 +176,7 @@ jobs:
           echo "ACCEPTED_WILD_TOP=$(jq -c '.wild_pack' "${accepted}")"
           echo "ACCEPTED_WILD_RACE_SAMPLE=$(jq -c '[.races[]|select((.wild_pack|type)=="object")][0].wild_pack' "${accepted}")"
 
-          for day in 2026-09-19 2026-09-20 2026-09-21; do
+          for day in 2026-09-19 2026-09-20 2026-09-21 2026-09-22; do
             cap="$(mktemp)"
             if curl --fail-with-body --silent --show-error --location \
               "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=${day}" \
@@ -186,7 +186,11 @@ jobs:
                 capabilities,
                 canonical_keys:(.canonical_authorities|keys|sort),
                 wild_pack_present:(.wild_pack|type=="object"),
-                wild_authority_present:(.canonical_authorities.wild_pack|type=="object")
+                wild_authority_present:(.canonical_authorities.wild_pack|type=="object"),
+                race_wild_count:([.races[]|select((.wild_pack|type)=="object")]|length),
+                race_wild_morning_count:([.races[]|select((.wild_pack.morning|type)=="object")]|length),
+                race_wild_pre_count:([.races[]|select((.wild_pack.pre_race|type)=="object")]|length),
+                race_wild_sample:([.races[]|select((.wild_pack|type)=="object")|{key,wild_pack}][0] // null)
               }' "${cap}"
             fi
           done
