@@ -169,6 +169,13 @@ jobs:
             unresolved:([.races[]|select(((.result_meta.result_status//"")!="ESTABLISHED") and ((.result_meta.result_status//"")!="TRIFECTA_NOT_ESTABLISHED"))]|length),
             shadow_night_execution:([.races[]|select((.original_display_shadow.night_execution//null)!=null)]|length)
           }' "${current}"
+          accepted="$(mktemp)"
+          curl --fail-with-body --silent --show-error --location \
+            "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-21" \
+            -o "${accepted}"
+          echo "ACCEPTED_WILD_TOP=$(jq -c '.wild_pack' "${accepted}")"
+          echo "ACCEPTED_WILD_RACE_SAMPLE=$(jq -c '[.races[]|select((.wild_pack|type)=="object")][0].wild_pack' "${accepted}")"
+
           for day in 2026-09-19 2026-09-20 2026-09-21; do
             cap="$(mktemp)"
             if curl --fail-with-body --silent --show-error --location \
