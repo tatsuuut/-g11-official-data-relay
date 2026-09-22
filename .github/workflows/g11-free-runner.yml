@@ -1275,26 +1275,6 @@ jobs:
             and .capabilities.canonical_authorities
           ' .relay-output/readback.json >/dev/null
 
-      - name: Dispatch 2026-09-23 MORNING after verified 2026-09-22 NIGHT
-        if: >-
-          success() &&
-          steps.due.outputs.phase == 'night' &&
-          steps.due.outputs.operational_date == '2026-09-22' &&
-          steps.publish.outputs.immutable_night != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          payload='{"ref":"main","inputs":{"phase":"morning","operational_date":"2026-09-23"}}'
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
-            -d "${payload}"
-          echo "G11_POST_NIGHT_MORNING_DISPATCH=2026-09-23"
-
       - name: Verify existing immutable night readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night == 'true'
         env:
