@@ -1070,7 +1070,7 @@ jobs:
           fi
 
           if jq -e '(.canonical_authorities.wild_pack | type) == "object"' "${FEED}" >/dev/null; then
-            jq -c 'del(.wild_pack) | del(.capabilities.wild_pack) | .races |= map(if ((.wild_pack.pre_race | type) == "object") then .wild_pack.pre_race |= del(.current_ids) else . end)' "${FEED}" > .relay-output/feed-site-compat-preflight.json
+            jq -c 'del(.wild_pack) | del(.capabilities.wild_pack) | .races |= map(if ((.wild_pack.pre_race | type) == "object") then .wild_pack.pre_race |= del(.current_ids,.full_path_counts) else . end)' "${FEED}" > .relay-output/feed-site-compat-preflight.json
             mv .relay-output/feed-site-compat-preflight.json "${FEED}"
             echo 'wild_compat=true' >> "${GITHUB_OUTPUT}"
             echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
