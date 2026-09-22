@@ -375,6 +375,11 @@ jobs:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
         run: |
           set -euo pipefail
+          if [ ! -f "${STATE_STORE}/manifest.json" ] || \
+             [ ! -f "${STATE_STORE}/snapshots/morning/official-day-input.json" ]; then
+            echo "G11_EARLY_PREDEADLINE_CAPTURE=SKIP_MORNING_UNAVAILABLE"
+            exit 0
+          fi
           python3 - "${STATE_STORE}" <<'PY'
           import json
           import pathlib
