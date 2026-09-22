@@ -2,7 +2,7 @@ name: G11 explicit night dispatcher
 
 on:
   # This file is allowlisted by the public-surface audit. Push validates the
-  # workflow only; scheduled NIGHT dispatch starts at 22:00 JST. Repair republish enabled v15.
+  # workflow only; scheduled NIGHT dispatch starts at 22:00 JST. Repair republish enabled v16.
   push:
     branches:
       - main
