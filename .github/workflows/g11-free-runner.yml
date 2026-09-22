@@ -1091,33 +1091,7 @@ jobs:
             if [ "${http_status}" = "400" ] && \
                jq -e '.error == "FEED_WILD_PACK_CAPABILITY"' \
                  .relay-output/publish-result.json >/dev/null 2>&1; then
-              echo 'G11_WILD_SITE_COMPAT_LEGACY_ENVELOPE=BEGIN'
-              jq -c --slurpfile legacy "${previous_wild}" '
-                .wild_pack = $legacy[0].wild_pack
-                | .capabilities.wild_pack = $legacy[0].capabilities.wild_pack
-                | .canonical_authorities.wild_pack = $legacy[0].canonical_authorities.wild_pack
-              ' "${FEED}" > .relay-output/feed-site-legacy-wild.json
-              legacy_feed_sha="$(sha256sum .relay-output/feed-site-legacy-wild.json | cut -d' ' -f1)"
-              legacy_status="$(curl --silent --show-error \
-                -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
-                -H "Authorization: Bearer ${token}" \
-                -H 'Content-Type: application/json' \
-                -H "x-g11-feed-sha256: ${legacy_feed_sha}" \
-                --data-binary "@.relay-output/feed-site-legacy-wild.json" \
-                --output .relay-output/publish-result.json \
-                --write-out '%{http_code}')"
-              if [[ "${legacy_status}" =~ ^2[0-9][0-9]$ ]]; then
-                mv .relay-output/feed-site-legacy-wild.json "${FEED}"
-                feed_sha="${legacy_feed_sha}"
-                echo 'G11_WILD_SITE_COMPAT_LEGACY_ENVELOPE=PASS'
-                echo 'wild_compat=legacy_envelope' >> "${GITHUB_OUTPUT}"
-                printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
-                exit 0
-              fi
-              printf 'G11 WILD legacy-envelope retry rejected (HTTP %s):\n' "${legacy_status}" >&2
-              jq -c . .relay-output/publish-result.json >&2 || true
-
-              echo 'G11_WILD_SITE_COMPAT_STRIPPED=BEGIN'
+              echo 'G11_WILD_SITE_COMPAT_FALLBACK=BEGIN'
               jq -c '
                 del(.wild_pack)
                 | del(.capabilities.wild_pack)
@@ -1134,12 +1108,12 @@ jobs:
                 --output .relay-output/publish-result.json \
                 --write-out '%{http_code}')"
               if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
-                echo 'G11_WILD_SITE_COMPAT_STRIPPED=PASS'
-                echo 'wild_compat=stripped' >> "${GITHUB_OUTPUT}"
+                echo 'G11_WILD_SITE_COMPAT_FALLBACK=PASS'
+                echo 'wild_compat=true' >> "${GITHUB_OUTPUT}"
                 printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
                 exit 0
               fi
-              printf 'G11 WILD stripped retry rejected (HTTP %s):\n' "${http_status}" >&2
+              printf 'G11 WILD compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
               jq -c . .relay-output/publish-result.json >&2 || true
             fi
             if [ "${http_status}" = "409" ] && \
@@ -1234,16 +1208,10 @@ jobs:
             and (.canonical_authorities | type == "object")
             and (.canonical_authorities.growth_p3 | type == "object")
             and (
-              if $wild_compat == "stripped"
+              if $wild_compat == "true"
               then (.canonical_authorities.wild_pack | type) == "object"
                 and (.capabilities.wild_pack // null) == null
                 and (.wild_pack // null) == null
-                and ([.races[] | select((.wild_pack | type) == "object")] | length) == 0
-              elif $wild_compat == "legacy_envelope"
-              then (.canonical_authorities.wild_pack | type) == "object"
-                and .capabilities.wild_pack == "G11_WILD_PACK_PUBLIC_CURRENT_V1"
-                and (.wild_pack | type) == "object"
-                and ([.races[] | select((.wild_pack | type) == "object")] | length) > 0
               else (.canonical_authorities.wild_pack | type == "object")
               end
             )
