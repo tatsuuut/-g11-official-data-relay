@@ -1069,6 +1069,46 @@ jobs:
             echo "G11_ACCEPTED_0921_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${previous_wild}")"
           fi
 
+          # Starting with the next fresh operational day, a displayed ◎
+          # is valid only when it is backed by the CURRENT value-alert contract.
+          # 2026-09-22 may still contain immutable Site snapshots accepted before
+          # this contract was deployed; never let that compatibility residue
+          # become a new-day production rule.
+          jq -e --arg day "${{ steps.due.outputs.operational_date }}" '
+            if $day >= "2026-09-23" then
+              ([.races[]
+                | select((.predeadline | type) == "object")
+                | select(.predeadline.odds_merit == "◎")
+                | select(.predeadline.value_alert != true)
+               ] | length) == 0
+              and
+              ([.races[]
+                | select((.predeadline | type) == "object")
+                | select(.predeadline.value_alert == true)
+                | select(
+                    .predeadline.odds_merit != "◎"
+                    or (
+                      .predeadline.value_alert_type != "S_3BET_MEAN_EV_1_20"
+                      and .predeadline.value_alert_type != "TURBULENCE_7PLUS_7BET_MEAN_EV_1_50"
+                    )
+                  )
+               ] | length) == 0
+            else true
+            end
+          ' "${FEED}" >/dev/null || {
+            echo 'G11_VALUE_ALERT_CURRENT_BINDING=FAIL' >&2
+            jq -c '[.races[]
+              | select((.predeadline | type) == "object")
+              | select(
+                  (.predeadline.odds_merit == "◎" and .predeadline.value_alert != true)
+                  or
+                  (.predeadline.value_alert == true and .predeadline.odds_merit != "◎")
+                )
+              | {key,predeadline}]' "${FEED}" >&2 || true
+            exit 1
+          }
+          echo 'G11_VALUE_ALERT_CURRENT_BINDING=PASS'
+
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
