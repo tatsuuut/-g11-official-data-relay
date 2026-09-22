@@ -479,6 +479,7 @@ jobs:
           PY
 
       - name: Verify relay schedule and authority contracts
+        # Push/manual runs execute the full private regression gate.
         if: github.event_name != 'schedule'
         working-directory: .g11-private
         env:
