@@ -192,6 +192,11 @@ jobs:
                 race_wild_pre_count:([.races[]|select((.wild_pack.pre_race|type)=="object")]|length),
                 race_wild_sample:([.races[]|select((.wild_pack|type)=="object")|{key,wild_pack}][0] // null)
               }' "${cap}"
+              if [ "${day}" = "2026-09-22" ]; then
+                jq -c '[.races[]
+                  | select(.key=="20260922-03-01" or .key=="20260922-17-02")
+                  | {key,deadline_jst,predeadline,predeadline_exclusion_reason,odds_captured_at_jst,wild_pack}]' "${cap}"
+              fi
             fi
           done
 
