@@ -197,6 +197,25 @@ jobs:
                   | select(.key=="20260922-03-01" or .key=="20260922-17-02")
                   | {key,deadline_jst,predeadline,predeadline_exclusion_reason,odds_captured_at_jst,wild_pack}]' "${cap}"
               fi
+              if [ "${day}" = "2026-09-22" ]; then
+                echo "VALUE_ALERT_AUDIT_20260922="
+                jq -c '[.races[]
+                  | select((.predeadline|type)=="object" and .predeadline.odds_merit=="◎")
+                  | {key,venue,race,deadline_jst,
+                     root_quality:.quality,
+                     root_turbulence:.turbulence,
+                     root_odds_merit:.odds_merit,
+                     pre_quality:.predeadline.quality,
+                     pre_turbulence:.predeadline.turbulence,
+                     pre_points:.predeadline.production_points,
+                     pre_odds_merit:.predeadline.odds_merit,
+                     legacy_odds_merit:.predeadline.legacy_odds_merit,
+                     value_alert:.predeadline.value_alert,
+                     value_alert_type:.predeadline.value_alert_type,
+                     production_mean_ev:.predeadline.production_mean_ev,
+                     best_ev:.predeadline.best_ev,
+                     practical_bets:.predeadline.practical_bets}]' "${cap}"
+              fi
             fi
           done
 
