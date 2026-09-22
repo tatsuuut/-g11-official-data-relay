@@ -234,6 +234,11 @@ jobs:
           else
             operational_date="$(date +%F)"
           fi
+          # Bounded repair marker for the unresolved 2026-09-22 NIGHT
+          # publication. This never changes automatic scheduled dates.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" == *"[night-republish-20260922]"* ]]; then
+            operational_date="2026-09-22"
+          fi
 
           # Once NIGHT is already complete in the app, stop dispatching for
           # the remainder of the window. A transient readback failure does not
