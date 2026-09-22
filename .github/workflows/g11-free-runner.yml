@@ -1095,6 +1095,37 @@ jobs:
             printf 'G11 sync rejected the verified feed (HTTP %s):\n' "${http_status}" >&2
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
+            if [ "${http_status}" = "413" ] && \
+               jq -e '.error == "PAYLOAD_TOO_LARGE"' \
+                 .relay-output/publish-result.json >/dev/null 2>&1; then
+              echo 'G11_SITE_PAYLOAD_COMPACT_RETRY=BEGIN'
+              jq -c '
+                .races |= map(
+                  if ((.wild_pack.pre_race | type) == "object")
+                  then .wild_pack.pre_race |= del(.current_ids)
+                  else .
+                  end
+                )
+              ' "${FEED}" > .relay-output/feed-site-compact.json
+              mv .relay-output/feed-site-compact.json "${FEED}"
+              feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+              printf 'compact_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
+              http_status="$(curl --silent --show-error \
+                -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
+                -H "Authorization: Bearer ${token}" \
+                -H 'Content-Type: application/json' \
+                -H "x-g11-feed-sha256: ${feed_sha}" \
+                --data-binary "@${FEED}" \
+                --output .relay-output/publish-result.json \
+                --write-out '%{http_code}')"
+              if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
+                echo 'G11_SITE_PAYLOAD_COMPACT_RETRY=PASS'
+                printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+              printf 'G11 compact payload retry rejected (HTTP %s):\n' "${http_status}" >&2
+              jq -c . .relay-output/publish-result.json >&2 || true
+            fi
             if [ "${http_status}" = "400" ] && \
                jq -e '.error == "FEED_WILD_PACK_CAPABILITY"' \
                  .relay-output/publish-result.json >/dev/null 2>&1; then
