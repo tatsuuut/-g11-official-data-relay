@@ -174,6 +174,32 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     print("G11_SITE_SCHEMA_TYPE_DIFF=" + json.dumps(type_diffs, ensure_ascii=False, sort_keys=True))
     print("G11_SITE_SCHEMA_KEYSET_DIFF=" + json.dumps(keyset_diffs, ensure_ascii=False, sort_keys=True))
 
+    filled = []
+    reference_dicts = [race for race in reference_races if isinstance(race, dict)]
+    common_race_keys = set(reference_dicts[0])
+    for race in reference_dicts[1:]:
+        common_race_keys &= set(race)
+    reference_result_meta = [
+        race.get("result_meta") for race in reference_dicts
+        if isinstance(race.get("result_meta"), dict)
+    ]
+    common_result_meta_keys = set(reference_result_meta[0]) if reference_result_meta else set()
+    for meta in reference_result_meta[1:]:
+        common_result_meta_keys &= set(meta)
+    for race in incoming_races:
+        if not isinstance(race, dict):
+            continue
+        for key in sorted(common_race_keys):
+            if key not in race:
+                race[key] = None
+                filled.append(f"race.{key}")
+        meta = race.get("result_meta")
+        if isinstance(meta, dict):
+            for key in sorted(common_result_meta_keys):
+                if key not in meta:
+                    meta[key] = None
+                    filled.append(f"race.result_meta.{key}")
+
     dropped = []
     feed["races"] = [
         _prune_to_schema(race, schema, "race", dropped)
@@ -191,6 +217,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
         print("G11_SITE_INCOMING_NESTED_" + field.upper() + "=" + json.dumps(_nested_keyset_variants(incoming_races, field), ensure_ascii=False, sort_keys=True))
     print("G11_SITE_SCHEMA_PROJECT=PASS")
     print("G11_SITE_SCHEMA_DROPPED=" + json.dumps(sorted(set(dropped)), ensure_ascii=False))
+    print("G11_SITE_SCHEMA_FILLED=" + json.dumps(sorted(set(filled)), ensure_ascii=False))
     return 0
 
 def fail(message: str) -> None:
