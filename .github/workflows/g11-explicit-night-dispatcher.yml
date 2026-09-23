@@ -2,7 +2,7 @@ name: G11 explicit night dispatcher
 
 on:
   # This file is allowlisted by the public-surface audit. Push validates the
-  # workflow only; scheduled NIGHT dispatch starts at 22:00 JST. Repair republish enabled v29.
+  # workflow only; scheduled NIGHT dispatch starts at 22:00 JST. Repair republish enabled v30.
   push:
     branches:
       - main
@@ -226,13 +226,6 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" != *"[night-republish]"* ]] && [[ "${COMMIT_MESSAGE}" != *"[wild-night-settle]"* ]]; then
-            exit 0
-          fi
-          # Temporary hold requested by the user: stop only the unresolved
-          # 2026-09-22 NIGHT repair loop. Normal future NIGHT schedules remain
-          # available; this guard blocks bounded 9/22 repair pushes only.
-          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" == *"[night-republish-20260922]"* ]]; then
-            echo "G11_20260922_NIGHT_REPAIR_HOLD=TRUE"
             exit 0
           fi
           now_hour="$(date +%H)"
