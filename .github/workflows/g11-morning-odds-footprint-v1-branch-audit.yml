@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: feat/morning-odds-footprint-4bet-shadow-v1
+          ref: feat/morning-odds-footprint-push-routing-v1
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           fetch-depth: 1
