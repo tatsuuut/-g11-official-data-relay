@@ -358,7 +358,15 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                 filled.append(f"race.{key}")
         meta = race.get("result_meta")
         if isinstance(meta, dict):
-            for key in sorted(common_result_meta_keys):
+            # Result-finality fields are semantic state, not shape padding.
+            # The Site accepts them only when an official result has actually
+            # established the race.  Synthesizing null result_status/dead_heat/
+            # trifecta_settlements from yesterday's settled schema makes a
+            # live PREDEADLINE feed fail FEED_RESULT_META_STATUS.
+            finality_keys = {
+                "result_status", "dead_heat", "trifecta_settlements",
+            }
+            for key in sorted(common_result_meta_keys - finality_keys):
                 if key not in meta:
                     meta[key] = None
                     filled.append(f"race.result_meta.{key}")
