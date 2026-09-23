@@ -1,7 +1,7 @@
 name: G11 free official-data runner
 
 on:
-  # Immediately validate a runner change without waiting for GitHub's delayed cron. 9/23 type-keyset diagnosis.
+  # Immediately validate a runner change without waiting for GitHub's delayed cron. 9/23 fixed-schema publish.
   # 2026-09-20: verify WILD OOS, daily rollover, and unavailable-phase fail-closed. Transport compactness recheck. 9/23 morning schema inspection.
   push:
     branches:
