@@ -1,7 +1,7 @@
 name: G11 free official-data runner
 
 on:
-  # Immediately validate a runner change without waiting for GitHub's delayed cron. Morning recovery 2026-09-23 attempt 2.
+  # Immediately validate a runner change without waiting for GitHub's delayed cron.
   # 2026-09-20: verify WILD OOS, daily rollover, and unavailable-phase fail-closed. Transport compactness recheck.
   push:
     branches:
@@ -1111,6 +1111,7 @@ jobs:
             "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-21" \
             -o "${previous_wild}"; then
             echo "G11_ACCEPTED_0921_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${previous_wild}")"
+            echo "G11_ACCEPTED_0921_RACE_FIELDS=$(jq -c '[.races[] | keys] | add | unique' "${previous_wild}")"
           fi
 
           if jq -e '(.canonical_authorities.wild_pack | type) == "object"' "${FEED}" >/dev/null; then
@@ -1140,7 +1141,7 @@ jobs:
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
             if [ "${http_status}" = "413" ] && [ "${{ steps.due.outputs.phase }}" = "night" ]; then
-              if PYTHONPATH=".g11-private" python3 -m g11.relay.gzip_sync_retry_v1 "${FEED}" "${G11_APP_ORIGIN}" "${token}" "${feed_sha}"; then
+              if PYTHONPATH=".g11-private" python3 -m g11.relay.chunked_sync_retry_v1 "${FEED}" "${G11_APP_ORIGIN}" "${token}" "${feed_sha}"; then
                 printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
                 exit 0
               fi
@@ -1171,32 +1172,6 @@ jobs:
               fi
               printf 'G11 WILD compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
               jq -c . .relay-output/publish-result.json >&2 || true
-            fi
-            if [ "${http_status}" = "400" ] && \
-               jq -e '.error == "FEED_RACE_FIELDS"' \
-                 .relay-output/publish-result.json >/dev/null 2>&1; then
-              echo 'G11_RACE_FIELDS_SITE_COMPAT_FALLBACK=BEGIN'
-              if [ -s "${previous_wild}" ]; then
-                python3 scripts/g11_site_race_field_compat.py "${FEED}" "${previous_wild}"
-                feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
-                http_status="$(curl --silent --show-error \
-                  -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
-                  -H "Authorization: Bearer ${token}" \
-                  -H 'Content-Type: application/json' \
-                  -H "x-g11-feed-sha256: ${feed_sha}" \
-                  --data-binary "@${FEED}" \
-                  --output .relay-output/publish-result.json \
-                  --write-out '%{http_code}')"
-                if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
-                  echo 'G11_RACE_FIELDS_SITE_COMPAT_FALLBACK=PASS'
-                  printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
-                  exit 0
-                fi
-                printf 'G11 race-field compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
-                jq -c . .relay-output/publish-result.json >&2 || true
-              else
-                echo 'G11_RACE_FIELDS_SITE_COMPAT_REFERENCE_MISSING' >&2
-              fi
             fi
             if [ "${http_status}" = "409" ] && \
                [ "${{ steps.due.outputs.phase }}" = "night" ] && \
