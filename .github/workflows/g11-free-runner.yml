@@ -1112,6 +1112,10 @@ jobs:
             -o "${previous_wild}"; then
             echo "G11_ACCEPTED_0921_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${previous_wild}")"
             echo "G11_ACCEPTED_0921_RACE_FIELDS=$(jq -c '[.races[] | keys] | add | unique' "${previous_wild}")"
+            echo "G11_ACCEPTED_RACE_OBJECT_KEYS=$(jq -c '[.races[] | to_entries[] | select((.value|type) == "object") | {field:.key,keys:(.value|keys)}] | unique' "${previous_wild}")"
+            echo "G11_INCOMING_RACE_OBJECT_KEYS=$(jq -c '[.races[] | to_entries[] | select((.value|type) == "object") | {field:.key,keys:(.value|keys)}] | unique' "${FEED}")"
+            echo "G11_ACCEPTED_WILD_NESTED_KEYS=$(jq -c '[.races[].wild_pack? | select(type=="object") | {keys:keys,morning:(.morning? | if type=="object" then keys else [] end),pre_race:(.pre_race? | if type=="object" then keys else [] end),wild4:(.wild4? | if type=="object" then keys else [] end)}] | unique' "${previous_wild}")"
+            echo "G11_INCOMING_WILD_NESTED_KEYS=$(jq -c '[.races[].wild_pack? | select(type=="object") | {keys:keys,morning:(.morning? | if type=="object" then keys else [] end),pre_race:(.pre_race? | if type=="object" then keys else [] end),wild4:(.wild4? | if type=="object" then keys else [] end)}] | unique' "${FEED}")"
           fi
 
           if jq -e '(.canonical_authorities.wild_pack | type) == "object"' "${FEED}" >/dev/null; then
@@ -1119,51 +1123,6 @@ jobs:
             mv .relay-output/feed-site-compat-preflight.json "${FEED}"
             echo 'wild_compat=true' >> "${GITHUB_OUTPUT}"
             echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
-          fi
-
-          if [ -s "${previous_wild}" ]; then
-            python3 - "${FEED}" "${previous_wild}" <<'PY'
-          import json
-          import sys
-
-          incoming = json.load(open(sys.argv[1], encoding="utf-8"))
-          accepted = json.load(open(sys.argv[2], encoding="utf-8"))
-
-          def signatures(value, path, output):
-              if isinstance(value, dict):
-                  output.add((path, "object", tuple(sorted(value))))
-                  for key, child in value.items():
-                      signatures(child, f"{path}.{key}", output)
-              elif isinstance(value, list):
-                  output.add((path, "array", ()))
-                  for child in value:
-                      signatures(child, f"{path}[]", output)
-              elif value is None:
-                  output.add((path, "null", ()))
-              elif isinstance(value, bool):
-                  output.add((path, "bool", ()))
-              elif isinstance(value, int):
-                  output.add((path, "int", ()))
-              elif isinstance(value, float):
-                  output.add((path, "float", ()))
-              elif isinstance(value, str):
-                  output.add((path, "str", ()))
-              else:
-                  output.add((path, type(value).__name__, ()))
-
-          def race_signatures(feed):
-              output = set()
-              for race in feed.get("races", []):
-                  signatures(race, "$race", output)
-              return output
-
-          inc = race_signatures(incoming)
-          acc = race_signatures(accepted)
-          only_inc = sorted(inc - acc)
-          only_acc = sorted(acc - inc)
-          print("G11_RACE_SCHEMA_ONLY_INCOMING="+json.dumps(only_inc[:250], ensure_ascii=False))
-          print("G11_RACE_SCHEMA_ONLY_ACCEPTED="+json.dumps(only_acc[:250], ensure_ascii=False))
-          PY
           fi
 
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
@@ -1217,43 +1176,6 @@ jobs:
               fi
               printf 'G11 WILD compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
               jq -c . .relay-output/publish-result.json >&2 || true
-            fi
-            if [ "${http_status}" = "400" ] && \
-               jq -e '.error == "FEED_RACE_FIELDS"' \
-                 .relay-output/publish-result.json >/dev/null 2>&1; then
-              echo 'G11_RACE_FIELDS_DYNAMIC_COMPAT=BEGIN'
-              if [ -s "${previous_wild}" ]; then
-                allowed_fields="$(jq -c '[.races[] | keys[]] | unique' "${previous_wild}")"
-                incoming_fields="$(jq -c '[.races[] | keys[]] | unique' "${FEED}")"
-                echo "G11_RACE_FIELDS_ALLOWED=${allowed_fields}"
-                echo "G11_RACE_FIELDS_INCOMING=${incoming_fields}"
-                jq -c --argjson allowed "${allowed_fields}" '
-                  .races |= map(
-                    with_entries(
-                      select(.key as $k | (($allowed | index($k)) != null))
-                    )
-                  )
-                ' "${FEED}" > .relay-output/feed-race-fields-compat.json
-                mv .relay-output/feed-race-fields-compat.json "${FEED}"
-                feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
-                http_status="$(curl --silent --show-error \
-                  -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
-                  -H "Authorization: Bearer ${token}" \
-                  -H 'Content-Type: application/json' \
-                  -H "x-g11-feed-sha256: ${feed_sha}" \
-                  --data-binary "@${FEED}" \
-                  --output .relay-output/publish-result.json \
-                  --write-out '%{http_code}')"
-                if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
-                  echo 'G11_RACE_FIELDS_DYNAMIC_COMPAT=PASS'
-                  printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
-                  exit 0
-                fi
-                printf 'G11 dynamic race-field compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
-                jq -c . .relay-output/publish-result.json >&2 || true
-              else
-                echo 'G11_RACE_FIELDS_DYNAMIC_COMPAT_REFERENCE_MISSING' >&2
-              fi
             fi
             if [ "${http_status}" = "409" ] && \
                [ "${{ steps.due.outputs.phase }}" = "night" ] && \
