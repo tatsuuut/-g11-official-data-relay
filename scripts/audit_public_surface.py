@@ -216,6 +216,29 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     )
     print(f"G11_SITE_DISPLAY_COMPAT=COMPACT_V1:{display_compacted}")
 
+    p3_fields = {
+        "p3_head", "p3_logic_id", "p3_production_bets", "p3_published_at_jst",
+        "p3_snapshot", "p3_snapshot_sha256", "p3_status",
+    }
+    missing_p3 = []
+    for race in incoming_races:
+        if not isinstance(race, dict):
+            continue
+        missing = sorted(p3_fields - set(race))
+        if missing:
+            missing_p3.append({
+                "key": race.get("key"),
+                "venue": race.get("venue"),
+                "race": race.get("race"),
+                "formal_status": race.get("formal_status"),
+                "exclusion_reason": race.get("exclusion_reason"),
+                "top_boat": race.get("top_boat"),
+                "practical_bets": race.get("practical_bets"),
+                "quality": race.get("quality"),
+                "missing": missing,
+            })
+    print("G11_SITE_MISSING_P3_RACES=" + json.dumps(missing_p3, ensure_ascii=False, sort_keys=True))
+
     filled = []
     reference_dicts = [race for race in reference_races if isinstance(race, dict)]
     common_race_keys = set(reference_dicts[0])
