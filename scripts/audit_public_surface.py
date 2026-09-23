@@ -216,6 +216,23 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     )
     print(f"G11_SITE_DISPLAY_COMPAT=COMPACT_V1:{display_compacted}")
 
+    reference_abeken_live = [
+        race.get("abeken_shadow", {}).get("live")
+        for race in reference_races
+        if isinstance(race, dict)
+        and isinstance(race.get("abeken_shadow"), dict)
+    ]
+    abeken_live_suppressed = 0
+    if reference_abeken_live and all(value is None for value in reference_abeken_live):
+        for race in incoming_races:
+            if not isinstance(race, dict):
+                continue
+            shadow = race.get("abeken_shadow")
+            if isinstance(shadow, dict) and shadow.get("live") is not None:
+                shadow["live"] = None
+                abeken_live_suppressed += 1
+    print(f"G11_SITE_ABEKEN_LIVE_COMPAT=NULL_V1:{abeken_live_suppressed}")
+
     p3_fields = {
         "p3_head", "p3_logic_id", "p3_production_bets", "p3_published_at_jst",
         "p3_snapshot", "p3_snapshot_sha256", "p3_status",
