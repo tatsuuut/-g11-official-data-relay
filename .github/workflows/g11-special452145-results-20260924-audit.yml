@@ -1,0 +1,124 @@
+name: G11 special 45-2=145 results 20260924 audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-special452145-results-20260924-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Checkout private G11
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          fetch-depth: 1
+
+      - name: Fetch official national K file
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp/k
+          curl --fail-with-body --silent --show-error --location \
+            'https://www1.mbrace.or.jp/od2/K/202609/k260924.lzh' \
+            -o .tmp/k260924.lzh
+          7z x -y -o.tmp/k .tmp/k260924.lzh >/dev/null
+          find .tmp/k -maxdepth 1 -type f -printf '%f\n'
+
+      - name: Parse target results and settle fixed 8
+        env:
+          PYTHONPATH: .g11-private
+        run: |
+          python3 - <<'PY'
+          import json
+          from datetime import date
+          from pathlib import Path
+          from g11.canonical.official_pipeline import decode_cp932, parse_result_text
+          from g11.growth_p3.v1_1.special_45_2_eq_145_v1 import FIXED_BETS
+
+          targets = {
+              '20260924-10-10': {'venue':'三国','race':10},
+              '20260924-02-08': {'venue':'戸田','race':8},
+              '20260924-08-10': {'venue':'常滑','race':10},
+              '20260924-22-08': {'venue':'福岡','race':8},
+          }
+          files=[p for p in Path('.tmp/k').iterdir() if p.is_file()]
+          if len(files)!=1:
+              raise SystemExit(f'K_MEMBER_COUNT:{len(files)}:{[p.name for p in files]}')
+          results=parse_result_text(decode_cp932(files[0].read_bytes()), date(2026,9,24), require_full_races=False)
+          by_key={r.race_key:r for r in results}
+          out=[]
+          total_stake=0
+          total_return=0
+          hits=0
+          fixed=list(FIXED_BETS)
+          for key,meta in targets.items():
+              r=by_key.get(key)
+              if r is None:
+                  raise SystemExit(f'MISSING_RESULT:{key}')
+              settlements=[{'combination':s.combination,'payout':s.payout,'popularity':s.popularity} for s in r.trifecta_settlements]
+              payout=sum(s.payout for s in r.trifecta_settlements if s.combination in fixed)
+              hit=payout>0
+              stake=len(fixed)*100
+              total_stake += stake
+              total_return += payout
+              hits += int(hit)
+              finish_order=[
+                  e.boat for e in sorted(r.entries, key=lambda e: int(e.finish) if e.finish.isdigit() else 99)
+                  if e.finish.isdigit()
+              ]
+              combo=r.trifecta_combination
+              if r.race_status!='ESTABLISHED':
+                  miss_class='NOT_ESTABLISHED'
+              elif hit:
+                  miss_class='HIT'
+              elif combo and combo.split('-')[0] not in {'4','5'}:
+                  miss_class='HEAD_MISS'
+              elif combo:
+                  second=combo.split('-')[1]
+                  third=combo.split('-')[2]
+                  allowed_second={'2','1','5'} if combo.startswith('4-') else {'2','1','4'}
+                  if second not in allowed_second:
+                      miss_class='SECOND_MISS'
+                  else:
+                      miss_class='THIRD_OR_COMBINATION_MISS'
+              else:
+                  miss_class='UNKNOWN'
+              out.append({
+                  **meta,
+                  'race_key':key,
+                  'race_status':r.race_status,
+                  'trifecta':combo,
+                  'payout':r.trifecta_payout,
+                  'popularity':r.trifecta_popularity,
+                  'settlements':settlements,
+                  'winning_method':r.winning_method,
+                  'refund_boats':list(r.refund_boats),
+                  'finish_order':finish_order,
+                  'fixed8_hit':hit,
+                  'fixed8_return':payout,
+                  'fixed8_stake':stake,
+                  'profit':payout-stake,
+                  'miss_class':miss_class,
+              })
+          print('G11_SPECIAL_45_2_EQ_145_RESULTS_20260924=' + json.dumps({
+              'fixed_bets':fixed,
+              'hits':hits,
+              'races':len(out),
+              'total_stake':total_stake,
+              'total_return':total_return,
+              'profit':total_return-total_stake,
+              'roi_percent':round(total_return/total_stake*100,2) if total_stake else None,
+              'results':out,
+          }, ensure_ascii=False, sort_keys=True))
+          PY
