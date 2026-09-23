@@ -1,0 +1,81 @@
+name: G11 special 45-2=145 20260925 audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-special452145-20260925-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Checkout private G11
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          fetch-depth: 1
+
+      - name: Install parser dependency
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+
+      - name: Fetch official national B file
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp/b
+          curl --fail-with-body --silent --show-error --location \
+            'https://www1.mbrace.or.jp/od2/B/202609/b260925.lzh' \
+            -o .tmp/b260925.lzh
+          7z x -y -o.tmp/b .tmp/b260925.lzh >/dev/null
+          find .tmp/b -maxdepth 1 -type f -printf '%f\n'
+
+      - name: Evaluate exact special rule
+        env:
+          PYTHONPATH: .g11-private
+        run: |
+          python3 - <<'PY'
+          import json
+          from datetime import date
+          from pathlib import Path
+          from g11.canonical.official_pipeline import decode_cp932, parse_schedule_text
+          from g11.growth_p3.v1_1.special_45_2_eq_145_v1 import evaluate, FIXED_BETS
+
+          files = [p for p in Path('.tmp/b').iterdir() if p.is_file()]
+          if len(files) != 1:
+              raise SystemExit(f'B_MEMBER_COUNT:{len(files)}:{[p.name for p in files]}')
+          races = parse_schedule_text(decode_cp932(files[0].read_bytes()), date(2026, 9, 25))
+          active = []
+          for race in races:
+              boats = {
+                  e.boat: {
+                      'NATIONAL_WIN_RATE': e.national_win_rate,
+                      'MOTOR_2REN': e.motor_top2_percent,
+                  }
+                  for e in race.entries
+              }
+              result = evaluate(boats)
+              if result['ACTIVE']:
+                  active.append({
+                      'race_key': race.race_key,
+                      'venue': race.venue_name,
+                      'race': race.race_no,
+                      'deadline_jst': race.deadline_jst,
+                      'event_title': race.event_title,
+                      'evidence': result['EVIDENCE'],
+                      'fixed_bets': list(FIXED_BETS),
+                  })
+          print('G11_SPECIAL_45_2_EQ_145_20260925=' + json.dumps({
+              'race_count': len(races),
+              'active_count': len(active),
+              'active': active,
+          }, ensure_ascii=False, sort_keys=True))
+          PY
