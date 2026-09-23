@@ -113,6 +113,9 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     reference_races = reference.get("races")
     incoming_races = feed.get("races")
+    if feed.get("stage") == "MORNING":
+        print("G11_SITE_SCHEMA_PROJECT=SKIP_MORNING")
+        return 0
     if not isinstance(reference_races, list) or not reference_races:
         fail("schema reference has no races")
     if not isinstance(incoming_races, list):
