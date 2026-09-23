@@ -113,6 +113,10 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     reference_races = reference.get("races")
     incoming_races = feed.get("races")
+    if feed.get("stage") != "MORNING":
+        special_eight_site_compat(feed_path)
+        feed = json.loads(feed_path.read_text(encoding="utf-8"))
+        incoming_races = feed.get("races")
     if feed.get("stage") == "MORNING":
         anomalies = []
         for race in incoming_races if isinstance(incoming_races, list) else []:
@@ -305,29 +309,40 @@ def special_eight_site_compat(feed_path: pathlib.Path) -> int:
     if not isinstance(races, list):
         fail("special-eight feed has no races")
     changed = []
+
+    def compact_projection(value, *, key, scope, p3_bets=None):
+        if not isinstance(value, dict):
+            return
+        bets = value.get("practical_bets")
+        if value.get("production_points") != 8 or not isinstance(bets, list) or len(bets) != 8:
+            return
+        if p3_bets is not None and (not isinstance(p3_bets, list) or len(p3_bets) != 8):
+            fail(f"special-eight p3 binding invalid: {key}")
+        canonical = list(bets)
+        value["production_points"] = 7
+        value["practical_bets"] = canonical[:7]
+        if p3_bets is not None:
+            p3_bets[:] = p3_bets[:7]
+        note = "SITE表示互換のみ｜正本特例8点=" + "/".join(canonical)
+        caution = value.get("caution")
+        value["caution"] = note if not caution else str(caution) + "｜" + note
+        changed.append({
+            "key": key,
+            "scope": scope,
+            "canonical_8": canonical,
+            "display_7": canonical[:7],
+            "display_extra": canonical[7],
+        })
+
     for race in races:
         if not isinstance(race, dict):
             continue
-        bets = race.get("practical_bets")
+        key = race.get("key")
         p3_bets = race.get("p3_production_bets")
-        if (
-            race.get("production_points") == 8
-            and isinstance(bets, list) and len(bets) == 8
-            and isinstance(p3_bets, list) and len(p3_bets) == 8
-        ):
-            canonical = list(bets)
-            race["production_points"] = 7
-            race["practical_bets"] = canonical[:7]
-            race["p3_production_bets"] = list(p3_bets[:7])
-            note = "SITE表示互換のみ｜正本特例8点=" + "/".join(canonical)
-            caution = race.get("caution")
-            race["caution"] = note if not caution else str(caution) + "｜" + note
-            changed.append({
-                "key": race.get("key"),
-                "canonical_8": canonical,
-                "display_7": canonical[:7],
-                "display_extra": canonical[7],
-            })
+        compact_projection(race, key=key, scope="MORNING_ROOT", p3_bets=p3_bets)
+        pre = race.get("predeadline")
+        compact_projection(pre, key=key, scope="PREDEADLINE")
+
     feed_path.write_text(
         json.dumps(feed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n",
         encoding="utf-8",
