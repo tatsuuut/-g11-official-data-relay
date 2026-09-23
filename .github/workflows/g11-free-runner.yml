@@ -693,6 +693,7 @@ jobs:
         if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != ''
         env:
           FEED: .relay-output/feed.json
+          PHASE: ${{ steps.due.outputs.phase }}
         run: |
           set -euo pipefail
           if [ "${{ steps.due.outputs.phase }}" != "night" ]; then
@@ -1123,10 +1124,6 @@ jobs:
             echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
           fi
 
-          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
-            PYTHONPATH=".g11-private" python3 -m g11.relay.night_transport_compact_v1 "${FEED}"
-          fi
-
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
@@ -1146,6 +1143,27 @@ jobs:
             printf 'G11 sync rejected the verified feed (HTTP %s):\n' "${http_status}" >&2
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
+            if [ "${http_status}" = "413" ] && [ "${PHASE}" = "night" ]; then
+              echo 'G11_NIGHT_GZIP_TRANSPORT_RETRY=BEGIN'
+              gzip -c -9 "${FEED}" > .relay-output/feed.json.gz
+              printf 'verified_feed_gzip_bytes=%s\n' "$(wc -c < .relay-output/feed.json.gz)"
+              http_status="$(curl --silent --show-error \
+                -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
+                -H "Authorization: Bearer ${token}" \
+                -H 'Content-Type: application/json' \
+                -H 'Content-Encoding: gzip' \
+                -H "x-g11-feed-sha256: ${feed_sha}" \
+                --data-binary "@.relay-output/feed.json.gz" \
+                --output .relay-output/publish-result.json \
+                --write-out '%{http_code}')"
+              if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
+                echo 'G11_NIGHT_GZIP_TRANSPORT_RETRY=PASS'
+                printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+              printf 'G11 NIGHT gzip transport retry rejected (HTTP %s):\n' "${http_status}" >&2
+              jq -c . .relay-output/publish-result.json >&2 || true
+            fi
             if [ "${http_status}" = "400" ] && \
                jq -e '.error == "FEED_WILD_PACK_CAPABILITY"' \
                  .relay-output/publish-result.json >/dev/null 2>&1; then
