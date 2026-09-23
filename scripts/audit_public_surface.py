@@ -15,7 +15,6 @@ ALLOWED_FILES = {
     "README.md",
     "SECURITY.md",
     "scripts/audit_public_surface.py",
-    "scripts/g11_site_race_field_compat.py",
 }
 IGNORED_PARTS = {".git", "__pycache__"}
 FORBIDDEN_SUFFIXES = {
