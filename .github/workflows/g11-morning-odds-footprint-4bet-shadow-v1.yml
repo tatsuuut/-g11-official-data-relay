@@ -1,0 +1,201 @@
+name: G11 morning odds footprint 4-bet shadow V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: capture MORNING odds or settle research results
+        required: true
+        default: capture
+        type: choice
+        options:
+          - capture
+          - settle
+      operational_date:
+        description: YYYY-MM-DD; defaults to current JST date
+        required: false
+        type: string
+  schedule:
+    # Dedicated MORNING research lane, after production morning ends at 07:05 JST.
+    - cron: "10-55/5 22 * * *"
+    # Separate NIGHT research settlement retries. Detection is already locked.
+    - cron: "20,35,50 13 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g11-morning-odds-footprint-4bet-shadow-v1
+  cancel-in-progress: false
+
+jobs:
+  shadow:
+    if: >-
+      github.repository == 'tatsuuut/-g11-official-data-relay' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    env:
+      TZ: Asia/Tokyo
+      PYTHONPATH: ${{ github.workspace }}/.g11-private
+      G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
+    steps:
+      - name: Checkout public relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Resolve research mode and operational date
+        id: mode
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_DATE: ${{ inputs.operational_date }}
+        run: |
+          set -euo pipefail
+          operational_date="$(date +%F)"
+          if [ -n "${REQUESTED_DATE:-}" ]; then
+            operational_date="${REQUESTED_DATE}"
+          fi
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            mode="${REQUESTED_MODE:-capture}"
+          else
+            case "${SCHEDULE_EXPRESSION}" in
+              "10-55/5 22 * * *") mode="capture" ;;
+              "20,35,50 13 * * *") mode="settle" ;;
+              *) echo "unexpected schedule" >&2; exit 1 ;;
+            esac
+          fi
+          python3 - "${operational_date}" "${mode}" <<'PY'
+          import datetime, re, sys
+          if re.fullmatch(r"\d{4}-\d{2}-\d{2}", sys.argv[1]) is None:
+              raise SystemExit("DATE_FORMAT")
+          datetime.date.fromisoformat(sys.argv[1])
+          if sys.argv[2] not in {"capture", "settle"}:
+              raise SystemExit("MODE")
+          PY
+          echo "operational_date=${operational_date}" >> "${GITHUB_OUTPUT}"
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+
+      - name: Require private repository credential
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: test -n "${G11_PRIVATE_REPO_TOKEN}"
+
+      - name: Checkout private detector source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          fetch-depth: 1
+
+      - name: Checkout private append-only research history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: g11-runtime
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-history
+          fetch-depth: 1
+
+      - name: Install pinned official HTML parser dependency
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+
+      - name: Fetch current verified app feed read-only
+        id: feed
+        shell: bash
+        env:
+          OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          mkdir -p .shadow-work
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+            -o .shadow-work/feed.json
+          jq -e --arg d "${OPERATIONAL_DATE}" '
+            .status == "PASS"
+            and .operational_date_jst == $d
+            and (.races | type == "array")
+            and (.races | length > 0)
+          ' .shadow-work/feed.json >/dev/null
+          sha="$(sha256sum .shadow-work/feed.json | cut -d" " -f1)"
+          echo "feed_sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Capture earliest complete MORNING exact-120 odds
+        if: steps.mode.outputs.mode == 'capture'
+        shell: bash
+        env:
+          OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          python3 -m g11.morning_odds_footprint.v1.runtime_v1 capture \
+            --feed "${GITHUB_WORKSPACE}/.shadow-work/feed.json" \
+            --history-root "${GITHUB_WORKSPACE}/.g11-history/g11/morning-odds-footprint/v1" \
+            --operational-date "${OPERATIONAL_DATE}" \
+            --max-requests 24 \
+            --interval-seconds 10 \
+            --summary-out "${GITHUB_WORKSPACE}/.shadow-work/run-summary.json"
+          jq -c . .shadow-work/run-summary.json
+
+      - name: Settle only already-locked footprint research
+        if: steps.mode.outputs.mode == 'settle'
+        shell: bash
+        env:
+          OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          day_path="g11/morning-odds-footprint/v1/${OPERATIONAL_DATE:0:4}/${OPERATIONAL_DATE:5:2}/${OPERATIONAL_DATE:8:2}"
+          if [ ! -f ".g11-history/${day_path}/scope.json" ]; then
+            echo "No MORNING footprint scope for ${OPERATIONAL_DATE}; settlement is a no-op."
+            exit 0
+          fi
+          python3 -m g11.morning_odds_footprint.v1.runtime_v1 settle \
+            --feed "${GITHUB_WORKSPACE}/.shadow-work/feed.json" \
+            --history-root "${GITHUB_WORKSPACE}/.g11-history/g11/morning-odds-footprint/v1" \
+            --operational-date "${OPERATIONAL_DATE}" \
+            --summary-out "${GITHUB_WORKSPACE}/.shadow-work/run-summary.json"
+          jq -c . .shadow-work/run-summary.json
+
+      - name: Assert production isolation
+        shell: bash
+        env:
+          OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          day_path=".g11-history/g11/morning-odds-footprint/v1/${OPERATIONAL_DATE:0:4}/${OPERATIONAL_DATE:5:2}/${OPERATIONAL_DATE:8:2}"
+          if [ -f "${day_path}/daily-summary.json" ]; then
+            jq -e '
+              .P3_MUTATED == false
+              and .WILD_MUTATED == false
+              and .ABEKEN_MUTATED == false
+              and .PRODUCTION_BETS_MUTATED == false
+              and .NOTIFICATION_MUTATED == false
+              and .PURCHASE_EXECUTED == false
+              and .RESULT_INPUT_USED_FOR_DETECTION == false
+              and .PAYOUT_INPUT_USED_FOR_DETECTION == false
+              and .NO_AUTOMATIC_P3_PROMOTION == true
+            ' "${day_path}/daily-summary.json" >/dev/null
+          fi
+
+      - name: Persist only research-history path
+        working-directory: .g11-history
+        shell: bash
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          set -euo pipefail
+          git config user.name "g11-research-bot"
+          git config user.email "g11-research-bot@users.noreply.github.com"
+          git add g11/morning-odds-footprint/v1
+          if git diff --cached --quiet; then
+            echo "No research changes to persist."
+            exit 0
+          fi
+          git commit -m "morning-odds-footprint: ${MODE} ${OPERATIONAL_DATE}"
+          git fetch origin g11-runtime
+          git rebase origin/g11-runtime
+          git push origin HEAD:g11-runtime
