@@ -693,7 +693,6 @@ jobs:
         if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != ''
         env:
           FEED: .relay-output/feed.json
-          PHASE: ${{ steps.due.outputs.phase }}
         run: |
           set -euo pipefail
           if [ "${{ steps.due.outputs.phase }}" != "night" ]; then
@@ -735,10 +734,7 @@ jobs:
           FEED: .relay-output/feed.json
         run: |
           set -euo pipefail
-          # Once a race's official-live forecast and EV snapshot have been
-          # published, a delayed cache branch must not replace them. Preserve
-          # that complete race snapshot; races without stored odds may still be
-          # added normally. Morning predictions are untouched.
+          # Preserve already-accepted immutable race snapshots.
           if curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
             -o .relay-output/stored-feed.json; then
@@ -818,15 +814,9 @@ jobs:
                     .production_mean_ev
                   )
                 )
-              # TRUE AI / 野生成長AI HEAD morning predictions are immutable
-              # once accepted by the app. Later predeadline reruns may attach
-              # PRE_RACE/WILD/P3 data, but must keep the exact accepted morning
-              # prediction packet.
+              # Preserve accepted TRUE AI morning predictions.
               | .true_ai = $stored[0].true_ai
-              # ABEKEN predictions are immutable once accepted by the app.
-              # Later morning/predeadline reruns may add WILD or P3 sidecars,
-              # but they must never replace the already-published 剥きけん
-              # prediction payload.
+              # Preserve accepted 剥きけん predictions.
               | .abeken = $stored[0].abeken
               | .races |= map(
                   . as $incoming
@@ -1143,26 +1133,11 @@ jobs:
             printf 'G11 sync rejected the verified feed (HTTP %s):\n' "${http_status}" >&2
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
-            if [ "${http_status}" = "413" ] && [ "${PHASE}" = "night" ]; then
-              echo 'G11_NIGHT_GZIP_TRANSPORT_RETRY=BEGIN'
-              gzip -c -9 "${FEED}" > .relay-output/feed.json.gz
-              printf 'verified_feed_gzip_bytes=%s\n' "$(wc -c < .relay-output/feed.json.gz)"
-              http_status="$(curl --silent --show-error \
-                -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
-                -H "Authorization: Bearer ${token}" \
-                -H 'Content-Type: application/json' \
-                -H 'Content-Encoding: gzip' \
-                -H "x-g11-feed-sha256: ${feed_sha}" \
-                --data-binary "@.relay-output/feed.json.gz" \
-                --output .relay-output/publish-result.json \
-                --write-out '%{http_code}')"
-              if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
-                echo 'G11_NIGHT_GZIP_TRANSPORT_RETRY=PASS'
+            if [ "${http_status}" = "413" ] && [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+              if PYTHONPATH=".g11-private" python3 -m g11.relay.gzip_sync_retry_v1 "${FEED}" "${G11_APP_ORIGIN}" "${token}" "${feed_sha}"; then
                 printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
                 exit 0
               fi
-              printf 'G11 NIGHT gzip transport retry rejected (HTTP %s):\n' "${http_status}" >&2
-              jq -c . .relay-output/publish-result.json >&2 || true
             fi
             if [ "${http_status}" = "400" ] && \
                jq -e '.error == "FEED_WILD_PACK_CAPABILITY"' \
