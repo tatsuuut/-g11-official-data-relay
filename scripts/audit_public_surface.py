@@ -296,6 +296,44 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     print("G11_SITE_SCHEMA_FILLED=" + json.dumps(sorted(set(filled)), ensure_ascii=False))
     return 0
 
+
+def special_eight_site_compat(feed_path: pathlib.Path) -> int:
+    """Transport-only adapter for the deployed Site's legacy 3/5/7 display contract."""
+    feed = json.loads(feed_path.read_text(encoding="utf-8"))
+    races = feed.get("races")
+    if not isinstance(races, list):
+        fail("special-eight feed has no races")
+    changed = []
+    for race in races:
+        if not isinstance(race, dict):
+            continue
+        bets = race.get("practical_bets")
+        p3_bets = race.get("p3_production_bets")
+        if (
+            race.get("production_points") == 8
+            and isinstance(bets, list) and len(bets) == 8
+            and isinstance(p3_bets, list) and len(p3_bets) == 8
+        ):
+            canonical = list(bets)
+            race["production_points"] = 7
+            race["practical_bets"] = canonical[:7]
+            race["p3_production_bets"] = list(p3_bets[:7])
+            note = "SITE表示互換のみ｜正本特例8点=" + "/".join(canonical)
+            caution = race.get("caution")
+            race["caution"] = note if not caution else str(caution) + "｜" + note
+            changed.append({
+                "key": race.get("key"),
+                "canonical_8": canonical,
+                "display_7": canonical[:7],
+                "display_extra": canonical[7],
+            })
+    feed_path.write_text(
+        json.dumps(feed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    print("G11_SITE_SPECIAL8_COMPAT=" + json.dumps(changed, ensure_ascii=False, sort_keys=True))
+    return 0
+
 def fail(message: str) -> None:
     raise SystemExit(f"PUBLIC_SURFACE_AUDIT_FAIL: {message}")
 
@@ -334,4 +372,6 @@ def main() -> int:
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "project-feed-schema":
         sys.exit(project_feed_schema(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])))
+    if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
+        sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
