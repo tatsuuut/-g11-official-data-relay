@@ -228,6 +228,13 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" != *"[night-republish]"* ]] && [[ "${COMMIT_MESSAGE}" != *"[wild-night-settle]"* ]]; then
             exit 0
           fi
+          # Temporary hold requested by the user: stop only the unresolved
+          # 2026-09-22 NIGHT repair loop. Normal future NIGHT schedules remain
+          # available; this guard blocks bounded 9/22 repair pushes only.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" == *"[night-republish-20260922]"* ]]; then
+            echo "G11_20260922_NIGHT_REPAIR_HOLD=TRUE"
+            exit 0
+          fi
           now_hour="$(date +%H)"
           if [ "${now_hour}" -lt 5 ]; then
             operational_date="$(date --date='yesterday' +%F)"
