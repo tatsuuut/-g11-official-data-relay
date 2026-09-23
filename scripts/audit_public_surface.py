@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import sys
@@ -40,6 +41,67 @@ FORBIDDEN_PATTERNS = {
 PATTERN_DEFINITION_FILE = "scripts/audit_public_surface.py"
 
 
+
+def _merge_schema(current, value):
+    if isinstance(value, dict):
+        node = current if isinstance(current, dict) else {}
+        for key, child in value.items():
+            node[key] = _merge_schema(node.get(key), child)
+        return node
+    if isinstance(value, list):
+        child_schema = current[0] if isinstance(current, list) and current else None
+        for child in value:
+            child_schema = _merge_schema(child_schema, child)
+        return [child_schema]
+    return current if current is not None else True
+
+
+def _prune_to_schema(value, schema, path, dropped):
+    if isinstance(value, dict) and isinstance(schema, dict):
+        output = {}
+        for key, child in value.items():
+            if key not in schema:
+                dropped.append(f"{path}.{key}")
+                continue
+            output[key] = _prune_to_schema(child, schema[key], f"{path}.{key}", dropped)
+        return output
+    if isinstance(value, list) and isinstance(schema, list) and schema:
+        return [
+            _prune_to_schema(child, schema[0], f"{path}[]", dropped)
+            for child in value
+        ]
+    return value
+
+
+def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -> int:
+    feed = json.loads(feed_path.read_text(encoding="utf-8"))
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    reference_races = reference.get("races")
+    incoming_races = feed.get("races")
+    if not isinstance(reference_races, list) or not reference_races:
+        fail("schema reference has no races")
+    if not isinstance(incoming_races, list):
+        fail("incoming feed has no races")
+    schema = None
+    for race in reference_races:
+        if isinstance(race, dict):
+            schema = _merge_schema(schema, race)
+    if not isinstance(schema, dict):
+        fail("schema reference invalid")
+    dropped = []
+    feed["races"] = [
+        _prune_to_schema(race, schema, "race", dropped)
+        if isinstance(race, dict) else race
+        for race in incoming_races
+    ]
+    feed_path.write_text(
+        json.dumps(feed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    print("G11_SITE_SCHEMA_PROJECT=PASS")
+    print("G11_SITE_SCHEMA_DROPPED=" + json.dumps(sorted(set(dropped)), ensure_ascii=False))
+    return 0
+
 def fail(message: str) -> None:
     raise SystemExit(f"PUBLIC_SURFACE_AUDIT_FAIL: {message}")
 
@@ -76,4 +138,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "project-feed-schema":
+        sys.exit(project_feed_schema(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])))
     sys.exit(main())
