@@ -74,39 +74,8 @@ def _nested_keyset_variants(rows, field):
     ]
 
 def _compact_original_display_shadow(race):
-    shadow = race.get("original_display_shadow")
-    if not isinstance(shadow, dict):
-        return False
-    changed = False
-    boat_keys = {
-        "boat", "course", "tilt", "standard_exhibition_time", "start_timing",
-        "display_composite_rank", "morning_rank", "movement",
-    }
-    boats = shadow.get("boats")
-    if isinstance(boats, list):
-        compact = [
-            {key: value for key, value in boat.items() if key in boat_keys}
-            if isinstance(boat, dict) else boat
-            for boat in boats
-        ]
-        changed = changed or compact != boats
-        shadow["boats"] = compact
-    inputs = shadow.get("last_minute_inputs")
-    if isinstance(inputs, dict) and "odds_role" in inputs:
-        inputs.pop("odds_role", None)
-        changed = True
-    profiles = shadow.get("profile_projections")
-    if isinstance(profiles, dict):
-        compact_profiles = {}
-        for name, definition in profiles.items():
-            if isinstance(definition, dict):
-                compact_profiles[name] = {"practical_bets": definition.get("practical_bets", [])}
-            else:
-                compact_profiles[name] = definition
-        changed = changed or compact_profiles != profiles
-        shadow["profile_projections"] = compact_profiles
-    return changed
-
+    """Preserve the deployed Site display-shadow schema exactly."""
+    return False
 
 def _merge_schema(current, value):
     if isinstance(value, dict):
