@@ -190,6 +190,10 @@ jobs:
           set -euo pipefail
           git config user.name "g11-research-bot"
           git config user.email "g11-research-bot@users.noreply.github.com"
+          if [ ! -e g11/morning-odds-footprint/v1 ]; then
+            echo "No morning-odds-footprint history exists yet; persistence is a clean no-op."
+            exit 0
+          fi
           git add g11/morning-odds-footprint/v1
           if git diff --cached --quiet; then
             echo "No research changes to persist."
