@@ -1,0 +1,45 @@
+name: G11 Growth P3 branch audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-growth-p3-double-count-branch-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Check out private Growth P3 branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: fix/growth-p3-double-count-fail-closed-20260923
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          fetch-depth: 1
+
+      - name: Install pinned parser dependency
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+
+      - name: Compile target modules
+        working-directory: .g11-private
+        run: >-
+          python3 -m compileall -q
+          g11/growth_p3/v1_1
+          p3/formal_prediction_engine/v1/src
+          p3/formal_input_admission/v1/src
+          p3/player_motor_admission/v1/src
+
+      - name: Run Growth P3 canonical and runtime tests
+        working-directory: .g11-private
+        run: >-
+          python3 -m unittest -v
+          g11.growth_p3.v1_1.test_canonical_v1_1
+          g11.growth_p3.v1_1.test_current_runtime_v1
