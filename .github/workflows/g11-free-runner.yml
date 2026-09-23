@@ -1,7 +1,7 @@
 name: G11 free official-data runner
 
 on:
-  # Immediately validate a runner change without waiting for GitHub's delayed cron.
+  # Immediately validate a runner change without waiting for GitHub's delayed cron. 9/23 recovery baseline restored.
   # 2026-09-20: verify WILD OOS, daily rollover, and unavailable-phase fail-closed. Transport compactness recheck. 9/23 morning schema inspection.
   push:
     branches:
@@ -1112,10 +1112,6 @@ jobs:
             -o "${previous_wild}"; then
             echo "G11_ACCEPTED_0921_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${previous_wild}")"
             echo "G11_ACCEPTED_0921_RACE_FIELDS=$(jq -c '[.races[] | keys] | add | unique' "${previous_wild}")"
-            echo "G11_ACCEPTED_RACE_OBJECT_KEYS=$(jq -c '[.races[] | to_entries[] | select((.value|type) == "object") | {field:.key,keys:(.value|keys)}] | unique' "${previous_wild}")"
-            echo "G11_INCOMING_RACE_OBJECT_KEYS=$(jq -c '[.races[] | to_entries[] | select((.value|type) == "object") | {field:.key,keys:(.value|keys)}] | unique' "${FEED}")"
-            echo "G11_ACCEPTED_WILD_NESTED_KEYS=$(jq -c '[.races[].wild_pack? | select(type=="object") | {keys:keys,morning:(.morning? | if type=="object" then keys else [] end),pre_race:(.pre_race? | if type=="object" then keys else [] end),wild4:(.wild4? | if type=="object" then keys else [] end)}] | unique' "${previous_wild}")"
-            echo "G11_INCOMING_WILD_NESTED_KEYS=$(jq -c '[.races[].wild_pack? | select(type=="object") | {keys:keys,morning:(.morning? | if type=="object" then keys else [] end),pre_race:(.pre_race? | if type=="object" then keys else [] end),wild4:(.wild4? | if type=="object" then keys else [] end)}] | unique' "${FEED}")"
           fi
 
           if jq -e '(.canonical_authorities.wild_pack | type) == "object"' "${FEED}" >/dev/null; then
