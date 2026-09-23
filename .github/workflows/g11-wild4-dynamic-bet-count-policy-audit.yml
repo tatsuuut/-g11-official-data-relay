@@ -1,0 +1,32 @@
+name: G11 WILD4 dynamic bet count policy audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-wild4-dynamic-bet-count-policy-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Checkout private WILD4 policy branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: feat/wild4-dynamic-bet-count-policy-v1
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          fetch-depth: 1
+
+      - name: Compile and test WILD4 policy
+        working-directory: .g11-private
+        run: |
+          python3 -m compileall -q g11/wild_pack/v1
+          python3 -m unittest -v g11.wild_pack.v1.test_wild_bet_bootstrap_v1
