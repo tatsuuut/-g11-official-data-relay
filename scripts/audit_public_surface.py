@@ -125,6 +125,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                     if isinstance(race, dict) and isinstance(race.get("key"), str)
                 }
                 frozen = 0
+                prediction_frozen = 0
                 for race in feed.get("races", []):
                     if not isinstance(race, dict):
                         continue
@@ -132,6 +133,35 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                     if isinstance(prior, dict) and "original_display_shadow" in prior:
                         race["original_display_shadow"] = prior["original_display_shadow"]
                         frozen += 1
+                    if isinstance(prior, dict):
+                        for field in (
+                            "predeadline",
+                            "odds_merit",
+                            "best_ev_bet",
+                            "best_ev",
+                            "value_bets",
+                            "odds_captured_at_jst",
+                        ):
+                            if field in prior:
+                                race[field] = prior[field]
+                        prediction_frozen += 1
+
+                    shadow = race.get("original_display_shadow")
+                    if isinstance(shadow, dict):
+                        boats = shadow.get("boats")
+                        if isinstance(boats, list):
+                            for boat in boats:
+                                if not isinstance(boat, dict):
+                                    continue
+                                if isinstance(boat.get("metric_ranks"), dict):
+                                    boat["metric_ranks"] = {}
+                                if isinstance(boat.get("metric_values"), dict):
+                                    boat["metric_values"] = {}
+                        profiles = shadow.get("profile_projections")
+                        if isinstance(profiles, dict):
+                            for value in profiles.values():
+                                if isinstance(value, dict) and isinstance(value.get("verification10"), list):
+                                    value["verification10"] = []
                 if "original_display_research" in stored:
                     feed["original_display_research"] = stored["original_display_research"]
                 feed_path.write_text(
@@ -149,6 +179,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                     + json.dumps(
                         {
                             "races": frozen,
+                            "prediction_races_frozen": prediction_frozen,
                             "canonical_night_evidence_mutated": False,
                             "transport_only": True,
                         },
