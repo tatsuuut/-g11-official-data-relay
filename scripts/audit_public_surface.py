@@ -73,6 +73,41 @@ def _nested_keyset_variants(rows, field):
         for keys, count in sorted(variants.items(), key=lambda item: (-item[1], item[0]))
     ]
 
+def _compact_original_display_shadow(race):
+    shadow = race.get("original_display_shadow")
+    if not isinstance(shadow, dict):
+        return False
+    changed = False
+    boat_keys = {
+        "boat", "course", "tilt", "standard_exhibition_time", "start_timing",
+        "display_composite_rank", "morning_rank", "movement",
+    }
+    boats = shadow.get("boats")
+    if isinstance(boats, list):
+        compact = [
+            {key: value for key, value in boat.items() if key in boat_keys}
+            if isinstance(boat, dict) else boat
+            for boat in boats
+        ]
+        changed = changed or compact != boats
+        shadow["boats"] = compact
+    inputs = shadow.get("last_minute_inputs")
+    if isinstance(inputs, dict) and "odds_role" in inputs:
+        inputs.pop("odds_role", None)
+        changed = True
+    profiles = shadow.get("profile_projections")
+    if isinstance(profiles, dict):
+        compact_profiles = {}
+        for name, definition in profiles.items():
+            if isinstance(definition, dict):
+                compact_profiles[name] = {"practical_bets": definition.get("practical_bets", [])}
+            else:
+                compact_profiles[name] = definition
+        changed = changed or compact_profiles != profiles
+        shadow["profile_projections"] = compact_profiles
+    return changed
+
+
 def _merge_schema(current, value):
     if isinstance(value, dict):
         node = current if isinstance(current, dict) else {}
@@ -173,6 +208,13 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     }
     print("G11_SITE_SCHEMA_TYPE_DIFF=" + json.dumps(type_diffs, ensure_ascii=False, sort_keys=True))
     print("G11_SITE_SCHEMA_KEYSET_DIFF=" + json.dumps(keyset_diffs, ensure_ascii=False, sort_keys=True))
+
+    display_compacted = sum(
+        _compact_original_display_shadow(race)
+        for race in incoming_races
+        if isinstance(race, dict)
+    )
+    print(f"G11_SITE_DISPLAY_COMPAT=COMPACT_V1:{display_compacted}")
 
     filled = []
     reference_dicts = [race for race in reference_races if isinstance(race, dict)]
