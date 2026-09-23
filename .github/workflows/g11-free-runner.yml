@@ -1172,6 +1172,64 @@ jobs:
               printf 'G11 WILD compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
               jq -c . .relay-output/publish-result.json >&2 || true
             fi
+            if [ "${http_status}" = "400" ] && \
+               jq -e '.error == "FEED_RACE_FIELDS"' \
+                 .relay-output/publish-result.json >/dev/null 2>&1; then
+              echo 'G11_RACE_FIELDS_SITE_COMPAT_FALLBACK=BEGIN'
+              if [ -s "${previous_wild}" ]; then
+                python3 - "${FEED}" "${previous_wild}" <<'PY'
+          import json, sys
+
+          feed_path, accepted_path = sys.argv[1:3]
+          with open(feed_path, encoding="utf-8") as handle:
+              feed = json.load(handle)
+          with open(accepted_path, encoding="utf-8") as handle:
+              accepted = json.load(handle)
+
+          accepted_races = [r for r in accepted.get("races", []) if isinstance(r, dict)]
+          incoming_races = [r for r in feed.get("races", []) if isinstance(r, dict)]
+          if not accepted_races or len(incoming_races) != len(feed.get("races", [])):
+              raise SystemExit("G11_RACE_FIELDS_SITE_COMPAT_REFERENCE_INVALID")
+
+          allowed = set().union(*(r.keys() for r in accepted_races))
+          incoming = set().union(*(r.keys() for r in incoming_races))
+          dropped = sorted(incoming - allowed)
+          missing = sorted(allowed - incoming)
+          print("G11_ACCEPTED_0921_RACE_FIELDS="+json.dumps(sorted(allowed),ensure_ascii=False))
+          print("G11_INCOMING_RACE_FIELDS_DROP="+json.dumps(dropped,ensure_ascii=False))
+          print("G11_INCOMING_RACE_FIELDS_MISSING="+json.dumps(missing,ensure_ascii=False))
+
+          feed["races"] = [
+              {key: value for key, value in race.items() if key in allowed}
+              for race in incoming_races
+          ]
+          with open(feed_path, "w", encoding="utf-8") as handle:
+              json.dump(
+                  feed, handle, ensure_ascii=False, sort_keys=True,
+                  separators=(",", ":"), allow_nan=False
+              )
+              handle.write("\n")
+          PY
+                feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+                http_status="$(curl --silent --show-error \
+                  -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
+                  -H "Authorization: Bearer ${token}" \
+                  -H 'Content-Type: application/json' \
+                  -H "x-g11-feed-sha256: ${feed_sha}" \
+                  --data-binary "@${FEED}" \
+                  --output .relay-output/publish-result.json \
+                  --write-out '%{http_code}')"
+                if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
+                  echo 'G11_RACE_FIELDS_SITE_COMPAT_FALLBACK=PASS'
+                  printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+                  exit 0
+                fi
+                printf 'G11 race-field compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
+                jq -c . .relay-output/publish-result.json >&2 || true
+              else
+                echo 'G11_RACE_FIELDS_SITE_COMPAT_REFERENCE_MISSING' >&2
+              fi
+            fi
             if [ "${http_status}" = "409" ] && \
                [ "${{ steps.due.outputs.phase }}" = "night" ] && \
                jq -e '.error == "NIGHT_IMMUTABLE_CONFLICT"' \
