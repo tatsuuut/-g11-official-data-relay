@@ -1,7 +1,7 @@
 name: G11 free official-data runner
 
 on:
-  # 9/23 MORNING pure-stage publish retry.
+  # 9/23 MORNING pure feed recovery.
   # 2026-09-20: verify WILD OOS, daily rollover, and unavailable-phase fail-closed. Transport compactness recheck. 9/23 morning schema inspection.
   push:
     branches:
@@ -1114,11 +1114,7 @@ jobs:
             echo "G11_ACCEPTED_REFERENCE_DATE=${accepted_reference_date}"
             echo "G11_ACCEPTED_REFERENCE_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${previous_wild}")"
             echo "G11_ACCEPTED_REFERENCE_RACE_FIELDS=$(jq -c '[.races[] | keys] | add | unique' "${previous_wild}")"
-            if [ "${{ steps.due.outputs.phase }}" != "morning" ]; then
-              python3 scripts/audit_public_surface.py project-feed-schema "${FEED}" "${previous_wild}"
-            else
-              echo "G11_MORNING_SCHEMA_PROJECTION=SKIPPED_PREVIOUS_NIGHT_REFERENCE"
-            fi
+            python3 scripts/audit_public_surface.py project-feed-schema "${FEED}" "${previous_wild}"
           fi
 
           if jq -e '(.canonical_authorities.wild_pack | type) == "object"' "${FEED}" >/dev/null; then
