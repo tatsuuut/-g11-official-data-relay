@@ -111,6 +111,50 @@ def _prune_to_schema(value, schema, path, dropped):
 def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -> int:
     feed = json.loads(feed_path.read_text(encoding="utf-8"))
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    if feed.get("stage") == "NIGHT":
+        stored_path = pathlib.Path(".relay-output/stored-feed.json")
+        if stored_path.is_file():
+            stored = json.loads(stored_path.read_text(encoding="utf-8"))
+            if (
+                stored.get("operational_date_jst") == feed.get("operational_date_jst")
+                and isinstance(stored.get("races"), list)
+            ):
+                stored_by_key = {
+                    race.get("key"): race
+                    for race in stored["races"]
+                    if isinstance(race, dict) and isinstance(race.get("key"), str)
+                }
+                frozen = 0
+                for race in feed.get("races", []):
+                    if not isinstance(race, dict):
+                        continue
+                    prior = stored_by_key.get(race.get("key"))
+                    if isinstance(prior, dict) and "original_display_shadow" in prior:
+                        race["original_display_shadow"] = prior["original_display_shadow"]
+                        frozen += 1
+                if "original_display_research" in stored:
+                    feed["original_display_research"] = stored["original_display_research"]
+                feed_path.write_text(
+                    json.dumps(
+                        feed,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ) + "\n",
+                    encoding="utf-8",
+                )
+                print(
+                    "G11_SITE_NIGHT_DISPLAY_FROZEN_TO_STORED="
+                    + json.dumps(
+                        {
+                            "races": frozen,
+                            "canonical_night_evidence_mutated": False,
+                            "transport_only": True,
+                        },
+                        sort_keys=True,
+                    )
+                )
     reference_races = reference.get("races")
     incoming_races = feed.get("races")
     if feed.get("stage") != "MORNING":
