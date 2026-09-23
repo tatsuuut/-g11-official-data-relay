@@ -1,0 +1,138 @@
+name: G11 WILD4 research-state merge
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/g11-wild4-state-merge.yml
+  workflow_dispatch:
+    inputs:
+      current_date:
+        description: Current operational date YYYY-MM-DD
+        required: false
+        type: string
+      previous_date:
+        description: Previous operational date YYYY-MM-DD
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: g11-free-official-data-runner
+  cancel-in-progress: false
+
+jobs:
+  merge-wild4-research-state:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      TZ: Asia/Tokyo
+    steps:
+      - name: Resolve dates
+        id: dates
+        env:
+          INPUT_CURRENT: ${{ inputs.current_date }}
+          INPUT_PREVIOUS: ${{ inputs.previous_date }}
+        run: |
+          set -euo pipefail
+          current="${INPUT_CURRENT:-$(date +%F)}"
+          previous="${INPUT_PREVIOUS:-$(date --date='yesterday' +%F)}"
+          python3 - "${current}" "${previous}" <<'PY'
+          import datetime as dt
+          import sys
+          current=dt.date.fromisoformat(sys.argv[1])
+          previous=dt.date.fromisoformat(sys.argv[2])
+          if previous >= current:
+              raise SystemExit("WILD4_MERGE_DATE_ORDER")
+          PY
+          printf 'current=%s\nprevious=%s\n' "${current}" "${previous}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore current encrypted state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-wild4-merge-current-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-${{ steps.dates.outputs.current }}-
+
+      - name: Hold current state aside
+        run: |
+          set -euo pipefail
+          test -s .relay-cache/state.tgz.gpg
+          mv .relay-cache/state.tgz.gpg "${RUNNER_TEMP}/current-state.gpg"
+
+      - name: Restore previous encrypted state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-wild4-merge-previous-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-${{ steps.dates.outputs.previous }}-
+
+      - name: Merge only verified prior-day WILD4 OOS evidence
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          CURRENT_DATE: ${{ steps.dates.outputs.current }}
+          PREVIOUS_DATE: ${{ steps.dates.outputs.previous }}
+        run: |
+          set -euo pipefail
+          test -s .relay-cache/state.tgz.gpg
+          mv .relay-cache/state.tgz.gpg "${RUNNER_TEMP}/previous-state.gpg"
+          for label in current previous; do
+            mkdir -p "${RUNNER_TEMP}/${label}-state"
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3               --decrypt --output "${RUNNER_TEMP}/${label}-state.tgz"               "${RUNNER_TEMP}/${label}-state.gpg"
+            exec 3<&-
+            tar -xzf "${RUNNER_TEMP}/${label}-state.tgz"               -C "${RUNNER_TEMP}/${label}-state"
+          done
+
+          source="${RUNNER_TEMP}/previous-state/store/g11/wild-pack-oos/morning/${PREVIOUS_DATE}"
+          target="${RUNNER_TEMP}/current-state/store/g11/wild-pack-oos/morning/${PREVIOUS_DATE}"
+          test -s "${source}/bet-eligible.manifest.json"
+          test -s "${source}/bet-eligible.json.gz"
+          mkdir -p "${target}"
+          rsync -a --ignore-existing "${source}/" "${target}/"
+
+          python3 - "${target}" "${PREVIOUS_DATE}" <<'PY'
+          import gzip, hashlib, json, pathlib, sys
+          root=pathlib.Path(sys.argv[1])
+          expected_date=sys.argv[2]
+          manifest=json.loads((root/"bet-eligible.manifest.json").read_text())
+          artifact=root/"bet-eligible.json.gz"
+          if manifest.get("KIND")!="SETTLEMENT":
+              raise SystemExit("WILD4_MERGE_KIND")
+          if manifest.get("OPERATIONAL_DATE_JST")!=expected_date:
+              raise SystemExit("WILD4_MERGE_DATE")
+          if hashlib.sha256(artifact.read_bytes()).hexdigest()!=manifest.get("ARTIFACT_SHA256"):
+              raise SystemExit("WILD4_MERGE_HASH")
+          value=json.loads(gzip.decompress(artifact.read_bytes()))
+          if value.get("BET_ELIGIBLE_RACES")!=manifest.get("BET_ELIGIBLE_RACES"):
+              raise SystemExit("WILD4_MERGE_COUNT")
+          print("G11_WILD4_MERGED_ELIGIBLE", value["BET_ELIGIBLE_RACES"])
+          PY
+
+          rm -rf .relay-state
+          mkdir -p .relay-state
+          cp -a "${RUNNER_TEMP}/current-state/." .relay-state/
+          test "$(python3 -c 'import json;print(json.load(open(".relay-state/relay-state.json"))["OPERATIONAL_DATE_JST"])')" = "${CURRENT_DATE}"
+
+      - name: Encrypt merged current state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p .relay-cache
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . |             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3               --symmetric --cipher-algo AES256               --output .relay-cache/state.tgz.gpg
+          exec 3<&-
+          test -s .relay-cache/state.tgz.gpg
+
+      - name: Save merged current state
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ steps.dates.outputs.current }}-${{ github.run_id }}
