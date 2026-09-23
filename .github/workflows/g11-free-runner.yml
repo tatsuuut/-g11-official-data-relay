@@ -81,6 +81,7 @@ jobs:
           REQUESTED_DATE: ${{ inputs.operational_date }}
           EVENT_NAME: ${{ github.event_name }}
           SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
           now_hour="$(date +%H)"
@@ -112,9 +113,14 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # Push is diagnostic only; production timing remains owned by the
-            # fixed morning/predeadline/night schedules.
-            phase="predeadline"
+            # One bounded recovery marker can launch today's MORNING phase
+            # independently. Ordinary pushes remain PREDEADLINE diagnostics.
+            if [[ "${COMMIT_MESSAGE}" == *"[morning-20260923]"* ]]; then
+              phase="morning"
+              operational_date="2026-09-23"
+            else
+              phase="predeadline"
+            fi
           elif [ "${now_hour}" -ge 2 ] && [ "${now_hour}" -le 7 ]; then
             phase="morning"
           elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
