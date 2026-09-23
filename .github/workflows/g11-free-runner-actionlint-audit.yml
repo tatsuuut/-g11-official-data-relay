@@ -1,0 +1,29 @@
+name: G11 free runner actionlint audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-free-runner-actionlint-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 1
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      - name: Lint production runner
+        run: |
+          set -euo pipefail
+          "$(go env GOPATH)/bin/actionlint" -verbose .github/workflows/g11-free-runner.yml
