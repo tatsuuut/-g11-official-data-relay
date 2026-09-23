@@ -1145,11 +1145,6 @@ jobs:
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
             if [ "${http_status}" = "413" ] && [ "${{ steps.due.outputs.phase }}" = "night" ]; then
-              if PYTHONPATH=".g11-private" python3 -m g11.relay.gzip_sync_retry_v1 "${FEED}" "${G11_APP_ORIGIN}" "${token}" "${feed_sha}"; then
-                echo 'G11_NIGHT_GZIP_RETRY=PASS'
-                printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
-                exit 0
-              fi
               if PYTHONPATH=".g11-private" python3 -m g11.relay.chunked_sync_retry_v1 "${FEED}" "${G11_APP_ORIGIN}" "${token}" "${feed_sha}"; then
                 printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
                 exit 0
