@@ -878,23 +878,7 @@ jobs:
                     then del(.wild_pack)
                     else .
                     end
-                  # NIGHT may add only result/score facts. Freeze every
-                  # prediction-time odds/live field exactly to the already
-                  # accepted same-day feed, including null/absent live rows.
-                  | if (($prior | type) == "object")
-                    then .predeadline = $prior.predeadline
-                      | .predeadline_exclusion_reason = $prior.predeadline_exclusion_reason
-                      | .odds_merit = $prior.odds_merit
-                      | .best_ev_bet = $prior.best_ev_bet
-                      | .best_ev = $prior.best_ev
-                      | .value_bets = $prior.value_bets
-                      | .odds_captured_at_jst = $prior.odds_captured_at_jst
-                    else .
-                    end
                 )
-              | .counts.odds_enriched = $stored[0].counts.odds_enriched
-              | .counts.odds_waiting = $stored[0].counts.odds_waiting
-              | .counts.win_candidates = $stored[0].counts.win_candidates
             ' "${FEED}" > .relay-output/feed-night-immutable.json
             mv .relay-output/feed-night-immutable.json "${FEED}"
           fi
