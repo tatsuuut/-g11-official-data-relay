@@ -1022,6 +1022,15 @@ jobs:
           PY
           fi
 
+          # Compact special-eight to the deployed Site's deterministic
+          # seven-bet transport view BEFORE public NIGHT finance is computed.
+          # This keeps public stake/hit fields consistent with the exact bets
+          # visible in the app while canonical 8-point accounting remains in
+          # encrypted research state.
+          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+            python3 scripts/audit_public_surface.py special-eight-site-compat "${FEED}"
+          fi
+
           # Re-settle display-only NIGHT finance against the exact immutable
           # MORNING practical_bets already accepted by the Site. Canonical
           # RESEARCH_LEDGER60 remains untouched in encrypted state.
