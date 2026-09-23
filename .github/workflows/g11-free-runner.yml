@@ -1173,6 +1173,43 @@ jobs:
               printf 'G11 WILD compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
               jq -c . .relay-output/publish-result.json >&2 || true
             fi
+            if [ "${http_status}" = "400" ] && \
+               jq -e '.error == "FEED_RACE_FIELDS"' \
+                 .relay-output/publish-result.json >/dev/null 2>&1; then
+              echo 'G11_RACE_FIELDS_DYNAMIC_COMPAT=BEGIN'
+              if [ -s "${previous_wild}" ]; then
+                allowed_fields="$(jq -c '[.races[] | keys[]] | unique' "${previous_wild}")"
+                incoming_fields="$(jq -c '[.races[] | keys[]] | unique' "${FEED}")"
+                echo "G11_RACE_FIELDS_ALLOWED=${allowed_fields}"
+                echo "G11_RACE_FIELDS_INCOMING=${incoming_fields}"
+                jq -c --argjson allowed "${allowed_fields}" '
+                  .races |= map(
+                    with_entries(
+                      select(.key as $k | (($allowed | index($k)) != null))
+                    )
+                  )
+                ' "${FEED}" > .relay-output/feed-race-fields-compat.json
+                mv .relay-output/feed-race-fields-compat.json "${FEED}"
+                feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+                http_status="$(curl --silent --show-error \
+                  -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
+                  -H "Authorization: Bearer ${token}" \
+                  -H 'Content-Type: application/json' \
+                  -H "x-g11-feed-sha256: ${feed_sha}" \
+                  --data-binary "@${FEED}" \
+                  --output .relay-output/publish-result.json \
+                  --write-out '%{http_code}')"
+                if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
+                  echo 'G11_RACE_FIELDS_DYNAMIC_COMPAT=PASS'
+                  printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+                  exit 0
+                fi
+                printf 'G11 dynamic race-field compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
+                jq -c . .relay-output/publish-result.json >&2 || true
+              else
+                echo 'G11_RACE_FIELDS_DYNAMIC_COMPAT_REFERENCE_MISSING' >&2
+              fi
+            fi
             if [ "${http_status}" = "409" ] && \
                [ "${{ steps.due.outputs.phase }}" = "night" ] && \
                jq -e '.error == "NIGHT_IMMUTABLE_CONFLICT"' \
