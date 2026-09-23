@@ -114,6 +114,28 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     reference_races = reference.get("races")
     incoming_races = feed.get("races")
     if feed.get("stage") == "MORNING":
+        anomalies = []
+        for race in incoming_races if isinstance(incoming_races, list) else []:
+            if not isinstance(race, dict):
+                continue
+            points = race.get("production_points")
+            p3_bets = race.get("p3_production_bets")
+            practical = race.get("practical_bets")
+            if points not in (3, 5, 7) or (
+                isinstance(practical, list) and isinstance(points, int)
+                and len(practical) != points
+            ):
+                anomalies.append({
+                    "key": race.get("key"),
+                    "venue": race.get("venue"),
+                    "race": race.get("race"),
+                    "production_points": points,
+                    "practical_bets": practical,
+                    "p3_production_bets": p3_bets,
+                    "p3_status": race.get("p3_status"),
+                    "p3_snapshot": race.get("p3_snapshot"),
+                })
+        print("G11_MORNING_POINT_ANOMALIES=" + json.dumps(anomalies, ensure_ascii=False, sort_keys=True))
         print("G11_SITE_SCHEMA_PROJECT=SKIP_MORNING")
         return 0
     if not isinstance(reference_races, list) or not reference_races:
