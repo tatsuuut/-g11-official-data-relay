@@ -1,7 +1,7 @@
 name: G11 free official-data runner
 
 on:
-  # 9/23 MORNING compact display transport retry.
+  # 9/23 MORNING identify five missing P3 races.
   # 2026-09-20: verify WILD OOS, daily rollover, and unavailable-phase fail-closed. Transport compactness recheck. 9/23 morning schema inspection.
   push:
     branches:
