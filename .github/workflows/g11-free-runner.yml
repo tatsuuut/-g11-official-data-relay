@@ -1,7 +1,7 @@
 name: G11 free official-data runner
 
 on:
-  # 9/23 MORNING Site transport nulls unsupported Abeken LIVE.
+  # 9/23 MORNING publish with exact required display schema.
   # 2026-09-20: verify WILD OOS, daily rollover, and unavailable-phase fail-closed. Transport compactness recheck. 9/23 morning schema inspection.
   push:
     branches:
