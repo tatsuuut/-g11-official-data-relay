@@ -117,7 +117,10 @@ jobs:
           elif [ "${EVENT_NAME}" = "push" ]; then
             # One bounded recovery marker can launch today's MORNING phase
             # independently. Ordinary pushes remain PREDEADLINE diagnostics.
-            if [[ "${COMMIT_MESSAGE}" == *"[morning-20260923]"* ]]; then
+            if [[ "${COMMIT_MESSAGE}" == *"[morning-current]"* ]]; then
+              phase="morning"
+              operational_date="$(date +%F)"
+            elif [[ "${COMMIT_MESSAGE}" == *"[morning-20260923]"* ]]; then
               phase="morning"
               operational_date="2026-09-23"
             else
