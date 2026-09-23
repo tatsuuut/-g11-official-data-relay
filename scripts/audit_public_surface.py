@@ -136,6 +136,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                     "p3_snapshot": race.get("p3_snapshot"),
                 })
         print("G11_MORNING_POINT_ANOMALIES=" + json.dumps(anomalies, ensure_ascii=False, sort_keys=True))
+        special_eight_site_compat(feed_path)
         print("G11_SITE_SCHEMA_PROJECT=SKIP_MORNING")
         return 0
     if not isinstance(reference_races, list) or not reference_races:
