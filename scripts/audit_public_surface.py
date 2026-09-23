@@ -10,6 +10,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
     ".github/workflows/g11-free-runner.yml",
+    ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml",
     ".github/workflows/g11-explicit-night-dispatcher.yml",
     ".github/workflows/g11-night-backfill-20260917-20260919.yml",
     ".github/workflows/g11-wild-position-bootstrap.yml",
