@@ -136,6 +136,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                     if isinstance(prior, dict):
                         for field in (
                             "predeadline",
+                            "predeadline_exclusion_reason",
                             "odds_merit",
                             "best_ev_bet",
                             "best_ev",
@@ -164,6 +165,12 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                                     value["verification10"] = []
                 if "original_display_research" in stored:
                     feed["original_display_research"] = stored["original_display_research"]
+                stored_counts = stored.get("counts")
+                incoming_counts = feed.get("counts")
+                if isinstance(stored_counts, dict) and isinstance(incoming_counts, dict):
+                    for field in ("odds_enriched", "odds_waiting", "win_candidates"):
+                        if field in stored_counts:
+                            incoming_counts[field] = stored_counts[field]
                 feed_path.write_text(
                     json.dumps(
                         feed,
