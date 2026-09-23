@@ -88,6 +88,61 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
             schema = _merge_schema(schema, race)
     if not isinstance(schema, dict):
         fail("schema reference invalid")
+    def collect_profile(races):
+        type_map = {}
+        keyset_map = {}
+
+        def kind(value):
+            if value is None:
+                return "null"
+            if isinstance(value, bool):
+                return "bool"
+            if isinstance(value, (int, float)):
+                return "number"
+            if isinstance(value, str):
+                return "string"
+            if isinstance(value, dict):
+                return "object"
+            if isinstance(value, list):
+                return "array"
+            return type(value).__name__
+
+        def walk(value, path):
+            type_map.setdefault(path, set()).add(kind(value))
+            if isinstance(value, dict):
+                keyset_map.setdefault(path, set()).add(tuple(sorted(value)))
+                for key, child in value.items():
+                    walk(child, f"{path}.{key}")
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child, f"{path}[]")
+
+        for race in races:
+            if isinstance(race, dict):
+                walk(race, "race")
+        return type_map, keyset_map
+
+    accepted_types, accepted_keysets = collect_profile(reference_races)
+    incoming_types, incoming_keysets = collect_profile(incoming_races)
+    type_diffs = {
+        path: {
+            "accepted": sorted(accepted_types.get(path, set())),
+            "incoming": sorted(types),
+        }
+        for path, types in incoming_types.items()
+        if not types.issubset(accepted_types.get(path, set()))
+    }
+    keyset_diffs = {
+        path: {
+            "accepted": [list(keys) for keys in sorted(accepted_keysets.get(path, set()))],
+            "incoming": [list(keys) for keys in sorted(keysets)],
+        }
+        for path, keysets in incoming_keysets.items()
+        if not keysets.issubset(accepted_keysets.get(path, set()))
+    }
+    print("G11_SITE_SCHEMA_TYPE_DIFF=" + json.dumps(type_diffs, ensure_ascii=False, sort_keys=True))
+    print("G11_SITE_SCHEMA_KEYSET_DIFF=" + json.dumps(keyset_diffs, ensure_ascii=False, sort_keys=True))
+
     dropped = []
     feed["races"] = [
         _prune_to_schema(race, schema, "race", dropped)
