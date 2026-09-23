@@ -1,7 +1,7 @@
 name: G11 free official-data runner
 
 on:
-  # 9/23 MORNING point-contract diagnostic.
+  # 9/23 MORNING special-eight compatibility inside projector.
   # 2026-09-20: verify WILD OOS, daily rollover, and unavailable-phase fail-closed. Transport compactness recheck. 9/23 morning schema inspection.
   push:
     branches:
@@ -1124,7 +1124,6 @@ jobs:
             echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
           fi
 
-          python3 scripts/audit_public_surface.py special-eight-site-compat "${FEED}"
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
