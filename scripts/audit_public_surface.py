@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import json
 import pathlib
 import re
@@ -41,6 +42,36 @@ FORBIDDEN_PATTERNS = {
 PATTERN_DEFINITION_FILE = "scripts/audit_public_surface.py"
 
 
+
+
+def _keyset_variants(rows):
+    variants = Counter(
+        tuple(sorted(row.keys()))
+        for row in rows
+        if isinstance(row, dict)
+    )
+    return [
+        {"count": count, "keys": list(keys)}
+        for keys, count in sorted(variants.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _nested_keyset_variants(rows, field):
+    variants = Counter()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        value = row.get(field)
+        if isinstance(value, dict):
+            variants[tuple(sorted(value.keys()))] += 1
+        elif value is None:
+            variants[("<NULL>",)] += 1
+        else:
+            variants[(f"<TYPE:{type(value).__name__}>",)] += 1
+    return [
+        {"count": count, "keys": list(keys)}
+        for keys, count in sorted(variants.items(), key=lambda item: (-item[1], item[0]))
+    ]
 
 def _merge_schema(current, value):
     if isinstance(value, dict):
@@ -153,6 +184,11 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
         json.dumps(feed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n",
         encoding="utf-8",
     )
+    print("G11_SITE_REFERENCE_RACE_KEYSETS=" + json.dumps(_keyset_variants(reference_races), ensure_ascii=False, sort_keys=True))
+    print("G11_SITE_INCOMING_RACE_KEYSETS=" + json.dumps(_keyset_variants(incoming_races), ensure_ascii=False, sort_keys=True))
+    for field in ("original_display_shadow", "wild_pack", "abeken_shadow", "p3_snapshot", "result_meta", "research_finance", "actual_purchase", "predeadline", "three_engine_score"):
+        print("G11_SITE_REFERENCE_NESTED_" + field.upper() + "=" + json.dumps(_nested_keyset_variants(reference_races, field), ensure_ascii=False, sort_keys=True))
+        print("G11_SITE_INCOMING_NESTED_" + field.upper() + "=" + json.dumps(_nested_keyset_variants(incoming_races, field), ensure_ascii=False, sort_keys=True))
     print("G11_SITE_SCHEMA_PROJECT=PASS")
     print("G11_SITE_SCHEMA_DROPPED=" + json.dumps(sorted(set(dropped)), ensure_ascii=False))
     return 0
