@@ -1124,6 +1124,7 @@ jobs:
             echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
           fi
 
+          python3 scripts/audit_public_surface.py special-eight-site-compat "${FEED}"
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
