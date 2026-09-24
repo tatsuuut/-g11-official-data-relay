@@ -1,0 +1,31 @@
+name: G11 push API options audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-push-api-options-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect push API methods
+        run: |
+          set -euo pipefail
+          for endpoint in g11-push-subscription g11-push-config g11-sync; do
+            echo "ENDPOINT=${endpoint}"
+            status=$(curl --silent --show-error --location \
+              -X OPTIONS \
+              -D "${endpoint}.headers" \
+              -o "${endpoint}.body" \
+              -w '%{http_code}' \
+              "https://g11-race-lab.higatatsunori2.chatgpt.site/api/${endpoint}")
+            echo "HTTP=${status}"
+            sed -n '1,25p' "${endpoint}.headers"
+            cat "${endpoint}.body" || true
+            echo
+          done
