@@ -1,0 +1,36 @@
+name: G11 push API state audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-push-api-state-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect push API state
+        run: |
+          set -euo pipefail
+          echo 'PUSH_CONFIG='
+          curl --silent --show-error --location \
+            -D push-config.headers \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-push-config' \
+            -o push-config.json
+          sed -n '1,20p' push-config.headers
+          cat push-config.json
+          echo
+          echo 'PUSH_SUBSCRIPTION_GET='
+          status=$(curl --silent --show-error --location \
+            -D push-sub.headers \
+            -o push-sub.body \
+            -w '%{http_code}' \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-push-subscription')
+          echo "HTTP=${status}"
+          sed -n '1,20p' push-sub.headers
+          cat push-sub.body || true
+          echo
