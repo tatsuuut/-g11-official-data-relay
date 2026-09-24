@@ -752,6 +752,7 @@ jobs:
               and .research_db.available == false
             ' "${FEED}" >/dev/null; then
               echo 'allowed=true' >> "${GITHUB_OUTPUT}"
+              touch .relay-output/rescue-night-nonresearch
               echo 'G11_NIGHT_PUBLICATION_GATE=PASS_RESCUE_NONRESEARCH'
             else
               echo 'allowed=false' >> "${GITHUB_OUTPUT}"
@@ -796,15 +797,6 @@ jobs:
           FEED: .relay-output/feed.json
         run: |
           set -euo pipefail
-          rescue_night=false
-          if [ "${{ steps.due.outputs.phase }}" = "night" ] && \
-             [ -f .relay-output/result.json ] && \
-             jq -e '.STATUS == "SAME_DAY_RESCUE_NIGHT_RESULTS_COMPLETE"' \
-               .relay-output/result.json >/dev/null 2>&1; then
-            rescue_night=true
-            echo 'G11_RESCUE_NIGHT_TRANSPORT=TRUE'
-          fi
-
           # Preserve already-accepted immutable race snapshots.
           if curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
@@ -1089,16 +1081,16 @@ jobs:
           # no canonical workbook-ledger-projection; its public contract is
           # official results + already-locked prediction display only.
           if [ "${{ steps.due.outputs.phase }}" = "night" ] && \
-             [ "${rescue_night}" != "true" ]; then
+             [ ! -f .relay-output/rescue-night-nonresearch ]; then
             PYTHONPATH=".g11-private" python3 -m g11.relay.night_transport_finance_v1 \
               "${FEED}" \
               ".relay-state/store/snapshots/night/workbook-ledger-projection.json"
-          elif [ "${rescue_night}" = "true" ]; then
+          elif [ -f .relay-output/rescue-night-nonresearch ]; then
             echo 'G11_NIGHT_FINANCE=NOT_APPLICABLE_RESCUE_NONRESEARCH'
           fi
 
           if [ "${{ steps.due.outputs.phase }}" = "night" ] && \
-             [ "${rescue_night}" != "true" ]; then
+             [ ! -f .relay-output/rescue-night-nonresearch ]; then
             python3 - "${FEED}" <<'PY'
           import collections, json, sys
           feed=json.load(open(sys.argv[1],encoding="utf-8"))
