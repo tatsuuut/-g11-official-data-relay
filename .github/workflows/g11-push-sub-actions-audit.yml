@@ -22,7 +22,7 @@ jobs:
               -X POST \
               -H 'Content-Type: application/json' \
               -H 'Origin: https://g11-race-lab.higatatsunori2.chatgpt.site' \
-              -d "{\"action\":\"${action}\",\"endpoint\":\"https://invalid.example.test/push\"}" \
+              -d "{\"action\":\"${action}\",\"endpoint\":\"https://fcm.googleapis.com/fcm/send/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}" \
               -o body.json \
               -w '%{http_code}' \
               'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-push-subscription')
