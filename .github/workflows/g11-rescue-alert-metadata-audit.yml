@@ -1,0 +1,57 @@
+name: G11 rescue alert metadata audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-rescue-alert-metadata-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout relay fix
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      - name: Lint production runner
+        run: "$(go env GOPATH)/bin/actionlint" .github/workflows/g11-free-runner.yml
+
+      - name: Prove rescue alert metadata stays nonresearch
+        run: |
+          set -euo pipefail
+          cat > feed.json <<'JSON'
+          {"races":[
+            {"key":"r1","research_eligible":false,"formal_status":"EXCLUDED","exclusion_reason":"SAME_DAY_RESCUE_NONRESEARCH","predeadline":{"value_alert":true,"odds_merit":"◎"}},
+            {"key":"r2","research_eligible":false,"formal_status":"EXCLUDED","exclusion_reason":"SAME_DAY_RESCUE_NONRESEARCH","predeadline":{"value_alert":false,"odds_merit":"○"}},
+            {"key":"r3","research_eligible":true,"formal_status":"FORMAL","exclusion_reason":null,"predeadline":{"value_alert":true,"odds_merit":"◎"}}
+          ]}
+          JSON
+          jq -c '
+            .races |= map(
+              if (.exclusion_reason == "SAME_DAY_RESCUE_NONRESEARCH")
+                 and ((.predeadline | type) == "object")
+                 and (.predeadline.value_alert == true)
+                 and (.predeadline.odds_merit == "◎")
+                then .predeadline.rescue_value_alert = true
+                  | .predeadline.rescue_value_alert_type = "SAME_DAY_RESCUE_NONRESEARCH"
+                elif ((.predeadline | type) == "object")
+                then del(.predeadline.rescue_value_alert,.predeadline.rescue_value_alert_type)
+                else .
+                end
+            )
+          ' feed.json > out.json
+          jq -e '
+            .races[0].research_eligible == false
+            and .races[0].formal_status == "EXCLUDED"
+            and .races[0].predeadline.rescue_value_alert == true
+            and .races[0].predeadline.rescue_value_alert_type == "SAME_DAY_RESCUE_NONRESEARCH"
+            and (.races[1].predeadline | has("rescue_value_alert") | not)
+            and (.races[2].predeadline | has("rescue_value_alert") | not)
+          ' out.json >/dev/null
+          echo 'RESCUE_ALERT_METADATA_NONRESEARCH=PASS'
