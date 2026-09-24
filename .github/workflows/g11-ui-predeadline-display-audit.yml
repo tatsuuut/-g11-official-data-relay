@@ -1,0 +1,56 @@
+name: G11 UI predeadline display audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-ui-predeadline-display-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect current app feed and UI strings
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-24' \
+            -o feed.json
+          echo 'FEED_SUMMARY='
+          jq -c '{stage,generated_at_jst,counts}' feed.json
+          echo 'RACE_SAMPLE='
+          jq -c '[.races[] | select(.key=="20260924-18-03" or .key=="20260924-21-03" or .key=="20260924-10-04" or .key=="20260924-18-04" or .key=="20260924-21-04" or .key=="20260924-10-05") | {key,deadline_jst,predeadline,predeadline_exclusion_reason}]' feed.json
+          page=$(mktemp)
+          curl --fail-with-body --silent --show-error --location \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site' -o "${page}"
+          python3 - "${page}" <<'PY' > assets.txt
+          import pathlib,re,sys
+          html=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          seen=[]
+          for v in re.findall(r'''(?:src|href)=["']([^"']+\.js(?:\?[^"']*)?)["']''', html):
+              if v not in seen:
+                  seen.append(v)
+          print('\n'.join(seen))
+          PY
+          found=0
+          while IFS= read -r asset; do
+            [ -n "${asset}" ] || continue
+            case "${asset}" in
+              http*) url="${asset}" ;;
+              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
+              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+            esac
+            js=$(mktemp)
+            curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
+            python3 - "${js}" <<'PY'
+          import pathlib,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          needles=['直前待ち','直前取得失敗','朝LOCK維持','WILD4 BET','HEAD_DERIVED_SHADOW','NOT_WILD2']
+          for n in needles:
+              if n in text:
+                  print('UI_STRING_FOUND='+n)
+          PY
+          done < assets.txt
