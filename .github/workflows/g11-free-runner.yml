@@ -318,6 +318,7 @@ jobs:
         env:
           WILD_MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning
         run: |
+          python3 -m py_compile g11/relay/rescue_v1.py g11/relay/rescue_entry_v2.py
           python3 - "${WILD_MODEL_ROOT}" <<'PY'
           import hashlib
           import json
@@ -384,14 +385,30 @@ jobs:
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
+          RESCUE_STORE: ${{ github.workspace }}/.relay-state/rescue/store
         run: |
           set -euo pipefail
-          if [ ! -f "${STATE_STORE}/manifest.json" ] || \
-             [ ! -f "${STATE_STORE}/snapshots/morning/official-day-input.json" ]; then
-            echo "G11_EARLY_PREDEADLINE_CAPTURE=SKIP_MORNING_UNAVAILABLE"
+
+          capture_store=""
+          capture_mode=""
+          if [ -f "${STATE_STORE}/manifest.json" ] && \
+             [ -f "${STATE_STORE}/snapshots/morning/official-day-input.json" ]; then
+            capture_store="${STATE_STORE}"
+            capture_mode="CANONICAL"
+          elif [ -f "${RESCUE_STORE}/manifest.json" ] && \
+               [ -f "${RESCUE_STORE}/snapshots/morning/official-day-input.json" ]; then
+            # A missing canonical MORNING must not disable the time-critical
+            # T-7 official capture.  The isolated rescue store is already
+            # future-only/nonresearch and carries its own sealed PREDEADLINE
+            # plan, so it can safely protect the capture window here.
+            capture_store="${RESCUE_STORE}"
+            capture_mode="SAME_DAY_RESCUE"
+          else
+            echo "G11_EARLY_PREDEADLINE_CAPTURE=SKIP_NO_VERIFIED_MORNING_STORE"
             exit 0
           fi
-          python3 - "${STATE_STORE}" <<'PY'
+
+          python3 - "${capture_store}" "${capture_mode}" <<'PY'
           import json
           import pathlib
           import sys
@@ -399,6 +416,7 @@ jobs:
           from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
 
           store = pathlib.Path(sys.argv[1])
+          store_mode = sys.argv[2]
           result = CanonicalRunner(OfficialArtifactStore(store)).run_due_predeadline(
               max_requests=48
           )
@@ -406,6 +424,7 @@ jobs:
               "G11_EARLY_PREDEADLINE_CAPTURE="
               + json.dumps(
                   {
+                      "store_mode": store_mode,
                       "status": result.get("STATUS"),
                       "acquired_count": len(result.get("ACQUIRED", [])),
                       "missed_count": len(result.get("MISSED", [])),
