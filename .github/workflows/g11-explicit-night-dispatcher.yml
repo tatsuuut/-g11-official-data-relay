@@ -117,7 +117,7 @@ jobs:
               python3 - "${js}" <<'PY'
           import pathlib,re,sys
           text=pathlib.Path(sys.argv[1]).read_text(encoding="utf-8",errors="replace")
-          needles=["夜結果待ち","変更案の提示","本番採用審査","処刑監査室","night_execution","TRIFECTA_NOT_ESTABLISHED","result_trifecta"]
+          needles=["夜結果待ち","変更案の提示","本番採用審査","処刑監査室","night_execution","TRIFECTA_NOT_ESTABLISHED","result_trifecta","reference_finance","reference_practical_hit"]
           for needle in needles:
               start=0
               shown=0
