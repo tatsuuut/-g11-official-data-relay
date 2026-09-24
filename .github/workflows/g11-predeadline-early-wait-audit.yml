@@ -35,4 +35,4 @@ jobs:
           python3 -m compileall -q g11/canonical/official_pipeline.py g11/canonical/test_official_pipeline.py
           python3 -m unittest -v \
             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_due_runner_waits_in_process_when_t7_boundary_is_near
-          python3 -m unittest -v g11.canonical.test_official_pipeline
+          python3 -m unittest -v g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests
