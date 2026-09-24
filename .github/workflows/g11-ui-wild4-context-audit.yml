@@ -53,3 +53,24 @@ jobs:
                   shown+=1
           PY
           done < assets.txt
+          curl --fail-with-body --silent --show-error --location \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-24' \
+            -o feed.json
+          echo 'RESCUE_WILD_DISPLAY_STATE='
+          jq -c '{
+            stage,
+            wild_authority:.canonical_authorities.wild_pack,
+            true_ai_display:(.true_ai.app_display_authorized // null),
+            true_ai_predictions:((.true_ai.public_predictions // [])|length),
+            race_sample:(.races[0].wild_pack)
+          }' feed.json
+          jq -e '
+            .canonical_authorities.wild_pack.implementation_status == "PASS"
+            and .canonical_authorities.wild_pack.morning_full_pack_ready == true
+            and .canonical_authorities.wild_pack.app_source_binding_status == "PASS"
+            and (.canonical_authorities.wild_pack.runtime_current_pack_id | type) == "string"
+            and .canonical_authorities.wild_pack.runtime_current_pack_id == .canonical_authorities.wild_pack.app_published_pack_id
+            and (.true_ai.app_display_authorized // false) == false
+            and ((.true_ai.public_predictions // []) | length) == 0
+          ' feed.json >/dev/null
+          echo 'FAKE_WILD4_HEAD_DERIVED_SURFACE=SUPPRESSED'
