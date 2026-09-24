@@ -115,9 +115,13 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # One bounded recovery marker can launch today's MORNING phase
-            # independently. Ordinary pushes remain PREDEADLINE diagnostics.
-            if [[ "${COMMIT_MESSAGE}" == *"[morning-current]"* ]]; then
+            # Explicit bounded recovery markers may launch today's MORNING or
+            # NIGHT phase independently. Ordinary pushes remain PREDEADLINE
+            # diagnostics.
+            if [[ "${COMMIT_MESSAGE}" == *"[night-current]"* ]]; then
+              phase="night"
+              operational_date="$(date +%F)"
+            elif [[ "${COMMIT_MESSAGE}" == *"[morning-current]"* ]]; then
               phase="morning"
               operational_date="$(date +%F)"
             elif [[ "${COMMIT_MESSAGE}" == *"[morning-20260923]"* ]]; then
@@ -730,6 +734,33 @@ jobs:
             echo 'allowed=true' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
+          # A same-day rescue NIGHT is deliberately nonresearch.  Its runtime
+          # result is authoritative only for display/official result attachment,
+          # so gate it on complete official race results rather than the normal
+          # RESEARCH_LEDGER60 completeness contract.
+          if [ -f .relay-output/result.json ] && \
+             jq -e '.STATUS == "SAME_DAY_RESCUE_NIGHT_RESULTS_COMPLETE"' \
+               .relay-output/result.json >/dev/null 2>&1; then
+            if jq -e '
+              .stage == "NIGHT"
+              and .status == "PASS"
+              and .counts.races > 0
+              and .counts.pending == 0
+              and .counts.results == .counts.races
+              and .counts.formal == 0
+              and .counts.research_samples == 0
+              and .research_db.available == false
+            ' "${FEED}" >/dev/null; then
+              echo 'allowed=true' >> "${GITHUB_OUTPUT}"
+              echo 'G11_NIGHT_PUBLICATION_GATE=PASS_RESCUE_NONRESEARCH'
+            else
+              echo 'allowed=false' >> "${GITHUB_OUTPUT}"
+              echo 'G11_NIGHT_PUBLICATION_GATE=DEFER_RESCUE_INCOMPLETE'
+              jq -c '{stage,status,counts,research_db}' "${FEED}"
+            fi
+            exit 0
+          fi
+
           if jq -e '
             .stage == "NIGHT"
             and .status == "PASS"
