@@ -1308,28 +1308,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
-          if [ ! -f "${day_root}/morning-predictions.manifest.json" ]; then
-            exit 0
-          fi
           now_hhmm="$(date +%H%M)"
           if [ "${now_hhmm}" -ge 2050 ]; then
             exit 0
           fi
 
-          # Scheduled Actions are best-effort and can arrive more than seven
-          # minutes late. Leave enough spacing for the next official update,
-          # then continue only when no other run is already queued/running.
+          # Scheduled Actions are best-effort and have been observed arriving
+          # 10-20+ minutes late.  The exact PREDEADLINE capture window starts
+          # seven minutes before cutoff, so a delayed cron event must NEVER
+          # suppress the self-chain.  A successful PREDEADLINE runtime is
+          # sufficient authority to keep the heartbeat alive, including the
+          # isolated SAME_DAY_RESCUE_NONRESEARCH lane.
+          #
+          # Only an already queued/running workflow_dispatch continuation is a
+          # duplicate.  Delayed schedule events are deliberately ignored here;
+          # the shared concurrency group serializes them safely.
           sleep 45
           runs="$(curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=20")"
-          active="$(printf '%s' "${runs}" | jq \
+          active_dispatch="$(printf '%s' "${runs}" | jq \
             --argjson current "${GITHUB_RUN_ID}" \
-            '[.workflow_runs[] | select(.id != $current and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending"))] | length')"
-          if [ "${active}" -gt 0 ]; then
+            '[.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending"))] | length')"
+          if [ "${active_dispatch}" -gt 0 ]; then
             exit 0
           fi
           curl --fail-with-body --silent --show-error \
