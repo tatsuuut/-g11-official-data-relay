@@ -826,35 +826,8 @@ jobs:
                     .production_mean_ev
                   )
                 )
-              # Preserve accepted TRUE AI morning predictions only on a
-              # canonical day. Same-day rescue is NONRESEARCH: do not
-              # resurrect its stored TRUE-AI payload, because the Site can
-              # otherwise relabel HEAD-derived helper combinations as WILD4.
-              | if (
-                  ([.races[]
-                    | select(.exclusion_reason == "SAME_DAY_RESCUE_NONRESEARCH")]
-                   | length) == (.races | length)
-                )
-                then .
-                else .true_ai = $stored[0].true_ai
-                end
-              # Keep a rescue ◎ visible to notification transport without
-              # converting the race into FORMAL research/KPI data.
-              | .races |= map(
-                  if (.exclusion_reason == "SAME_DAY_RESCUE_NONRESEARCH")
-                     and ((.predeadline | type) == "object")
-                     and (.predeadline.value_alert == true)
-                     and (.predeadline.odds_merit == "◎")
-                    then .predeadline.rescue_value_alert = true
-                      | .predeadline.rescue_value_alert_type = "SAME_DAY_RESCUE_NONRESEARCH"
-                    elif ((.predeadline | type) == "object")
-                    then del(
-                      .predeadline.rescue_value_alert,
-                      .predeadline.rescue_value_alert_type
-                    )
-                    else .
-                    end
-                )
+              # Preserve accepted TRUE AI morning predictions.
+              | .true_ai = $stored[0].true_ai
               # Preserve accepted 剥きけん predictions.
               | .abeken = $stored[0].abeken
               | .races |= map(
@@ -1240,9 +1213,6 @@ jobs:
             fi
             exit 1
           fi
-          echo 'G11_SYNC_SUCCESS_RESPONSE='
-          jq -c . .relay-output/publish-result.json || \
-            sed -n '1,40p' .relay-output/publish-result.json
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify source identity and projected app readback
