@@ -232,6 +232,74 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
         fail("schema reference has no races")
     if not isinstance(incoming_races, list):
         fail("incoming feed has no races")
+
+    # The deployed Site already supports the legacy non-formal late_reference
+    # object. A same-day rescue NIGHT may use that exact race-local transport
+    # shape to show hit/miss and hypothetical 100-yen-per-bet money without
+    # becoming a formal research sample. Previous-day schema projection must
+    # not strip this optional field merely because yesterday was a normal day.
+    rescue_reference_by_key = {}
+    if (
+        feed.get("stage") == "NIGHT"
+        and isinstance(feed.get("counts"), dict)
+        and feed["counts"].get("formal") == 0
+        and isinstance(feed.get("research_db"), dict)
+        and feed["research_db"].get("available") is False
+    ):
+        required_ref = {
+            "schema", "status", "captured_at_jst", "morning_lock_established",
+            "stored_in_existing_research_ledger", "included_in_formal_metrics",
+            "included_in_coefficient_learning", "included_in_promotion_gate",
+            "notification_eligible", "purchase_executed",
+            "official_result_captured_at_jst", "validation_bets",
+            "reference_practical_hit", "reference_validation_hit",
+            "reference_finance",
+        }
+        required_finance = {
+            "status", "race_refund_occurred", "gross_stake", "refund_amount",
+            "net_investment", "prize_return", "total_return", "profit",
+        }
+        for race in incoming_races:
+            if not isinstance(race, dict):
+                continue
+            ref = race.get("late_reference")
+            if not isinstance(ref, dict):
+                continue
+            finance = ref.get("reference_finance")
+            valid = (
+                set(ref) == required_ref
+                and ref.get("schema") == "G11_LATE_REFERENCE_FEED_V1"
+                and ref.get("status") == "RECORDED_NON_FORMAL_SETTLED"
+                and ref.get("morning_lock_established") is False
+                and ref.get("included_in_formal_metrics") is False
+                and ref.get("included_in_coefficient_learning") is False
+                and ref.get("included_in_promotion_gate") is False
+                and ref.get("notification_eligible") is False
+                and ref.get("purchase_executed") is False
+                and isinstance(ref.get("validation_bets"), list)
+                and isinstance(ref.get("reference_practical_hit"), bool)
+                and isinstance(ref.get("reference_validation_hit"), bool)
+                and isinstance(finance, dict)
+                and set(finance) == required_finance
+                and finance.get("status") == "VERIFIED_HYPOTHETICAL_ONLY"
+                and isinstance(finance.get("race_refund_occurred"), bool)
+                and all(isinstance(finance.get(key), int) for key in (
+                    "gross_stake", "refund_amount", "net_investment",
+                    "prize_return", "total_return", "profit",
+                ))
+                and finance["gross_stake"] - finance["refund_amount"]
+                    == finance["net_investment"]
+                and finance["prize_return"] + finance["refund_amount"]
+                    == finance["total_return"]
+                and finance["total_return"] - finance["gross_stake"]
+                    == finance["profit"]
+                and race.get("formal_status") == "EXCLUDED"
+                and race.get("research_eligible") is False
+            )
+            if not valid:
+                fail("invalid same-day rescue late_reference transport")
+            rescue_reference_by_key[race.get("key")] = ref
+
     schema = None
     for race in reference_races:
         if isinstance(race, dict):
@@ -380,13 +448,29 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
         if isinstance(race, dict) else race
         for race in incoming_races
     ]
+    if rescue_reference_by_key:
+        for race in feed["races"]:
+            if not isinstance(race, dict):
+                continue
+            ref = rescue_reference_by_key.get(race.get("key"))
+            if ref is not None:
+                race["late_reference"] = ref
+        dropped[:] = [
+            item for item in dropped
+            if item != "race.late_reference"
+            and not item.startswith("race.late_reference.")
+        ]
+        print(
+            "G11_SITE_RESCUE_LATE_REFERENCE_PRESERVED="
+            + str(len(rescue_reference_by_key))
+        )
     feed_path.write_text(
         json.dumps(feed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n",
         encoding="utf-8",
     )
     print("G11_SITE_REFERENCE_RACE_KEYSETS=" + json.dumps(_keyset_variants(reference_races), ensure_ascii=False, sort_keys=True))
     print("G11_SITE_INCOMING_RACE_KEYSETS=" + json.dumps(_keyset_variants(incoming_races), ensure_ascii=False, sort_keys=True))
-    for field in ("original_display_shadow", "wild_pack", "abeken_shadow", "p3_snapshot", "result_meta", "research_finance", "actual_purchase", "predeadline", "three_engine_score"):
+    for field in ("original_display_shadow", "wild_pack", "abeken_shadow", "p3_snapshot", "result_meta", "research_finance", "actual_purchase", "predeadline", "three_engine_score", "late_reference"):
         print("G11_SITE_REFERENCE_NESTED_" + field.upper() + "=" + json.dumps(_nested_keyset_variants(reference_races, field), ensure_ascii=False, sort_keys=True))
         print("G11_SITE_INCOMING_NESTED_" + field.upper() + "=" + json.dumps(_nested_keyset_variants(incoming_races, field), ensure_ascii=False, sort_keys=True))
     print("G11_SITE_SCHEMA_PROJECT=PASS")
