@@ -1,0 +1,31 @@
+name: G11 push subscription actions audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-push-sub-actions-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe non-mutating push subscription actions
+        run: |
+          set -euo pipefail
+          for action in status list inspect; do
+            echo "ACTION=${action}"
+            status=$(curl --silent --show-error --location \
+              -X POST \
+              -H 'Content-Type: application/json' \
+              -d "{\"action\":\"${action}\",\"endpoint\":\"https://invalid.example.test/push\"}" \
+              -o body.json \
+              -w '%{http_code}' \
+              'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-push-subscription')
+            echo "HTTP=${status}"
+            cat body.json || true
+            echo
+          done
