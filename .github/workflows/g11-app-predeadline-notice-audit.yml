@@ -1,0 +1,23 @@
+name: G11 app predeadline notice audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-app-predeadline-notice-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect current app feed
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-24' \
+            -o feed.json
+          jq -c '{stage,generated_at_jst,counts}' feed.json
+          jq -c '[.races[] | select(.key=="20260924-18-03" or .key=="20260924-21-03" or .key=="20260924-10-04" or .key=="20260924-18-04" or .key=="20260924-21-04" or .key=="20260924-10-05") | {key,venue,race,deadline_jst,predeadline,predeadline_exclusion_reason,odds_captured_at_jst,odds_merit}]' feed.json
