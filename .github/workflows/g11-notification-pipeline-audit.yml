@@ -40,6 +40,10 @@ jobs:
                   seen.append(v)
           print('\n'.join(seen))
           PY
+          echo 'TOPLEVEL_NOTIFICATION_KEYS='
+          jq -c 'keys | map(select(test("push|notif|alert";"i")))' feed.json
+          echo 'RACE_NOTIFICATION_KEYS='
+          jq -c '[.races[0] | keys[] | select(test("push|notif|alert";"i"))]' feed.json
           while IFS= read -r asset; do
             [ -n "${asset}" ] || continue
             case "${asset}" in
