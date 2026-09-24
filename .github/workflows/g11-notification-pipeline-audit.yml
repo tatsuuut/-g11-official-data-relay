@@ -60,3 +60,22 @@ jobs:
           print('BUNDLE_NOTIFY_ROUTES='+json.dumps(interesting,ensure_ascii=False,sort_keys=True))
           PY
           done < assets.txt
+          while IFS= read -r asset; do
+            [ -n "${asset}" ] || continue
+            case "${asset}" in
+              http*) url="${asset}" ;;
+              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
+              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+            esac
+            js=$(mktemp)
+            curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
+            python3 - "${js}" <<'PY'
+          import pathlib,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          for needle in ['/api/g11-push-config','/api/g11-push-subscription','value_alert','win_candidates','Notification.permission']:
+              pos=text.find(needle)
+              if pos>=0:
+                  print('CONTEXT='+needle)
+                  print(repr(text[max(0,pos-5000):min(len(text),pos+9000)]))
+          PY
+          done < assets.txt
