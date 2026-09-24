@@ -1,0 +1,62 @@
+name: G11 notification pipeline audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-notification-pipeline-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect current feed and deployed notification code
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-24' \
+            -o feed.json
+          echo 'FEED_ALERT_SUMMARY='
+          jq -c '{
+            stage,generated_at_jst,counts,
+            value_alert_count:([.races[]|select((.predeadline.value_alert//false)==true)]|length),
+            live_best_count:([.races[]|select((.predeadline.odds_merit//"")=="◎")]|length),
+            root_best_count:([.races[]|select((.odds_merit//"")=="◎")]|length),
+            samples:([.races[]|select((.predeadline.value_alert//false)==true or (.predeadline.odds_merit//"")=="◎")|{key,venue,race,deadline_jst,predeadline}]|.[0:10])
+          }' feed.json
+
+          page=$(mktemp)
+          curl --fail-with-body --silent --show-error --location \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site' -o "${page}"
+          python3 - "${page}" <<'PY' > assets.txt
+          import pathlib,re,sys
+          html=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          seen=[]
+          for v in re.findall(r'''(?:src|href)=["']([^"']+\.js(?:\?[^"']*)?)["']''', html):
+              if v not in seen:
+                  seen.append(v)
+          print('\n'.join(seen))
+          PY
+          while IFS= read -r asset; do
+            [ -n "${asset}" ] || continue
+            case "${asset}" in
+              http*) url="${asset}" ;;
+              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
+              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+            esac
+            js=$(mktemp)
+            curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
+            python3 - "${js}" <<'PY'
+          import pathlib,re,sys,json
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          needles=['◎通知','Notification','serviceWorker','PushManager','pushManager','subscribe','permission','value_alert','win_candidates']
+          found={n:(n in text) for n in needles}
+          routes=sorted(set(re.findall(r'["\x60\x27](/api/[A-Za-z0-9_?=&./:-]+)',text)))
+          interesting=[r for r in routes if any(k in r.lower() for k in ('notif','push','alert','subscribe','device','token'))]
+          print('BUNDLE_NOTIFY_FLAGS='+json.dumps(found,ensure_ascii=False,sort_keys=True))
+          print('BUNDLE_NOTIFY_ROUTES='+json.dumps(interesting,ensure_ascii=False,sort_keys=True))
+          PY
+          done < assets.txt
