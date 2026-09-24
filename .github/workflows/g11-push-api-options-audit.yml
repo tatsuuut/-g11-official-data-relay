@@ -29,3 +29,14 @@ jobs:
             cat "${endpoint}.body" || true
             echo
           done
+
+          echo 'SYNC_GET='
+          status=$(curl --silent --show-error --location \
+            -D sync-get.headers \
+            -o sync-get.body \
+            -w '%{http_code}' \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-sync')
+          echo "HTTP=${status}"
+          sed -n '1,25p' sync-get.headers
+          cat sync-get.body || true
+          echo
