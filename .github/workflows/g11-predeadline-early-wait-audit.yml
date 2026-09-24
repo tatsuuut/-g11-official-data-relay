@@ -1,0 +1,38 @@
+name: G11 PREDEADLINE early-wait audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-predeadline-early-wait-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Checkout private fix branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: fix/predeadline-early-wait-heartbeat-v1
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1' 'catboost==1.2.8'
+
+      - name: Compile and test canonical PREDEADLINE
+        working-directory: .g11-private
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q g11/canonical/official_pipeline.py g11/canonical/test_official_pipeline.py
+          python3 -m unittest -v \
+            g11.canonical.test_official_pipeline.CanonicalPipelineTest.test_due_runner_waits_in_process_when_t7_boundary_is_near
+          python3 -m unittest -v g11.canonical.test_official_pipeline
