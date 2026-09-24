@@ -102,6 +102,40 @@ def audit_public() -> dict[str, object]:
     require_text(free, "G11_APP_ORIGIN:", "APP_ORIGIN_CONTRACT")
     require_text(free, "G11_RUNTIME_BRANCH:", "RUNTIME_BRANCH_CONTRACT")
 
+    # PREDEADLINE reliability contract: cron delay must not suppress the
+    # self-dispatch heartbeat.  Only another workflow_dispatch continuation
+    # may block dispatch; TRUE-AI artifacts are not an availability gate.
+    continuation_start = free.index(
+        "- name: Keep the predeadline relay alive between delayed cron starts"
+    )
+    continuation_end = free.index(
+        "- name: Propagate private runtime failure after state checkpoint"
+    )
+    continuation = free[continuation_start:continuation_end]
+    require_text(
+        continuation,
+        '.event == "workflow_dispatch"',
+        "PREDEADLINE_CHAIN_DISPATCH_ONLY_DEDUPE",
+    )
+    require_text(
+        continuation,
+        "sleep 45",
+        "PREDEADLINE_CHAIN_SPACING",
+    )
+    require_text(
+        continuation,
+        'actions/workflows/g11-free-runner.yml/dispatches',
+        "PREDEADLINE_CHAIN_DISPATCH_TARGET",
+    )
+    require(
+        "morning-predictions.manifest.json" not in continuation,
+        "PREDEADLINE_CHAIN_TRUE_AI_GATE",
+    )
+    require(
+        '.event == "schedule"' not in continuation,
+        "PREDEADLINE_CHAIN_CRON_MUST_NOT_BLOCK",
+    )
+
     return {
         "MORNING": "PASS",
         "PREDEADLINE": "PASS",
