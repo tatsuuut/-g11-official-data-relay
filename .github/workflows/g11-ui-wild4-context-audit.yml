@@ -40,7 +40,7 @@ jobs:
             python3 - "${js}" <<'PY'
           import pathlib,sys
           text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
-          needles=['WILD4 BET','HEAD_DERIVED_SHADOW','NOT_WILD2','WILD_BET OOS','HEAD由来10点']
+          needles=['WILD4 BET','HEAD_DERIVED_SHADOW','NOT_WILD2','WILD_BET OOS','HEAD由来10点','function cp']
           for needle in needles:
               start=0
               shown=0
