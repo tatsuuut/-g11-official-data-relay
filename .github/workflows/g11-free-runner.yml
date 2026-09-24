@@ -827,8 +827,6 @@ jobs:
                   )
                 )
               # Preserve accepted TRUE AI morning predictions.
-              # Rescue safety is enforced by verified WILD CURRENT authority
-              # in the private feed; keep this reconciliation path byte-stable.
               | .true_ai = $stored[0].true_ai
               # Preserve accepted 剥きけん predictions.
               | .abeken = $stored[0].abeken
@@ -1215,9 +1213,6 @@ jobs:
             fi
             exit 1
           fi
-          echo 'G11_SYNC_SUCCESS_RESPONSE='
-          jq -c . .relay-output/publish-result.json || \
-            sed -n '1,40p' .relay-output/publish-result.json
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify source identity and projected app readback
