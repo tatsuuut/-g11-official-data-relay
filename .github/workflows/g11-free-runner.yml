@@ -840,6 +840,26 @@ jobs:
                 then .
                 else .true_ai = $stored[0].true_ai
                 end
+              # Preserve rescue alerts as notification-only metadata.  They
+              # remain NONRESEARCH and never become FORMAL/KPI rows, but the
+              # Site push service can notify a user that a live ◎ candidate
+              # appeared instead of silently dropping it because
+              # research_eligible=false.
+              | .races |= map(
+                  if (.exclusion_reason == "SAME_DAY_RESCUE_NONRESEARCH")
+                     and ((.predeadline | type) == "object")
+                     and (.predeadline.value_alert == true)
+                     and (.predeadline.odds_merit == "◎")
+                    then .predeadline.rescue_value_alert = true
+                      | .predeadline.rescue_value_alert_type = "SAME_DAY_RESCUE_NONRESEARCH"
+                    elif ((.predeadline | type) == "object")
+                    then del(
+                      .predeadline.rescue_value_alert,
+                      .predeadline.rescue_value_alert_type
+                    )
+                    else .
+                    end
+                )
               # Preserve accepted 剥きけん predictions.
               | .abeken = $stored[0].abeken
               | .races |= map(
