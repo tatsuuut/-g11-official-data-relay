@@ -1,0 +1,30 @@
+name: G11 service worker push audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-service-worker-push-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect service worker push handler
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site/sw.js' -o sw.js
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path('sw.js').read_text(encoding='utf-8',errors='replace')
+          print('SW_BYTES',len(text))
+          for needle in ['push','notificationclick','showNotification','tag','data','title']:
+              pos=text.find(needle)
+              if pos>=0:
+                  print('NEEDLE='+needle)
+                  print(text[max(0,pos-2500):min(len(text),pos+7000)])
+          PY
