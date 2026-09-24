@@ -56,7 +56,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 22
+    timeout-minutes: 30
     env:
       G11_PRIVATE_REPOSITORY: tatsuuut/boat-brain-lab
       G11_PRIVATE_RUNTIME_REF: main
