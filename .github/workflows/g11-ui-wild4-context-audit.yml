@@ -1,0 +1,55 @@
+name: G11 UI WILD4 context audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-ui-wild4-context-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Inspect deployed UI WILD4 context
+        run: |
+          set -euo pipefail
+          page=$(mktemp)
+          curl --fail-with-body --silent --show-error --location \
+            'https://g11-race-lab.higatatsunori2.chatgpt.site' -o "${page}"
+          python3 - "${page}" <<'PY' > assets.txt
+          import pathlib,re,sys
+          html=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          seen=[]
+          for v in re.findall(r'''(?:src|href)=["']([^"']+\.js(?:\?[^"']*)?)["']''', html):
+              if v not in seen:
+                  seen.append(v)
+          print('\n'.join(seen))
+          PY
+          while IFS= read -r asset; do
+            [ -n "${asset}" ] || continue
+            case "${asset}" in
+              http*) url="${asset}" ;;
+              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
+              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+            esac
+            js=$(mktemp)
+            curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
+            python3 - "${js}" <<'PY'
+          import pathlib,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          needles=['WILD4 BET','HEAD_DERIVED_SHADOW','NOT_WILD2','WILD_BET OOS','HEAD由来10点']
+          for needle in needles:
+              start=0
+              shown=0
+              while shown<5:
+                  pos=text.find(needle,start)
+                  if pos<0: break
+                  print('NEEDLE='+needle)
+                  print(repr(text[max(0,pos-5000):min(len(text),pos+9000)]))
+                  start=pos+len(needle)
+                  shown+=1
+          PY
+          done < assets.txt
