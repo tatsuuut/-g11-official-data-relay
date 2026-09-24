@@ -11,6 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
     ".github/workflows/g11-free-runner.yml",
     ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml",
+    ".github/workflows/g11-three-phase-runtime-contract-gate.yml",
     ".github/workflows/g11-explicit-night-dispatcher.yml",
     ".github/workflows/g11-night-backfill-20260917-20260919.yml",
     ".github/workflows/g11-wild-position-bootstrap.yml",
@@ -18,6 +19,7 @@ ALLOWED_FILES = {
     "README.md",
     "SECURITY.md",
     "scripts/audit_public_surface.py",
+    "scripts/audit_three_phase_runtime_contract.py",
 }
 IGNORED_PARTS = {".git", "__pycache__"}
 FORBIDDEN_SUFFIXES = {
