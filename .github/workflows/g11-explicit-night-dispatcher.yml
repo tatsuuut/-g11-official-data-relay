@@ -163,6 +163,24 @@ jobs:
           if curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-app-release?client=ios"             -o "${release}"; then
             echo "G11_APP_RELEASE=$(tr -d '\n' < "${release}")"
           fi
+          accepted_late_reference="$(mktemp)"
+          if curl --fail-with-body --silent --show-error --location \
+            "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-08" \
+            -o "${accepted_late_reference}"; then
+            echo "ACCEPTED_LATE_REFERENCE_CONTRACT="
+            jq -c '{
+              stage,status,counts,research_db,
+              top_level:(.late_reference // null),
+              race_sample:([.races[]
+                | select((.late_reference|type)=="object")
+                | {
+                    key,formal_status,exclusion_reason,research_eligible,
+                    practical_hit,validation_hit,miss_classification,
+                    research_decision,research_finance,late_reference
+                  }][0] // null)
+            }' "${accepted_late_reference}"
+          fi
+
           current="$(mktemp)"
           curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-21"             -o "${current}"
           jq -c '{
