@@ -21,6 +21,7 @@ jobs:
             status=$(curl --silent --show-error --location \
               -X POST \
               -H 'Content-Type: application/json' \
+              -H 'Origin: https://g11-race-lab.higatatsunori2.chatgpt.site' \
               -d "{\"action\":\"${action}\",\"endpoint\":\"https://invalid.example.test/push\"}" \
               -o body.json \
               -w '%{http_code}' \
