@@ -16,8 +16,11 @@ on:
         required: false
         type: string
   schedule:
-    # Dedicated MORNING research lane, after production morning ends at 07:05 JST.
+    # Dedicated MORNING research lane. Start after production morning ends at
+    # 07:05 JST, but keep bounded retries through 08:55 so a delayed app feed
+    # cannot erase the entire day's market-footprint sample.
     - cron: "10-55/5 22 * * *"
+    - cron: "*/5 23 * * *"
     # Separate NIGHT research settlement retries. Detection is already locked.
     - cron: "20,35,50 13 * * *"
 
@@ -61,7 +64,7 @@ jobs:
             mode="${REQUESTED_MODE:-capture}"
           else
             case "${SCHEDULE_EXPRESSION}" in
-              "10-55/5 22 * * *") mode="capture" ;;
+              "10-55/5 22 * * *"|"*/5 23 * * *") mode="capture" ;;
               "20,35,50 13 * * *") mode="settle" ;;
               *) echo "unexpected schedule" >&2; exit 1 ;;
             esac
@@ -108,23 +111,55 @@ jobs:
         shell: bash
         env:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
           mkdir -p .shadow-work
-          curl --fail-with-body --silent --show-error --location \
-            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
-            -o .shadow-work/feed.json
-          jq -e --arg d "${OPERATIONAL_DATE}" '
-            .status == "PASS"
-            and .operational_date_jst == $d
-            and (.races | type == "array")
-            and (.races | length > 0)
-          ' .shadow-work/feed.json >/dev/null
+          rm -f .shadow-work/feed.json .shadow-work/feed-response.json
+
+          # The app feed can legitimately lag the 07:05 MORNING boundary.
+          # Do not fail the whole day's footprint lane on a temporary 404.
+          # Each scheduled invocation gets a short bounded retry, then exits
+          # cleanly so the next 5-minute invocation can try again.
+          ready=false
+          for attempt in 1 2 3 4 5 6; do
+            http_status="$(curl --silent --show-error --location \
+              "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+              -o .shadow-work/feed-response.json \
+              --write-out '%{http_code}' || true)"
+
+            if [ "${http_status}" = "200" ] && \
+               jq -e --arg d "${OPERATIONAL_DATE}" '
+                 .status == "PASS"
+                 and .operational_date_jst == $d
+                 and (.races | type == "array")
+                 and (.races | length > 0)
+               ' .shadow-work/feed-response.json >/dev/null 2>&1; then
+              mv .shadow-work/feed-response.json .shadow-work/feed.json
+              ready=true
+              break
+            fi
+
+            echo "G11_FOOTPRINT_FEED_WAIT attempt=${attempt} http=${http_status} mode=${MODE}"
+            rm -f .shadow-work/feed-response.json
+            if [ "${attempt}" -lt 6 ]; then
+              sleep 10
+            fi
+          done
+
+          if [ "${ready}" != "true" ]; then
+            echo "ready=false" >> "${GITHUB_OUTPUT}"
+            echo "G11_FOOTPRINT_FEED=WAITING_VERIFIED_FEED"
+            exit 0
+          fi
+
           sha="$(sha256sum .shadow-work/feed.json | cut -d" " -f1)"
+          echo "ready=true" >> "${GITHUB_OUTPUT}"
           echo "feed_sha=${sha}" >> "${GITHUB_OUTPUT}"
+          echo "G11_FOOTPRINT_FEED=READY sha=${sha}"
 
       - name: Capture earliest complete MORNING exact-120 odds
-        if: steps.mode.outputs.mode == 'capture'
+        if: steps.mode.outputs.mode == 'capture' && steps.feed.outputs.ready == 'true'
         shell: bash
         env:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
@@ -140,7 +175,7 @@ jobs:
           jq -c . .shadow-work/run-summary.json
 
       - name: Settle only already-locked footprint research
-        if: steps.mode.outputs.mode == 'settle'
+        if: steps.mode.outputs.mode == 'settle' && steps.feed.outputs.ready == 'true'
         shell: bash
         env:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
