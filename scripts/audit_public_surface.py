@@ -464,6 +464,85 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
             "G11_SITE_RESCUE_LATE_REFERENCE_PRESERVED="
             + str(len(rescue_reference_by_key))
         )
+
+        finance_mismatches = []
+        for race in feed["races"]:
+            if not isinstance(race, dict):
+                continue
+            ref = race.get("late_reference")
+            if not isinstance(ref, dict):
+                continue
+            finance = ref.get("reference_finance")
+            bets = race.get("practical_bets")
+            meta = race.get("result_meta")
+            settlements = (
+                meta.get("trifecta_settlements")
+                if isinstance(meta, dict) else None
+            )
+            if (
+                not isinstance(finance, dict)
+                or not isinstance(bets, list)
+                or not isinstance(settlements, list)
+            ):
+                finance_mismatches.append({
+                    "key": race.get("key"),
+                    "reason": "shape",
+                })
+                continue
+            payout_by_bet = {
+                item.get("trifecta"): item.get("payout")
+                for item in settlements
+                if isinstance(item, dict)
+                and isinstance(item.get("trifecta"), str)
+                and isinstance(item.get("payout"), int)
+            }
+            expected_gross = len(bets) * 100
+            expected_prize = sum(
+                payout_by_bet.get(bet, 0)
+                for bet in bets
+                if isinstance(bet, str)
+            )
+            refund = finance.get("refund_amount")
+            checks = {
+                "gross": finance.get("gross_stake") == expected_gross,
+                "prize": finance.get("prize_return") == expected_prize,
+                "net": (
+                    isinstance(refund, int)
+                    and finance.get("net_investment")
+                    == expected_gross - refund
+                ),
+                "total": (
+                    isinstance(refund, int)
+                    and finance.get("total_return")
+                    == expected_prize + refund
+                ),
+                "profit": (
+                    isinstance(refund, int)
+                    and finance.get("profit")
+                    == expected_prize + refund - expected_gross
+                ),
+                "hit": ref.get("reference_practical_hit")
+                    == (expected_prize > 0),
+            }
+            if not all(checks.values()):
+                finance_mismatches.append({
+                    "key": race.get("key"),
+                    "bets": bets,
+                    "checks": checks,
+                    "expected_gross": expected_gross,
+                    "actual_gross": finance.get("gross_stake"),
+                    "expected_prize": expected_prize,
+                    "actual_prize": finance.get("prize_return"),
+                    "refund": refund,
+                    "net": finance.get("net_investment"),
+                    "total": finance.get("total_return"),
+                    "profit": finance.get("profit"),
+                    "reference_hit": ref.get("reference_practical_hit"),
+                })
+        print(
+            "G11_RESCUE_REFERENCE_FINANCE_MISMATCHES="
+            + json.dumps(finance_mismatches[:30], ensure_ascii=False, sort_keys=True)
+        )
     feed_path.write_text(
         json.dumps(feed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n",
         encoding="utf-8",
