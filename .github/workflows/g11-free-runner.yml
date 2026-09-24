@@ -826,8 +826,20 @@ jobs:
                     .production_mean_ev
                   )
                 )
-              # Preserve accepted TRUE AI morning predictions.
-              | .true_ai = $stored[0].true_ai
+              # Preserve accepted TRUE AI morning predictions only on a
+              # canonical day.  Same-day rescue feeds are explicitly
+              # NONRESEARCH and may suppress TRUE-AI display output so the
+              # deployed Site cannot relabel HEAD-derived helper combinations
+              # as "WILD4 BET".  Do not resurrect the previously accepted
+              # rescue TRUE-AI payload in that case.
+              | if (
+                  ([.races[]
+                    | select(.exclusion_reason == "SAME_DAY_RESCUE_NONRESEARCH")]
+                   | length) == (.races | length)
+                )
+                then .
+                else .true_ai = $stored[0].true_ai
+                end
               # Preserve accepted 剥きけん predictions.
               | .abeken = $stored[0].abeken
               | .races |= map(
