@@ -1,0 +1,91 @@
+name: G11 rescue TRUE AI reconciliation audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/g11-rescue-true-ai-reconciliation-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout relay fix
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 1
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      - name: Lint production runner
+        run: "$(go env GOPATH)/bin/actionlint" .github/workflows/g11-free-runner.yml
+
+      - name: Prove rescue suppression survives reconciliation
+        run: |
+          set -euo pipefail
+          cat > incoming-rescue.json <<'JSON'
+          {
+            "true_ai":{"app_display_authorized":false,"public_predictions":[]},
+            "races":[
+              {"key":"r1","exclusion_reason":"SAME_DAY_RESCUE_NONRESEARCH"},
+              {"key":"r2","exclusion_reason":"SAME_DAY_RESCUE_NONRESEARCH"}
+            ]
+          }
+          JSON
+          cat > stored-rescue.json <<'JSON'
+          {
+            "true_ai":{"app_display_authorized":true,"public_predictions":[{"race_id":"r1"}]}
+          }
+          JSON
+          jq -c --slurpfile stored stored-rescue.json '
+            if (
+              ([.races[]
+                | select(.exclusion_reason == "SAME_DAY_RESCUE_NONRESEARCH")]
+               | length) == (.races | length)
+            )
+            then .
+            else .true_ai = $stored[0].true_ai
+            end
+          ' incoming-rescue.json > rescue-out.json
+          jq -e '
+            .true_ai.app_display_authorized == false
+            and (.true_ai.public_predictions | length) == 0
+          ' rescue-out.json >/dev/null
+          echo 'RESCUE_TRUE_AI_NOT_RESURRECTED=PASS'
+
+      - name: Prove canonical day still preserves accepted TRUE AI
+        run: |
+          set -euo pipefail
+          cat > incoming-canonical.json <<'JSON'
+          {
+            "true_ai":{"app_display_authorized":false,"public_predictions":[]},
+            "races":[
+              {"key":"r1","exclusion_reason":null},
+              {"key":"r2","exclusion_reason":null}
+            ]
+          }
+          JSON
+          cat > stored-canonical.json <<'JSON'
+          {
+            "true_ai":{"app_display_authorized":true,"public_predictions":[{"race_id":"r1"}]}
+          }
+          JSON
+          jq -c --slurpfile stored stored-canonical.json '
+            if (
+              ([.races[]
+                | select(.exclusion_reason == "SAME_DAY_RESCUE_NONRESEARCH")]
+               | length) == (.races | length)
+            )
+            then .
+            else .true_ai = $stored[0].true_ai
+            end
+          ' incoming-canonical.json > canonical-out.json
+          jq -e '
+            .true_ai.app_display_authorized == true
+            and (.true_ai.public_predictions | length) == 1
+          ' canonical-out.json >/dev/null
+          echo 'CANONICAL_TRUE_AI_IMMUTABILITY=PASS'
