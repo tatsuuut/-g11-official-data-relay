@@ -107,7 +107,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 44526364122cbd64da2b2456a234fc1009b80c98
+          ref: 245e03561f353b6c26a7af8900eef3dec4e155fb
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-night-candidate
           persist-credentials: true
@@ -115,32 +115,15 @@ jobs:
         run: |
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1' 'catboost==1.2.8'
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Record unmodified baseline before any source patch
+        working-directory: .g11-night-candidate
+        run: python3 g11/relay/_night_candidate_regression_20260925.py baseline
       - name: Prepare hash-bound private source candidate
         working-directory: .g11-night-candidate
         run: python3 g11/relay/_night_candidate_patch_20260925.py
-      - name: Regress private candidate with real network forbidden
+      - name: Regress private candidate and require no new baseline failures
         working-directory: .g11-night-candidate
-        run: |
-          set -euo pipefail
-          for module in \
-            g11.canonical.test_night_commit_guard_v1 \
-            g11.canonical.test_official_pipeline \
-            g11.relay.test_v1 \
-            g11.relay.test_night_transport_finance_v1 \
-            g11.wild_pack.v1.test_runtime_orchestrator_v1 \
-            g11.growth_p3.v1_1.test_current_runtime_v1
-          do
-            python3 - "${module}" <<'PY'
-          import socket, sys, unittest
-          from unittest.mock import patch
-          with patch.object(socket.socket, 'connect', side_effect=RuntimeError('LIVE_NETWORK_FORBIDDEN_IN_NIGHT_PREFLIGHT')):
-              suite = unittest.defaultTestLoader.loadTestsFromName(sys.argv[1])
-              result = unittest.TextTestRunner(verbosity=2).run(suite)
-          if not result.wasSuccessful():
-              raise SystemExit(1)
-          print('NIGHT_OFFLINE_REGRESSION_PASS', sys.argv[1], result.testsRun)
-          PY
-          done
+        run: python3 g11/relay/_night_candidate_regression_20260925.py candidate
       - name: Prepare public wait and publication candidate
         run: |
           python3 - <<'PY'
@@ -220,9 +203,9 @@ jobs:
           set -euo pipefail
           branch='fix/night-result-readiness-20260925'
           remote="$(git ls-remote origin "refs/heads/${branch}" | cut -f1)"
-          test "${remote}" = '44526364122cbd64da2b2456a234fc1009b80c98'
+          test "${remote}" = '245e03561f353b6c26a7af8900eef3dec4e155fb'
           git add g11/canonical/official_pipeline.py g11/relay/v1.py g11/canonical/test_night_commit_guard_v1.py
-          git rm .github/workflows/g11-night-candidate-preflight.yml g11/relay/_night_candidate_patch_20260925.py
+          git rm .github/workflows/g11-night-candidate-preflight.yml g11/relay/_night_candidate_patch_20260925.py g11/relay/_night_candidate_regression_20260925.py
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
