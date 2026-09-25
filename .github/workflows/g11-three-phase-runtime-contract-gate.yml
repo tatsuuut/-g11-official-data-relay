@@ -83,18 +83,18 @@ jobs:
 
       - name: Gate summary
         run: |
-          echo 'G11_THREE_PHASE_GATE=MORNING_PASS/PREDEADLINE_PASS/NIGHT_PASS'
+          echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
+          echo 'G11_LIVE_ACQUISITION_PUBLICATION_UI=NOT_TESTED_BY_THIS_GATE'
           echo 'MERGE_POLICY=DO_NOT_MERGE_RUNTIME_CHANGES_UNLESS_THIS_GATE_PASSES'
 
-  prepare-night-candidate:
+  prepare-night-public-candidate:
     if: github.event_name == 'push' && github.ref == 'refs/heads/fix/night-wait-publication-20260925' && github.repository == 'tatsuuut/-g11-official-data-relay'
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 5
     permissions:
       contents: write
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      PYTHONPATH: .
       TZ: Asia/Tokyo
     steps:
       - name: Checkout public candidate only
@@ -102,30 +102,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: true
-      - name: Audit public allowlist before isolated private checkout
+      - name: Verify public allowlist
         run: python3 scripts/audit_public_surface.py
-      - name: Checkout pinned private candidate only
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: tatsuuut/boat-brain-lab
-          ref: 245e03561f353b6c26a7af8900eef3dec4e155fb
-          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-          path: .g11-night-candidate
-          persist-credentials: true
-      - name: Install existing pinned audit dependencies
-        run: |
-          python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1' 'catboost==1.2.8'
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-      - name: Record unmodified baseline before any source patch
-        working-directory: .g11-night-candidate
-        run: python3 g11/relay/_night_candidate_regression_20260925.py baseline
-      - name: Prepare hash-bound private source candidate
-        working-directory: .g11-night-candidate
-        run: python3 g11/relay/_night_candidate_patch_20260925.py
-      - name: Regress private candidate and require no new baseline failures
-        working-directory: .g11-night-candidate
-        run: python3 g11/relay/_night_candidate_regression_20260925.py candidate
-      - name: Prepare public wait and publication candidate
+      - name: Prepare previously tested public NIGHT guards only
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -140,8 +119,7 @@ jobs:
               if s.count(old)!=1: raise SystemExit('REFUSED_RUNNER_ANCHOR:'+repr(old[:70]))
               s=s.replace(old,new,1)
           one('''          # A same-day rescue NIGHT is intentionally nonresearch. It can attach
-          ''','''          # An unavailable or still-growing K archive is a checkpoint-only
-                    # wait, not a completed night and not a missing research-ledger defect.
+          ''','''          # Official-result waiting is checkpoint-only, not completed NIGHT.
                     if [ -f ../.relay-output/result.json ] && \\
                        jq -e --arg day "${OPERATIONAL_DATE}" '
                          .STATUS == "NIGHT_WAITING_OFFICIAL_RESULTS"
@@ -179,41 +157,23 @@ jobs:
                 - name: Keep the predeadline relay alive between delayed cron starts
           ''')
           s=s.replace('__RUNTIME_NIGHT_PHASE__', '$' + '{{ steps.due.outputs.phase }}')
-          if ('$' + '{{ steps.due.outputs.phase }}') not in s:
-              raise SystemExit('REFUSED_MISSING_RUNTIME_PHASE_BINDING')
           p.write_text(s)
           gate=Path('.github/workflows/g11-three-phase-runtime-contract-gate.yml')
-          s=gate.read_text()
-          s=s.split('\n  prepare-night-candidate:\n',1)[0].rstrip()+'\n'
+          s=gate.read_text().split('\n  prepare-night-public-candidate:\n',1)[0].rstrip()+'\n'
           s=s.replace('      - fix/night-wait-publication-20260925\n','')
-          needle='            g11.relay.test_night_transport_finance_v1 \\\n'
-          if s.count(needle)!=1: raise SystemExit('REFUSED_GATE_TEST_ANCHOR')
-          s=s.replace(needle,needle+'            g11.canonical.test_night_commit_guard_v1 \\\n')
           gate.write_text(s)
-          print('NIGHT_PUBLIC_CANDIDATE=PREPARED_NOT_DEPLOYED')
+          print('NIGHT_PUBLIC_CANDIDATE=PREPARED_PRIVATE_MAIN_UNCHANGED')
           PY
-      - name: Test complete candidate without runtime or sync
+      - name: Test final public files without official acquisition or sync
         run: |
           set -euo pipefail
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$(go env GOPATH)/bin/actionlint" .github/workflows/g11-free-runner.yml .github/workflows/g11-explicit-night-dispatcher.yml .github/workflows/g11-three-phase-runtime-contract-gate.yml
-          python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-night-candidate
+          python3 scripts/audit_public_surface.py
+          python3 scripts/audit_three_phase_runtime_contract.py
           git diff --check
-      - name: Commit private tested candidate without modifying main
-        working-directory: .g11-night-candidate
-        run: |
-          set -euo pipefail
-          branch='fix/night-result-readiness-20260925'
-          remote="$(git ls-remote origin "refs/heads/${branch}" | cut -f1)"
-          test "${remote}" = '245e03561f353b6c26a7af8900eef3dec4e155fb'
-          git add g11/canonical/official_pipeline.py g11/relay/v1.py g11/canonical/test_night_commit_guard_v1.py
-          git rm .github/workflows/g11-night-candidate-preflight.yml g11/relay/_night_candidate_patch_20260925.py g11/relay/_night_candidate_regression_20260925.py
-          git diff --cached --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'NIGHT: retry unavailable or partial K before immutable final commit'
-          echo "NIGHT_PRIVATE_TESTED_CANDIDATE_SHA=$(git rev-parse HEAD)"
-          git push origin "HEAD:refs/heads/${branch}"
-      - name: Commit public tested candidate without modifying main
+          git diff --stat
+      - name: Commit tested public candidate only
         run: |
           set -euo pipefail
           test "${GITHUB_REF_NAME}" = 'fix/night-wait-publication-20260925'
@@ -223,7 +183,8 @@ jobs:
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'NIGHT: checkpoint waiting results and verify full publication readback'
-          echo "NIGHT_PUBLIC_TESTED_CANDIDATE_SHA=$(git rev-parse HEAD)"
+          git commit -m 'NIGHT: checkpoint official waits and require complete publication readback'
           git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+          echo "NIGHT_PUBLIC_TESTED_CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo 'NIGHT_ACQUISITION_CORE=NOT_DEPLOYED_PRIVATE_CI_WRITE_BLOCKED'
           echo 'NIGHT_PRODUCTION_CHANGED=NO'
