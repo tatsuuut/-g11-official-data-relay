@@ -179,8 +179,11 @@ jobs:
         run: |
           set -euo pipefail
           "$(go env GOPATH)/bin/actionlint" .github/workflows/g11-free-runner.yml .github/workflows/g11-three-phase-runtime-contract-gate.yml .github/workflows/g11-explicit-night-dispatcher.yml
-          python3 scripts/audit_public_surface.py
           python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-private
+          private_tmp="$(mktemp -d "${RUNNER_TEMP}/g11-nowait-private.XXXXXX")"
+          mv .g11-private "${private_tmp}/checkout"
+          trap 'mv "${private_tmp}/checkout" .g11-private; rmdir "${private_tmp}"' EXIT
+          python3 scripts/audit_public_surface.py
           git diff --check
           git diff --stat
       - name: Save tested candidate to feature branch only
