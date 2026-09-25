@@ -94,6 +94,7 @@ jobs:
       contents: write
     env:
       PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: .
       TZ: Asia/Tokyo
     steps:
       - name: Checkout public candidate only
