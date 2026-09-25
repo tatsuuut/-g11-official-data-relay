@@ -178,7 +178,7 @@ jobs:
 
                 - name: Verify existing immutable night readback
           ''','''          ' .relay-output/readback.json >/dev/null
-                    if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+                    if [ "__RUNTIME_NIGHT_PHASE__" = "night" ]; then
                       python3 scripts/audit_three_phase_runtime_contract.py \\
                         --night-ready .relay-output/readback.json --day "${OPERATIONAL_DATE}"
                     fi
@@ -194,6 +194,9 @@ jobs:
 
                 - name: Keep the predeadline relay alive between delayed cron starts
           ''')
+          s=s.replace('__RUNTIME_NIGHT_PHASE__', '$' + '{{ steps.due.outputs.phase }}')
+          if ('$' + '{{ steps.due.outputs.phase }}') not in s:
+              raise SystemExit('REFUSED_MISSING_RUNTIME_PHASE_BINDING')
           p.write_text(s)
           gate=Path('.github/workflows/g11-three-phase-runtime-contract-gate.yml')
           s=gate.read_text()
