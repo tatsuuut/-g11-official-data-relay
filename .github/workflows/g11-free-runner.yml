@@ -417,13 +417,11 @@ jobs:
           import pathlib
           import sys
 
-          from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
+          from g11.relay.predeadline_nowait_v1 import capture
 
           store = pathlib.Path(sys.argv[1])
           store_mode = sys.argv[2]
-          result = CanonicalRunner(OfficialArtifactStore(store)).run_due_predeadline(
-              max_requests=48
-          )
+          result = capture(store)
           print(
               "G11_EARLY_PREDEADLINE_CAPTURE="
               + json.dumps(
@@ -594,7 +592,11 @@ jobs:
             --app-origin "${G11_APP_ORIGIN}"
             --oidc-audience "${G11_OIDC_AUDIENCE}"
           )
+          if [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
+            python3 -m g11.relay.predeadline_nowait_v1 "${args[@]}" | tee ../.relay-output/result.json
+          else
           python3 -m g11.relay.v1 "${args[@]}" | tee ../.relay-output/result.json
+          fi
 
       - name: Audit WILD4 training-food capture
         if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run'
@@ -1371,7 +1373,7 @@ jobs:
             --night-ready .relay-output/readback-existing-night.json --day "${OPERATIONAL_DATE}"
 
       - name: Keep the predeadline relay alive between delayed cron starts
-        if: success() && steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'predeadline'
+        if: always() && !cancelled() && steps.runtime.outcome == 'success' && steps.encrypt-state.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

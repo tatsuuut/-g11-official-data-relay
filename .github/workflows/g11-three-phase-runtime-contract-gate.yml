@@ -13,7 +13,6 @@ on:
   push:
     branches:
       - main
-      - fix/predeadline-no-future-wait-20260925
     paths:
       - ".github/workflows/g11-free-runner.yml"
       - ".github/workflows/g11-explicit-night-dispatcher.yml"
@@ -74,6 +73,7 @@ jobs:
           set -euo pipefail
           for module in \
             g11.relay.test_v1 \
+            g11.relay.test_predeadline_nowait_v1 \
             g11.relay.test_night_transport_finance_v1 \
             g11.wild_pack.v1.test_runtime_orchestrator_v1 \
             g11.growth_p3.v1_1.test_current_runtime_v1
@@ -86,116 +86,3 @@ jobs:
           echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
           echo 'G11_LIVE_ACQUISITION_PUBLICATION_UI=NOT_TESTED_BY_THIS_GATE'
           echo 'MERGE_POLICY=DO_NOT_MERGE_RUNTIME_CHANGES_UNLESS_THIS_GATE_PASSES'
-
-  prepare-nowait-candidate:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/predeadline-no-future-wait-20260925' && github.repository == 'tatsuuut/-g11-official-data-relay'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 8
-    permissions:
-      contents: write
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
-      PYTHONPATH: .
-      TZ: Asia/Tokyo
-    steps:
-      - name: Checkout public candidate only
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: true
-      - name: Check public surface before private checkout
-        run: python3 scripts/audit_public_surface.py
-      - name: Read pinned private scheduling candidate
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: tatsuuut/boat-brain-lab
-          ref: 8e8e631c8be3f4b562655d82eca9a406d03dd63d
-          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-          path: .g11-private
-          persist-credentials: false
-      - name: Install existing test dependencies
-        run: |
-          python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1' 'catboost==1.2.8'
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-      - name: Test scheduling and existing engines without live network
-        working-directory: .g11-private
-        run: |
-          python3 - <<'PY'
-          import socket, unittest
-          from unittest.mock import patch
-          modules = [
-              'g11.relay.test_predeadline_nowait_v1',
-              'g11.relay.test_v1',
-              'g11.relay.test_night_transport_finance_v1',
-              'g11.wild_pack.v1.test_runtime_orchestrator_v1',
-              'g11.growth_p3.v1_1.test_current_runtime_v1',
-          ]
-          for module in modules:
-              with patch.object(socket.socket, 'connect', side_effect=RuntimeError('LIVE_NETWORK_FORBIDDEN')):
-                  result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromName(module))
-              if not result.wasSuccessful():
-                  raise SystemExit('NOWAIT_PREFLIGHT_FAILED:' + module)
-              print('NOWAIT_OFFLINE_PASS=' + module + ':' + str(result.testsRun))
-          PY
-      - name: Prepare only the reviewed scheduler call changes
-        run: |
-          python3 - <<'PY'
-          import hashlib
-          from pathlib import Path
-          path = Path('.github/workflows/g11-free-runner.yml')
-          raw = path.read_bytes()
-          assert hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest() == '0a4fe7f5350013fdfa37eb1ee2cd6fe4c329a7e1', 'RUNNER_BASE_CHANGED'
-          text = raw.decode()
-          def replace_once(old, new):
-              global text
-              assert text.count(old) == 1, 'ANCHOR_COUNT:' + old[:80]
-              text = text.replace(old, new, 1)
-          replace_once(
-              '          from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore\n',
-              '          from g11.relay.predeadline_nowait_v1 import capture\n')
-          replace_once(
-              '          result = CanonicalRunner(OfficialArtifactStore(store)).run_due_predeadline(\n              max_requests=48\n          )',
-              '          result = capture(store)')
-          command = '          python3 -m g11.relay.v1 "${args[@]}" | tee ../.relay-output/result.json'
-          phase = '$' + '{{ steps.due.outputs.phase }}'
-          replace_once(command,
-              '          if [ "' + phase + '" = "predeadline" ]; then\n'
-              '            python3 -m g11.relay.predeadline_nowait_v1 "${args[@]}" | tee ../.relay-output/result.json\n'
-              '          else\n' + command + '\n          fi')
-          replace_once(
-              "        if: success() && steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'predeadline'",
-              "        if: always() && !cancelled() && steps.runtime.outcome == 'success' && steps.encrypt-state.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'")
-          path.write_text(text)
-          gate = Path('.github/workflows/g11-three-phase-runtime-contract-gate.yml')
-          text = gate.read_text().split('\n  prepare-nowait-candidate:\n', 1)[0].rstrip() + '\n'
-          text = text.replace('      - fix/predeadline-no-future-wait-20260925\n', '')
-          needle = '            g11.relay.test_v1 \\\n'
-          assert text.count(needle) == 1
-          text = text.replace(needle, needle + '            g11.relay.test_predeadline_nowait_v1 \\\n')
-          gate.write_text(text)
-          print('NOWAIT_CANDIDATE_PREPARED_PRODUCTION_UNCHANGED')
-          PY
-      - name: Validate final workflow files
-        run: |
-          set -euo pipefail
-          "$(go env GOPATH)/bin/actionlint" .github/workflows/g11-free-runner.yml .github/workflows/g11-three-phase-runtime-contract-gate.yml .github/workflows/g11-explicit-night-dispatcher.yml
-          python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-private
-          private_tmp="$(mktemp -d "${RUNNER_TEMP}/g11-nowait-private.XXXXXX")"
-          mv .g11-private "${private_tmp}/checkout"
-          trap 'mv "${private_tmp}/checkout" .g11-private; rmdir "${private_tmp}"' EXIT
-          python3 scripts/audit_public_surface.py
-          git diff --check
-          git diff --stat
-      - name: Save tested candidate to feature branch only
-        run: |
-          set -euo pipefail
-          test "${GITHUB_REF_NAME}" = 'fix/predeadline-no-future-wait-20260925'
-          remote="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | cut -f1)"
-          test "${remote}" = "${GITHUB_SHA}"
-          git add .github/workflows/g11-free-runner.yml .github/workflows/g11-three-phase-runtime-contract-gate.yml
-          git diff --cached --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'PREDEADLINE: yield to prediction and publication without future-race waits'
-          echo "NOWAIT_TESTED_PUBLIC_COMMIT=$(git rev-parse HEAD)"
-          git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
