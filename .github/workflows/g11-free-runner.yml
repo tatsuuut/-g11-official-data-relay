@@ -645,6 +645,16 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
           set -euo pipefail
+          # Official-result waiting is checkpoint-only, not completed NIGHT.
+          if [ -f ../.relay-output/result.json ] && \
+             jq -e --arg day "${OPERATIONAL_DATE}" '
+               .STATUS == "NIGHT_WAITING_OFFICIAL_RESULTS"
+               and .PHASE == "NIGHT" and .OPERATIONAL_DATE_JST == $day
+               and .FEED_EMITTED == false
+             ' ../.relay-output/result.json >/dev/null 2>&1; then
+            echo 'G11_NIGHT_RESEARCH_LEDGER_CHECK=DEFER_OFFICIAL_RESULTS'
+            exit 0
+          fi
           # A same-day rescue NIGHT is intentionally nonresearch. It can attach
           # the complete official result set and publish score-only display
           # without creating canonical TRUE-AI/WILD research ledgers.
@@ -765,7 +775,9 @@ jobs:
             .stage == "NIGHT"
             and .status == "PASS"
             and .counts.pending == 0
-            and .counts.results == .counts.formal
+            and .counts.races > 0
+            and .counts.results == .counts.races
+            and .counts.races == (.races | length)
             and .counts.research_samples == .counts.formal
             and .research_db.available == true
             and .research_db.formal_races == .counts.formal
@@ -1333,6 +1345,10 @@ jobs:
             )
             and .capabilities.canonical_authorities
           ' .relay-output/readback.json >/dev/null
+          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+            python3 scripts/audit_three_phase_runtime_contract.py \
+              --night-ready .relay-output/readback.json --day "${OPERATIONAL_DATE}"
+          fi
 
       - name: Verify existing immutable night readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night == 'true'
@@ -1351,6 +1367,8 @@ jobs:
             and (.races | type == "array")
             and (.counts.results > 0)
           ' .relay-output/readback-existing-night.json >/dev/null
+          python3 scripts/audit_three_phase_runtime_contract.py \
+            --night-ready .relay-output/readback-existing-night.json --day "${OPERATIONAL_DATE}"
 
       - name: Keep the predeadline relay alive between delayed cron starts
         if: success() && steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'predeadline'
