@@ -111,14 +111,14 @@ jobs:
           repository: tatsuuut/boat-brain-lab
           ref: 8e8e631c8be3f4b562655d82eca9a406d03dd63d
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-          path: .g11-nowait-candidate
+          path: .g11-private
           persist-credentials: false
       - name: Install existing test dependencies
         run: |
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1' 'catboost==1.2.8'
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - name: Test scheduling and existing engines without live network
-        working-directory: .g11-nowait-candidate
+        working-directory: .g11-private
         run: |
           python3 - <<'PY'
           import socket, unittest
@@ -180,7 +180,7 @@ jobs:
           set -euo pipefail
           "$(go env GOPATH)/bin/actionlint" .github/workflows/g11-free-runner.yml .github/workflows/g11-three-phase-runtime-contract-gate.yml .github/workflows/g11-explicit-night-dispatcher.yml
           python3 scripts/audit_public_surface.py
-          python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-nowait-candidate
+          python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-private
           git diff --check
           git diff --stat
       - name: Save tested candidate to feature branch only
