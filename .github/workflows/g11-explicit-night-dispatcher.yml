@@ -14,6 +14,7 @@ on:
       - main
     paths:
       - .github/workflows/g11-explicit-night-dispatcher.yml
+      - scripts/audit_three_phase_runtime_contract.py
   workflow_dispatch:
   schedule:
     # 22:00-01:55 JST, every 5 minutes until the app confirms NIGHT complete.
@@ -37,6 +38,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
     steps:
+      - name: Checkout tested night dispatch policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Test night date and completion decisions without live mutation
+        run: python3 scripts/audit_three_phase_runtime_contract.py --night-self-test
+
       - name: Recover current-day PREDEADLINE heartbeat
         if: github.event_name == 'push' && contains(github.event.head_commit.message, '[predeadline-recover-20260925]')
         env:
@@ -116,9 +125,9 @@ jobs:
               shadow_summary:(.original_display_shadow // null),
               race_shadow_counts:{
                 with_shadow:([.races[] | select((.original_display_shadow | type)=="object")] | length),
-                with_result:([.races[] | select(.result_trifecta != null)] | length),
-                with_research_decision:([.races[] | select(.research_decision != null)] | length),
-                with_miss_classification:([.races[] | select(.miss_classification != null)] | length)
+                with_result:([.races[] | select(.result_trifecta != null)]|length),
+                with_research_decision:([.races[] | select(.research_decision != null)]|length),
+                with_miss_classification:([.races[] | select(.miss_classification != null)]|length)
               },
               finance_statuses:([.races[].research_finance.status] | group_by(.) | map({status:.[0],count:length})),
               finance_sample:(.races | map(select(.research_finance.status=="VERIFIED")) | .[0].research_finance),
@@ -307,53 +316,83 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" != *"[night-republish]"* ]] && [[ "${COMMIT_MESSAGE}" != *"[wild-night-settle]"* ]]; then
+            echo 'G11_NIGHT_DISPATCH=VALIDATED_ONLY_NO_LIVE_RUN'
             exit 0
           fi
-          now_hour="$(date +%H)"
-          if [ "${now_hour}" -lt 5 ]; then
-            operational_date="$(date --date='yesterday' +%F)"
+          policy="scripts/audit_three_phase_runtime_contract.py"
+          # Scheduled/manual/repair invocations share the relay's 02:00
+          # rollover. A delayed night job cannot enter tomorrow's morning.
+          if window_day="$(python3 "${policy}" --night-day)"; then
+            operational_date="${window_day}"
           else
-            operational_date="$(date +%F)"
+            code=$?
+            if [ "${code}" -eq 2 ]; then
+              echo 'G11_NIGHT_DISPATCH=OUTSIDE_NIGHT_WINDOW'
+              exit 0
+            fi
+            exit "${code}"
           fi
-          # Bounded repair marker for the unresolved 2026-09-22 NIGHT
-          # publication. This never changes automatic scheduled dates.
+          # Retain the explicit historical operator marker; no implicit replay.
           if [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${COMMIT_MESSAGE}" == *"[night-republish-20260922]"* ]]; then
             operational_date="2026-09-22"
           fi
-
-          # Once NIGHT is already complete in the app, stop dispatching for
-          # the remainder of the window. A transient readback failure does not
-          # block the retry; it simply falls through to another NIGHT dispatch.
           current_feed="$(mktemp)"
+          trap 'rm -f "${current_feed}"' EXIT
           if [[ "${COMMIT_MESSAGE}" != *"[wild-night-settle]"* ]]; then
             if curl --fail-with-body --silent --show-error --location \
+              --connect-timeout 10 --max-time 20 \
               "${G11_APP_ORIGIN}/api/g11-feed?date=${operational_date}" \
               -o "${current_feed}"; then
-              if jq -e '
-                .stage == "NIGHT"
-                and .status == "PASS"
-                and .counts.pending == 0
-                and .counts.results == .counts.formal
-                and .counts.research_samples == .counts.formal
-                and .research_db.available == true
-                and .research_db.formal_races == .counts.formal
-                and ([.races[]
-                      | select(.research_eligible == true)
-                      | select((.research_finance.status // "") != "VERIFIED")]
-                     | length) == 0
-              ' "${current_feed}" >/dev/null 2>&1; then
+              # Result coverage and research eligibility have different
+              # denominators. Money must describe the displayed locked bets.
+              if python3 "${policy}" --night-ready "${current_feed}" --day "${operational_date}"; then
                 echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
                 exit 0
               fi
+            else
+              echo 'G11_NIGHT_READBACK=UNAVAILABLE_NOT_COMPLETION'
             fi
           fi
 
+          # Do not queue repeated NIGHT jobs behind another active runtime.
+          # The next scheduled dispatcher remains the bounded retry source.
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml"
+          for status in queued in_progress requested waiting pending; do
+            runs="$(curl --fail-with-body --silent --show-error \
+              --connect-timeout 10 --max-time 20 \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "${api}/runs?status=${status}&per_page=1")"
+            count="$(printf '%s' "${runs}" | jq -er '.total_count | select(type == "number" and . >= 0 and floor == .)')"
+            if [ "${count}" -gt 0 ]; then
+              echo "G11_NIGHT_DISPATCH=DEFER_ACTIVE status=${status} count=${count}"
+              exit 0
+            fi
+          done
+          # Recheck after network reads in case the 02:00 boundary was crossed.
+          if current_day="$(python3 "${policy}" --night-day)"; then
+            if [ "${current_day}" != "${window_day}" ]; then
+              echo 'G11_NIGHT_DISPATCH=DATE_CHANGED'
+              exit 0
+            fi
+          else
+            code=$?
+            if [ "${code}" -eq 2 ]; then
+              echo 'G11_NIGHT_DISPATCH=WINDOW_CLOSED_BEFORE_POST'
+              exit 0
+            fi
+            exit "${code}"
+          fi
           payload="$(jq -cn --arg day "${operational_date}" \
             '{ref:"main",inputs:{phase:"night",operational_date:$day}}')"
+          # No immediate POST retry: a timeout may already mean accepted.
           curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 20 \
             -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
             -d "${payload}"
+          echo "G11_NIGHT_DISPATCH=ACCEPTED day=${operational_date}"
