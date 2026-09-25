@@ -73,6 +73,7 @@ jobs:
           set -euo pipefail
           for module in \
             g11.relay.test_v1 \
+            g11.relay.test_predeadline_nowait_v1 \
             g11.relay.test_night_transport_finance_v1 \
             g11.wild_pack.v1.test_runtime_orchestrator_v1 \
             g11.growth_p3.v1_1.test_current_runtime_v1
