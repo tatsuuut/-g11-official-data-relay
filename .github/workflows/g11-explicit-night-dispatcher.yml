@@ -1,5 +1,6 @@
 name: G11 explicit night dispatcher
 
+# 2026-09-25: operator NIGHT recovery after missing scheduled night invocation.
 # 2026-09-24: rescue reference finance diagnostic.
 
 # 2026-09-24: rescue per-race reference display republish.
