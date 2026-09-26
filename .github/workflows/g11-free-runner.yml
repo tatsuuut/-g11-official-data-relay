@@ -839,6 +839,9 @@ jobs:
                       | .production_points = $old.production_points
                       | .prediction = $old.prediction
                       | .caution = $old.caution
+                      | .special_case_id = $old.special_case_id
+                      | .special_strength = $old.special_strength
+                      | .strong_mark = $old.strong_mark
                       | .p3_head = $old.p3_head
                       | .p3_logic_id = $old.p3_logic_id
                       | .p3_production_bets = $old.p3_production_bets
