@@ -571,7 +571,14 @@ def special_eight_site_compat(feed_path: pathlib.Path) -> int:
         if not isinstance(value, dict):
             return
         bets = value.get("practical_bets")
-        special = value.get("special_case_id") == "G11_P3_SPECIAL_45_2_EQ_145_V1"
+        case_id = value.get("special_case_id")
+        historical_unmarked = (
+            isinstance(key, str) and key[:8] in {"20260925", "20260926"}
+            and case_id is None
+            and "特例45-2=145" in str(value.get("caution") or "")
+            and "8点固定" in str(value.get("caution") or "")
+        )
+        special = case_id == "G11_P3_SPECIAL_45_2_EQ_145_V1" or historical_unmarked
         legacy = "正本特例8点=" in str(value.get("caution") or "")
         if not special and not legacy and value.get("production_points") != 8:
             return
