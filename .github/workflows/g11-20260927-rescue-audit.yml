@@ -48,7 +48,7 @@ jobs:
           abeken = set(manifest["ABEKEN_COMPLETED"])
           input_snapshot = read("rescue/store/snapshots/morning/official-day-input.json")
           assert input_snapshot and input_snapshot["PAYLOAD"]["OPERATIONAL_DATE_JST"] == "2026-09-27"
-          payload = input_snapshot["SNAPSHOT"]["PAYLOAD"]
+          payload = input_snapshot["PAYLOAD"]
           fields = payload["RAW38_FIELDS"]
           ki, di = fields.index("標準レースキー"), fields.index("締切")
           deadlines = {
