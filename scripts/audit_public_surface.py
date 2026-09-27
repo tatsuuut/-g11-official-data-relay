@@ -498,12 +498,33 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                     meta[key] = None
                     filled.append(f"race.result_meta.{key}")
 
+    # Preserve exact per-race proof for this one operational rescue day.
+    # Yesterday's schema lacks the field; pruning it would remove the only
+    # evidence that a LIVE ticket was locked before its own deadline.
+    rescue_proof_by_key = {}
+    if feed.get("SNAPSHOT_CLASS") == "TODAY_ONLY_RESCUE_PREDEADLINE":
+        if feed.get("operational_date_jst") != "2026-09-27" or feed.get("stage") != "PREDEADLINE":
+            fail("today-only rescue scope")
+        for race in incoming_races:
+            key = race.get("key") if isinstance(race, dict) else None
+            proof = race.get("today_rescue") if isinstance(race, dict) else None
+            if not isinstance(key, str) or key in rescue_proof_by_key or not isinstance(proof, dict):
+                fail("missing or duplicate race-local rescue proof")
+            rescue_proof_by_key[key] = proof
+
     dropped = []
     feed["races"] = [
         _prune_to_schema(race, schema, "race", dropped)
         if isinstance(race, dict) else race
         for race in incoming_races
     ]
+    if rescue_proof_by_key:
+        for race in feed["races"]:
+            if not isinstance(race, dict) or race.get("key") not in rescue_proof_by_key:
+                fail("rescue proof race binding")
+            race["today_rescue"] = rescue_proof_by_key[race["key"]]
+        dropped[:] = [item for item in dropped if item != "race.today_rescue" and not item.startswith("race.today_rescue.")]
+        print("G11_SITE_TODAY_RESCUE_PROOF_PRESERVED=" + str(len(rescue_proof_by_key)))
     if rescue_reference_by_key:
         for race in feed["races"]:
             if not isinstance(race, dict):
