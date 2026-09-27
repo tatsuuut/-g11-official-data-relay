@@ -866,6 +866,11 @@ jobs:
                   "special_id": row.get("special_case_id") == "G11_P3_SPECIAL_45_2_EQ_145_V1",
                   "old_note": (old.get("caution") or "").endswith(note),
                   "pre": not pre_old or (pre_old.get("practical_bets") == p["bets"][:7] and pre_new.get("practical_bets") == p["bets"] and pre_old.get("captured_at_jst") == pre_new.get("captured_at_jst") and (pre_old.get("caution") or "").endswith(note)),
+                  "pre_old_prefix": pre_old.get("practical_bets") == p["bets"][:7],
+                  "pre_new_eight": pre_new.get("practical_bets") == p["bets"] and pre_new.get("production_points") == 8,
+                  "pre_new_count": len(pre_new.get("practical_bets")) if isinstance(pre_new.get("practical_bets"), list) else None,
+                  "pre_time_same": pre_old.get("captured_at_jst") == pre_new.get("captured_at_jst"),
+                  "pre_old_note": (pre_old.get("caution") or "").endswith(note),
               }
               print("G11_SPECIAL8_REPLAY_CHECK=" + json.dumps({"key": key, "checks": checks}, sort_keys=True))
           PY
