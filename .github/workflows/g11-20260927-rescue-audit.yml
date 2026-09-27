@@ -79,6 +79,25 @@ jobs:
           for path in live_paths:
               val = read(path)
               live_records.append({"path":path,"keys":list(val.keys())[:18] if isinstance(val,dict) else None,"status":val.get("STATUS") if isinstance(val,dict) else None,"race_key":val.get("RACE_KEY") if isinstance(val,dict) else None,"snapshot_sha":hashlib.sha256(archive.extractfile(members[path]).read()).hexdigest()})
+          live_evidence = []
+          for key in sorted(future):
+              suffix = key.lower()
+              names = {
+                  "p3":f"rescue/store/snapshots/predeadline/current-growth-p3-live-{suffix}.json",
+                  "forecast":f"rescue/store/snapshots/predeadline/predeadline-prediction-{suffix}.json",
+                  "abeken":f"rescue/store/snapshots/predeadline/abeken-shadow-live-{suffix}.json",
+                  "beforeinfo":f"rescue/store/snapshots/predeadline/beforeinfo-{suffix}.json",
+                  "odds":f"rescue/store/snapshots/predeadline/odds3t-{suffix}.json",
+              }
+              deadline = dt.datetime.fromisoformat(deadlines[key])
+              row = {"key":key,"deadline":deadlines[key]}
+              for kind,path in names.items():
+                  m = members.get(path)
+                  obj = read(path) if m else None
+                  payload = obj.get("PAYLOAD",{}) if isinstance(obj,dict) else {}
+                  row[kind] = {"present":bool(m),"sha":hashlib.sha256(archive.extractfile(m).read()).hexdigest() if m else None,"created_jst":dt.datetime.fromtimestamp(m.mtime,dt.timezone(dt.timedelta(hours=9))).isoformat() if m else None,"status":payload.get("STATUS"),"captured":payload.get("CAPTURED_AT_JST"),"source_receipts":[{"kind":r.get("SOURCE_ID"),"captured":r.get("CAPTURED_AT_JST")} for r in obj.get("SOURCE_RECEIPTS",[]) if r.get("SOURCE_ID","").startswith(("beforeinfo-","odds3t-"))] if obj else []}
+              live_evidence.append(row)
+          print("G11_RESCUE_LIVE_EVIDENCE="+json.dumps({"as_of_jst":now.replace(microsecond=0).isoformat(),"races":live_evidence},ensure_ascii=False,sort_keys=True))
           print("G11_RESCUE_LIVE_AUDIT="+json.dumps({"count":len(live_records),"records":live_records},ensure_ascii=False,sort_keys=True))
           print("G11_RESCUE_AUDIT=" + json.dumps({
               "as_of_jst":now.replace(microsecond=0).isoformat(),
