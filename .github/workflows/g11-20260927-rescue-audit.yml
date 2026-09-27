@@ -74,6 +74,12 @@ jobs:
                   "future_t7":now < seven,
                   "before_deadline":now < deadline,
               })
+          live_paths = sorted(p for p in members if p.startswith("rescue/store/snapshots/predeadline/") and p.endswith(".json"))
+          live_records = []
+          for path in live_paths:
+              val = read(path)
+              live_records.append({"path":path,"keys":list(val.keys())[:18] if isinstance(val,dict) else None,"status":val.get("STATUS") if isinstance(val,dict) else None,"race_key":val.get("RACE_KEY") if isinstance(val,dict) else None,"snapshot_sha":hashlib.sha256(archive.extractfile(members[path]).read()).hexdigest()})
+          print("G11_RESCUE_LIVE_AUDIT="+json.dumps({"count":len(live_records),"records":live_records},ensure_ascii=False,sort_keys=True))
           print("G11_RESCUE_AUDIT=" + json.dumps({
               "as_of_jst":now.replace(microsecond=0).isoformat(),
               "rescue_lock_jst":lock.isoformat(),
