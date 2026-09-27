@@ -525,7 +525,9 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
             race["today_rescue"] = rescue_proof_by_key[race["key"]]
             # Yesterday's optional engine fields can be shape-padded as null;
             # absence means NOT_READY on this day, never a fabricated snapshot.
-            if race.get("abeken_shadow") is None:
+            if "abeken_status" not in feed.get("capabilities", {}):
+                race.pop("abeken_shadow", None)
+            elif race.get("abeken_shadow") is None:
                 race.pop("abeken_shadow", None)
             if race.get("wild_pack") is None:
                 race.pop("wild_pack", None)
