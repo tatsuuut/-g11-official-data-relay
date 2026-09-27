@@ -587,6 +587,13 @@ def special_eight_site_compat(feed_path: pathlib.Path) -> int:
         if (not special or value.get("production_points") != 8
                 or bets != canonical or len(set(bets)) != 8
                 or (p3_bets is not None and p3_bets != canonical)):
+            if isinstance(key, str) and key[:8] in {"20260925", "20260926"}:
+                fail("special-eight public artifact mismatch: "
+                     f"{key}:{scope}:root_proven={bool(historical_root_proven)},"
+                     f"case_id={repr(case_id)},points={repr(value.get('production_points'))},"
+                     f"count={len(bets) if isinstance(bets, list) else 'invalid'},"
+                     f"ordered_eight={bets == canonical},"
+                     f"note8={'8点固定' in str(value.get('caution') or '')}")
             fail(f"special-eight public artifact mismatch: {key}:{scope}")
         verified.append({"key": key, "scope": scope, "points": 8})
         return True
