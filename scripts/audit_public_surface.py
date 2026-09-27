@@ -466,10 +466,20 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     common_result_meta_keys = set(reference_result_meta[0]) if reference_result_meta else set()
     for meta in reference_result_meta[1:]:
         common_result_meta_keys &= set(meta)
+    final_replacement = (
+        feed.get("stage") == "NIGHT"
+        and feed.get("operational_date_jst") in {"2026-09-25", "2026-09-26"}
+        and isinstance(feed.get("final_accounting"), dict)
+        and isinstance(feed.get("capabilities"), dict)
+        and feed["capabilities"].get("final_accounting") == "G11_THREE_ENGINE_FINAL_BET_ACCOUNTING_V1"
+        and "three_engine_comparison" not in feed
+    )
     for race in incoming_races:
         if not isinstance(race, dict):
             continue
         for key in sorted(common_race_keys):
+            if key in {"three_engine_score", "three_engine_classification"} and final_replacement:
+                continue
             if key not in race:
                 race[key] = None
                 filled.append(f"race.{key}")
