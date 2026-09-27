@@ -111,6 +111,48 @@ def _prune_to_schema(value, schema, path, dropped):
     return value
 
 
+def verified_historical_special_pre_upgrade(prior, race, proof):
+    """Only preserve a read-model correction backed by the original morning lock."""
+    if not isinstance(prior, dict) or not isinstance(race, dict) or not isinstance(proof, dict):
+        return False
+    key = race.get("key")
+    if (
+        not isinstance(key, str) or key[:8] not in {"20260925", "20260926"}
+        or prior.get("key") != key
+        or not isinstance(proof.get("bets"), list) or len(proof["bets"]) != 8
+        or len(set(proof["bets"])) != 8
+        or prior.get("p3_snapshot_sha256") != proof.get("snapshot_sha")
+        or not isinstance(proof.get("snapshot_sha"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", proof["snapshot_sha"])
+    ):
+        return False
+    bets = proof["bets"]
+    note = "｜SITE表示互換のみ｜正本特例8点=" + "/".join(bets)
+    old_pre = prior.get("predeadline")
+    new_pre = race.get("predeadline")
+    if not isinstance(old_pre, dict) or not isinstance(new_pre, dict):
+        return False
+    return (
+        prior.get("practical_bets") == bets[:7]
+        and prior.get("p3_production_bets") == bets[:7]
+        and prior.get("production_points") == 7
+        and str(prior.get("caution") or "").endswith(note)
+        and race.get("practical_bets") == bets
+        and race.get("p3_production_bets") == bets
+        and race.get("production_points") == 8
+        and old_pre.get("practical_bets") == bets[:7]
+        and old_pre.get("production_points") == 7
+        and str(old_pre.get("caution") or "").endswith(note)
+        and new_pre.get("practical_bets") == bets
+        and new_pre.get("production_points") == 8
+        and new_pre.get("captured_at_jst") == old_pre.get("captured_at_jst")
+        and isinstance(new_pre.get("caution"), str)
+        and new_pre["caution"] == old_pre["caution"][:-len(note)]
+        and (new_pre.get("special_case_id") is None or
+             new_pre.get("special_case_id") == "G11_P3_SPECIAL_45_2_EQ_145_V1")
+    )
+
+
 def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -> int:
     feed = json.loads(feed_path.read_text(encoding="utf-8"))
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
@@ -127,6 +169,8 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                     for race in stored["races"]
                     if isinstance(race, dict) and isinstance(race.get("key"), str)
                 }
+                proof_path = pathlib.Path(".relay-output/special-eight-proof.json")
+                special_proof = json.loads(proof_path.read_text(encoding="utf-8")) if proof_path.is_file() else {}
                 frozen = 0
                 prediction_frozen = 0
                 for race in feed.get("races", []):
@@ -137,6 +181,8 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                         race["original_display_shadow"] = prior["original_display_shadow"]
                         frozen += 1
                     if isinstance(prior, dict):
+                        keep_repaired_pre = verified_historical_special_pre_upgrade(
+                            prior, race, special_proof.get(race.get("key")))
                         for field in (
                             "predeadline",
                             "predeadline_exclusion_reason",
@@ -146,7 +192,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
                             "value_bets",
                             "odds_captured_at_jst",
                         ):
-                            if field in prior:
+                            if field in prior and not (field == "predeadline" and keep_repaired_pre):
                                 race[field] = prior[field]
                         prediction_frozen += 1
 
