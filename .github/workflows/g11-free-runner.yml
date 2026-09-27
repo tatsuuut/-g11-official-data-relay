@@ -830,7 +830,7 @@ jobs:
           from g11.canonical.official_pipeline import OfficialArtifactStore
           from g11.growth_p3.v1_1 import current_runtime_v1 as p3
           from g11.relay.night_transport_finance_v1 import _current_special_bets
-          root = Path(".relay-state/store")
+          root = Path(".relay-state/store").resolve(strict=True)
           keys = {row["key"] for row in json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["races"]}
           bets = _current_special_bets(root, keys)
           store = OfficialArtifactStore(root)
