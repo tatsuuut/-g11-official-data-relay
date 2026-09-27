@@ -907,6 +907,7 @@ jobs:
                       | .p3_snapshot = $old.p3_snapshot
                       | .p3_snapshot_sha256 = $old.p3_snapshot_sha256
                       | .p3_status = $old.p3_status
+                      | if ($old | has("trifecta_confidence")) then .trifecta_confidence = $old.trifecta_confidence else del(.trifecta_confidence) end
                     else .
                     end
                   # Once the app has accepted a race PREDEADLINE
@@ -937,7 +938,7 @@ jobs:
                          and ($incoming.practical_bets == $locked.bets)
                          and ($incoming.p3_production_bets == $locked.bets)
                          and ($incoming.production_points == 8)
-                         and ($incoming.special_case_id == "G11_P3_SPECIAL_45_2_EQ_145_V1")
+                         and (($incoming.special_case_id == null) or ($incoming.special_case_id == "G11_P3_SPECIAL_45_2_EQ_145_V1"))
                          and (($old.caution // "") | endswith("｜SITE表示互換のみ｜正本特例8点=" + ($locked.bets | join("/"))))
                          and (
                            (($old.predeadline | type) != "object")
@@ -1204,6 +1205,13 @@ jobs:
               PYTHONPATH=".g11-private" python3 -m g11.relay.final_bet_accounting_v1 \
                 "${FEED}" \
                 ".relay-state/store/snapshots/night/workbook-ledger-projection.json"
+            fi
+            # Preserve the historical published confidence boundary; a newer
+            # result-revision review remains in encrypted research state.
+            if [ -f .relay-output/stored-feed.json ] && \
+               jq -e 'has("confidence_result_revision_review") | not' .relay-output/stored-feed.json >/dev/null; then
+              jq -c 'del(.confidence_result_revision_review)' "${FEED}" > .relay-output/feed-confidence-history.json
+              mv .relay-output/feed-confidence-history.json "${FEED}"
             fi
           fi
 
