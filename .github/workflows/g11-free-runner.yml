@@ -822,7 +822,29 @@ jobs:
           if curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
             -o .relay-output/stored-feed.json; then
-            jq -c --slurpfile stored .relay-output/stored-feed.json '
+            # Load only the verified immutable CURRENT P3 morning eight-ticket lock.
+            PYTHONPATH=".g11-private" python3 - "${FEED}" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          from g11.canonical.official_pipeline import OfficialArtifactStore
+          from g11.growth_p3.v1_1 import current_runtime_v1 as p3
+          from g11.relay.night_transport_finance_v1 import _current_special_bets
+          root = Path(".relay-state/store")
+          keys = {row["key"] for row in json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["races"]}
+          bets = _current_special_bets(root, keys)
+          store = OfficialArtifactStore(root)
+          proof = {}
+          for key, ordered in bets.items():
+              verified = store.load_verified_snapshot("morning", p3.snapshot_name(key))
+              proof[key] = {"bets": ordered, "snapshot_sha": verified["SNAPSHOT_SHA256"]}
+          Path(".relay-output/special-eight-proof.json").write_text(
+              json.dumps(proof, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+          print("G11_VERIFIED_SPECIAL8_MORNING_LOCKS=" + str(len(proof)))
+          PY
+            jq -c --slurpfile stored .relay-output/stored-feed.json \
+                  --slurpfile special .relay-output/special-eight-proof.json '
+              ($special[0] // {}) as $proof |
               (.canonical_authorities.growth_p3 // {}) as $growth
               | (($growth.logic_id == "CURRENT_GROWTH_P3")
                   and ($growth.status == "LOCKED")
@@ -832,6 +854,7 @@ jobs:
               | .races |= map(
                   . as $incoming
                   | ($prior[.key] // null) as $old
+                  | ($proof[$incoming.key] // null) as $locked
                   # Root prediction fields are the immutable morning
                   # projection. LIVE/CURRENT recalculation is carried only by
                   # .predeadline plus the legacy root odds mirror. Preserve the
@@ -876,6 +899,48 @@ jobs:
                       | .predeadline = $old.predeadline
                     else .
                     end
+                  # Restore an old public display prefix only when its
+                  # recorded MORNING SHA matches an immutable CURRENT P3 lock.
+                  | if (($old | type) == "object") and (($locked | type) == "object")
+                    then
+                      if ($old.p3_snapshot_sha256 == $locked.snapshot_sha)
+                         and ($old.practical_bets == $locked.bets[:7])
+                         and ($old.p3_production_bets == $locked.bets[:7])
+                         and ($old.production_points == 7)
+                         and ($incoming.practical_bets == $locked.bets)
+                         and ($incoming.p3_production_bets == $locked.bets)
+                         and ($incoming.production_points == 8)
+                         and ($incoming.special_case_id == "G11_P3_SPECIAL_45_2_EQ_145_V1")
+                         and (($old.caution // "") | endswith("｜SITE表示互換のみ｜正本特例8点=" + ($locked.bets | join("/"))))
+                         and (
+                           (($old.predeadline | type) != "object")
+                           or (
+                             (($incoming.predeadline | type) == "object")
+                             and ($old.predeadline.practical_bets == $locked.bets[:7])
+                             and ($incoming.predeadline.practical_bets == $locked.bets)
+                             and ($old.predeadline.captured_at_jst == $incoming.predeadline.captured_at_jst)
+                             and (($old.predeadline.caution // "") | endswith("｜SITE表示互換のみ｜正本特例8点=" + ($locked.bets | join("/"))))
+                           )
+                         )
+                        then .practical_bets = $locked.bets
+                          | .p3_production_bets = $locked.bets
+                          | .production_points = 8
+                          | .special_case_id = $incoming.special_case_id
+                          | .special_strength = $incoming.special_strength
+                          | .strong_mark = $incoming.strong_mark
+                          | .caution = ($old.caution | sub("｜SITE表示互換のみ｜正本特例8点=.*$"; ""))
+                          | .predeadline = (
+                            if (($old.predeadline | type) == "object")
+                            then ($old.predeadline
+                              | .practical_bets = $locked.bets
+                              | .production_points = 8
+                              | .special_case_id = $incoming.predeadline.special_case_id
+                              | .special_strength = $incoming.predeadline.special_strength
+                              | .strong_mark = $incoming.predeadline.strong_mark
+                              | .caution = (.caution | sub("｜SITE表示互換のみ｜正本特例8点=.*$"; "")))
+                            else $old.predeadline end)
+                        else . end
+                    else . end
                 )
               # The deployed VALUE ALERTS UI currently keys on the live
               # PREDEADLINE marker. Keep the race-root odds contract legacy for
