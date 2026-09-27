@@ -1316,6 +1316,7 @@ jobs:
             echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
           fi
 
+          echo "G11_TRANSPORT_RESCUE_PROOF=$(jq -c '{tagged:([.races[] | select((.today_rescue | type) == "object")] | length),first:(.races[0] | {key,today_rescue}),class:.SNAPSHOT_CLASS}' "${FEED}")"
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
