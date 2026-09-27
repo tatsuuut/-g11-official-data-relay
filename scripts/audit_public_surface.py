@@ -567,16 +567,18 @@ def special_eight_site_compat(feed_path: pathlib.Path) -> int:
     verified = []
     canonical = ["4-2-1", "4-2-5", "4-1-2", "4-5-2", "5-2-1", "5-2-4", "5-1-2", "5-4-2"]
 
-    def verify_projection(value, *, key, scope, p3_bets=None):
+    def verify_projection(value, *, key, scope, p3_bets=None, historical_root_proven=False):
         if not isinstance(value, dict):
             return
         bets = value.get("practical_bets")
         case_id = value.get("special_case_id")
+        historical_date = isinstance(key, str) and key[:8] in {"20260925", "20260926"}
         historical_unmarked = (
-            isinstance(key, str) and key[:8] in {"20260925", "20260926"}
-            and case_id is None
-            and "特例45-2=145" in str(value.get("caution") or "")
-            and "8点固定" in str(value.get("caution") or "")
+            historical_date and case_id is None and
+            ((scope == "MORNING_ROOT" and
+              "特例45-2=145" in str(value.get("caution") or "") and
+              "8点固定" in str(value.get("caution") or ""))
+             or (scope == "PREDEADLINE" and historical_root_proven))
         )
         special = case_id == "G11_P3_SPECIAL_45_2_EQ_145_V1" or historical_unmarked
         legacy = "正本特例8点=" in str(value.get("caution") or "")
@@ -587,15 +589,17 @@ def special_eight_site_compat(feed_path: pathlib.Path) -> int:
                 or (p3_bets is not None and p3_bets != canonical)):
             fail(f"special-eight public artifact mismatch: {key}:{scope}")
         verified.append({"key": key, "scope": scope, "points": 8})
+        return True
 
     for race in races:
         if not isinstance(race, dict):
             continue
         key = race.get("key")
         p3_bets = race.get("p3_production_bets")
-        verify_projection(race, key=key, scope="MORNING_ROOT", p3_bets=p3_bets)
+        root_proven = verify_projection(race, key=key, scope="MORNING_ROOT", p3_bets=p3_bets)
         pre = race.get("predeadline")
-        verify_projection(pre, key=key, scope="PREDEADLINE")
+        historical_root_proven = root_proven and race.get("special_case_id") is None
+        verify_projection(pre, key=key, scope="PREDEADLINE", historical_root_proven=historical_root_proven)
 
     print("G11_SITE_SPECIAL8_CANONICAL=" + json.dumps(verified, ensure_ascii=False, sort_keys=True))
     return 0
