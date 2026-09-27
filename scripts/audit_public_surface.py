@@ -210,7 +210,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
             points = race.get("production_points")
             p3_bets = race.get("p3_production_bets")
             practical = race.get("practical_bets")
-            if points not in (3, 5, 7) or (
+            if points not in (3, 5, 7, 8) or (
                 isinstance(practical, list) and isinstance(points, int)
                 and len(practical) != points
             ):
@@ -559,51 +559,38 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
 
 
 def special_eight_site_compat(feed_path: pathlib.Path) -> int:
-    """Transport-only adapter for the deployed Site's legacy 3/5/7 display contract."""
+    """Reject truncated special tickets before public serialization."""
     feed = json.loads(feed_path.read_text(encoding="utf-8"))
     races = feed.get("races")
     if not isinstance(races, list):
         fail("special-eight feed has no races")
-    changed = []
+    verified = []
+    canonical = ["4-2-1", "4-2-5", "4-1-2", "4-5-2", "5-2-1", "5-2-4", "5-1-2", "5-4-2"]
 
-    def compact_projection(value, *, key, scope, p3_bets=None):
+    def verify_projection(value, *, key, scope, p3_bets=None):
         if not isinstance(value, dict):
             return
         bets = value.get("practical_bets")
-        if value.get("production_points") != 8 or not isinstance(bets, list) or len(bets) != 8:
+        special = value.get("special_case_id") == "G11_P3_SPECIAL_45_2_EQ_145_V1"
+        legacy = "正本特例8点=" in str(value.get("caution") or "")
+        if not special and not legacy and value.get("production_points") != 8:
             return
-        if p3_bets is not None and (not isinstance(p3_bets, list) or len(p3_bets) != 8):
-            fail(f"special-eight p3 binding invalid: {key}")
-        canonical = list(bets)
-        value["production_points"] = 7
-        value["practical_bets"] = canonical[:7]
-        if p3_bets is not None:
-            p3_bets[:] = p3_bets[:7]
-        note = "SITE表示互換のみ｜正本特例8点=" + "/".join(canonical)
-        caution = value.get("caution")
-        value["caution"] = note if not caution else str(caution) + "｜" + note
-        changed.append({
-            "key": key,
-            "scope": scope,
-            "canonical_8": canonical,
-            "display_7": canonical[:7],
-            "display_extra": canonical[7],
-        })
+        if (not special or value.get("production_points") != 8
+                or bets != canonical or len(set(bets)) != 8
+                or (p3_bets is not None and p3_bets != canonical)):
+            fail(f"special-eight public artifact mismatch: {key}:{scope}")
+        verified.append({"key": key, "scope": scope, "points": 8})
 
     for race in races:
         if not isinstance(race, dict):
             continue
         key = race.get("key")
         p3_bets = race.get("p3_production_bets")
-        compact_projection(race, key=key, scope="MORNING_ROOT", p3_bets=p3_bets)
+        verify_projection(race, key=key, scope="MORNING_ROOT", p3_bets=p3_bets)
         pre = race.get("predeadline")
-        compact_projection(pre, key=key, scope="PREDEADLINE")
+        verify_projection(pre, key=key, scope="PREDEADLINE")
 
-    feed_path.write_text(
-        json.dumps(feed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
-    print("G11_SITE_SPECIAL8_COMPAT=" + json.dumps(changed, ensure_ascii=False, sort_keys=True))
+    print("G11_SITE_SPECIAL8_CANONICAL=" + json.dumps(verified, ensure_ascii=False, sort_keys=True))
     return 0
 
 def fail(message: str) -> None:
