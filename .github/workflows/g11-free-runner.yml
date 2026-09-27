@@ -54,7 +54,8 @@ jobs:
   run-private-runtime:
     if: >-
       github.repository == 'tatsuuut/-g11-official-data-relay' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -75,20 +76,6 @@ jobs:
 
       - name: Audit public surface
         run: python3 scripts/audit_public_surface.py
-
-      - name: Report relay enable gate state
-        env:
-          RELAY_ENABLED: ${{ vars.G11_RELAY_ENABLED }}
-        run: |
-          if [ "${RELAY_ENABLED}" = "true" ]; then
-            echo "G11_RELAY_ENABLE_GATE=ENABLED_TRUE"
-          elif [ "${RELAY_ENABLED}" = "false" ]; then
-            echo "G11_RELAY_ENABLE_GATE=ENABLED_FALSE"
-          elif [ -z "${RELAY_ENABLED}" ]; then
-            echo "G11_RELAY_ENABLE_GATE=UNSET"
-          else
-            echo "G11_RELAY_ENABLE_GATE=NONSTANDARD"
-          fi
 
       - name: Resolve the bounded phase and race day
         id: due
@@ -172,9 +159,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${OPERATIONAL_DATE}-${{ github.run_id }}
+          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
           restore-keys: |
-            g11-state-v2-${OPERATIONAL_DATE}-
+            g11-state-v2-${{ steps.due.outputs.operational_date }}-
             g11-state-v2-
 
       - name: Fail closed when the private credential is absent
@@ -197,7 +184,7 @@ jobs:
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
             --decrypt --output "${archive}" "${encrypted}"
           exec 3<&-
-          python3 - "${archive}" "${OPERATIONAL_DATE}" <<'PY'
+          python3 - "${archive}" "${{ steps.due.outputs.operational_date }}" <<'PY'
           import json
           import pathlib
           import shutil
@@ -323,7 +310,7 @@ jobs:
               .g11-model/g11/wild-pack-oos/ \
               .relay-state/store/g11/wild-pack-oos/
           fi
-          day_root=".relay-state/store/g11/true-ai-history/${OPERATIONAL_DATE}"
+          day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
           if [ ! -f "${day_root}/morning-predictions.manifest.json" ]; then
             model_source=".g11-model/g11/true-ai-models"
             test -f "${model_source}/latest-research.json"
@@ -388,7 +375,7 @@ jobs:
           # already present too.  Do not key CatBoost installation to missing
           # artifacts: PREDEADLINE and NIGHT can still load CURRENT .cbm
           # models. Verify the exact interpreter that later executes relay.v1.
-          if [ "${RELAY_PHASE}" != "dry-run" ]; then
+          if [ "${{ steps.due.outputs.phase }}" != "dry-run" ]; then
             if ! python3 -c 'import catboost' >/dev/null 2>&1; then
               python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
             fi
@@ -493,10 +480,10 @@ jobs:
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
           set -euo pipefail
-          python3 - "${STATE_STORE}" "${OPERATIONAL_DATE}" <<'PY'
+          python3 - "${STATE_STORE}" "${{ steps.due.outputs.operational_date }}" <<'PY'
           import pathlib
           import sys
           from g11.canonical import public_app_feed
@@ -598,8 +585,8 @@ jobs:
           set -euo pipefail
           mkdir -p ../.relay-output
           args=(
-            --phase "${RELAY_PHASE}"
-            --operational-date "${OPERATIONAL_DATE}"
+            --phase "${{ steps.due.outputs.phase }}"
+            --operational-date "${{ steps.due.outputs.operational_date }}"
             --state-root "${GITHUB_WORKSPACE}/.relay-state"
             --feed-output "${GITHUB_WORKSPACE}/.relay-output/feed.json"
             --public-repository "${GITHUB_REPOSITORY}"
@@ -608,7 +595,7 @@ jobs:
             --app-origin "${G11_APP_ORIGIN}"
             --oidc-audience "${G11_OIDC_AUDIENCE}"
           )
-          if [ "${RELAY_PHASE}" = "predeadline" ]; then
+          if [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
             python3 -m g11.relay.predeadline_nowait_v1 "${args[@]}" | tee ../.relay-output/result.json
           else
           python3 -m g11.relay.v1 "${args[@]}" | tee ../.relay-output/result.json
@@ -619,9 +606,9 @@ jobs:
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
-          python3 - "${STATE_STORE}" "${OPERATIONAL_DATE}" <<'PY'
+          python3 - "${STATE_STORE}" "${{ steps.due.outputs.operational_date }}" <<'PY'
           import gzip
           import json
           import pathlib
@@ -660,12 +647,12 @@ jobs:
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
           set -euo pipefail
           # Official-result waiting is checkpoint-only, not completed NIGHT.
           if [ -f ../.relay-output/result.json ] && \
-             jq -e --arg day "${OPERATIONAL_DATE}" '
+             jq -e --arg day "${{ steps.due.outputs.operational_date }}" '
                .STATUS == "NIGHT_WAITING_OFFICIAL_RESULTS"
                and .PHASE == "NIGHT" and .OPERATIONAL_DATE_JST == $day
                and .FEED_EMITTED == false
@@ -682,8 +669,8 @@ jobs:
             echo "RESCUE_NIGHT_RESEARCH_LEDGER_CHECK=NOT_APPLICABLE"
             exit 0
           fi
-          true_source="${STATE_STORE}/g11/true-ai-history/${OPERATIONAL_DATE}"
-          wild_source="${STATE_STORE}/g11/wild-pack-history/${OPERATIONAL_DATE}"
+          true_source="${STATE_STORE}/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
+          wild_source="${STATE_STORE}/g11/wild-pack-history/${{ steps.due.outputs.operational_date }}"
           test -f "${true_source}/day-records.manifest.json"
           test -f "${wild_source}/factual-paths.manifest.json"
           python3 - "${STATE_STORE}" <<'PY'
@@ -749,7 +736,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${OPERATIONAL_DATE}-${{ github.run_id }}
+          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
 
       - name: Gate NIGHT publication on fully settled research
         id: night-ready
@@ -760,7 +747,7 @@ jobs:
           RELAY_PHASE: ${{ steps.due.outputs.phase }}
         run: |
           set -euo pipefail
-          if [ "${RELAY_PHASE}" != "night" ]; then
+          if [ "${{ steps.due.outputs.phase }}" != "night" ]; then
             echo 'allowed=true' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -1310,12 +1297,12 @@ jobs:
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true'
         env:
           FEED: .relay-output/feed.json
-          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
           WILD_COMPAT: ${{ steps.publish.outputs.wild_compat }}
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --location \
-            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
             --dump-header .relay-output/readback.headers \
             -o .relay-output/readback.json
 
@@ -1360,7 +1347,7 @@ jobs:
               ;;
           esac
 
-          jq -e --arg operational_date "${OPERATIONAL_DATE}" --arg wild_compat "${WILD_COMPAT}" '
+          jq -e --arg operational_date "${{ steps.due.outputs.operational_date }}" --arg wild_compat "${WILD_COMPAT}" '
             .operational_date_jst == $operational_date
             and (.canonical_authorities | type == "object")
             and (.canonical_authorities.growth_p3 | type == "object")
@@ -1374,21 +1361,21 @@ jobs:
             )
             and .capabilities.canonical_authorities
           ' .relay-output/readback.json >/dev/null
-          if [ "${RELAY_PHASE}" = "night" ]; then
+          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
             python3 scripts/audit_three_phase_runtime_contract.py \
-              --night-ready .relay-output/readback.json --day "${OPERATIONAL_DATE}"
+              --night-ready .relay-output/readback.json --day "${{ steps.due.outputs.operational_date }}"
           fi
 
       - name: Verify existing immutable night readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night == 'true'
         env:
-          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --location \
-            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
             -o .relay-output/readback-existing-night.json
-          jq -e --arg operational_date "${OPERATIONAL_DATE}" '
+          jq -e --arg operational_date "${{ steps.due.outputs.operational_date }}" '
             .operational_date_jst == $operational_date
             and .stage == "NIGHT"
             and .status == "PASS"
@@ -1397,7 +1384,7 @@ jobs:
             and (.counts.results > 0)
           ' .relay-output/readback-existing-night.json >/dev/null
           python3 scripts/audit_three_phase_runtime_contract.py \
-            --night-ready .relay-output/readback-existing-night.json --day "${OPERATIONAL_DATE}"
+            --night-ready .relay-output/readback-existing-night.json --day "${{ steps.due.outputs.operational_date }}"
 
       - name: Keep the predeadline relay alive between delayed cron starts
         if: always() && !cancelled() && steps.runtime.outcome == 'success' && steps.encrypt-state.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'
