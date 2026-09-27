@@ -813,6 +813,8 @@ jobs:
         id: publish
         env:
           FEED: .relay-output/feed.json
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          RELAY_PHASE: ${{ steps.due.outputs.phase }}
         run: |
           set -euo pipefail
           # Preserve already-accepted immutable race snapshots.
