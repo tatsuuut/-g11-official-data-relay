@@ -1,0 +1,80 @@
+name: G11 20260927 rescue read-only audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TZ: Asia/Tokyo
+    steps:
+      - name: Restore encrypted 9/27 state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-27-audit-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-27-
+      - name: Audit sealed rescue without predictions or writes
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s .relay-cache/state.tgz.gpg
+          archive="${RUNNER_TEMP}/g11-rescue-audit.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${archive}" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${archive}" <<'PY'
+          import datetime as dt
+          import io
+          import json
+          import sys
+          import tarfile
+          from pathlib import PurePosixPath
+          archive = tarfile.open(sys.argv[1], "r:gz")
+          members = {str(PurePosixPath(m.name)).removeprefix("./"): m for m in archive.getmembers() if m.isfile()}
+          def read(path):
+              m = members.get(path)
+              return json.load(archive.extractfile(m)) if m else None
+          manifest = read("rescue/rescue-manifest.json")
+          assert manifest and manifest["OPERATIONAL_DATE_JST"] == "2026-09-27"
+          lock = dt.datetime.fromisoformat(manifest["RESCUE_LOCK_JST"])
+          now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9)))
+          future = set(manifest["FUTURE_RACE_KEYS"])
+          completed = set(manifest["P3_COMPLETED"])
+          abeken = set(manifest["ABEKEN_COMPLETED"])
+          deadlines = manifest["DEADLINE_BY_KEY"]
+          races = []
+          for key in sorted(deadlines):
+              deadline = dt.datetime.fromisoformat(deadlines[key])
+              seven = deadline - dt.timedelta(minutes=7)
+              prediction = read(f"rescue/store/snapshots/morning/prediction-{key.lower()}.json")
+              snap = prediction.get("SNAPSHOT_SHA256") if isinstance(prediction, dict) else None
+              races.append({
+                  "key":key,"deadline":deadline.isoformat(),"t7":seven.isoformat(),
+                  "baseline_before_t7":key in completed and lock <= seven,
+                  "baseline_before_deadline":key in completed and lock < deadline,
+                  "baseline_snapshot_present":bool(prediction),
+                  "baseline_snapshot_sha":snap,
+                  "abeken_snapshot_recorded":key in abeken,
+                  "future_t7":now < seven,
+                  "before_deadline":now < deadline,
+              })
+          print("G11_RESCUE_AUDIT=" + json.dumps({
+              "as_of_jst":now.replace(microsecond=0).isoformat(),
+              "rescue_lock_jst":lock.isoformat(),
+              "manifest_count":len(future),
+              "p3_count":len(completed),
+              "abeken_count":len(abeken),
+              "baseline_before_t7_count":sum(r["baseline_before_t7"] for r in races),
+              "baseline_before_deadline_count":sum(r["baseline_before_deadline"] for r in races),
+              "remaining_before_t7_count":sum(r["future_t7"] for r in races),
+              "remaining_before_deadline_count":sum(r["before_deadline"] for r in races),
+              "remaining_t7": [r for r in races if r["future_t7"]],
+              "morning_promoted":manifest["CANONICAL_MORNING_PROMOTED"],
+              "research_connected":manifest["NIGHT_RESEARCH_CONNECTED"],
+          },ensure_ascii=False,sort_keys=True))
+          PY
