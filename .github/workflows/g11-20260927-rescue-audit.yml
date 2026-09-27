@@ -29,6 +29,7 @@ jobs:
           exec 3<&-
           python3 - "${archive}" <<'PY'
           import datetime as dt
+          import hashlib
           import io
           import json
           import sys
@@ -50,19 +51,21 @@ jobs:
           assert input_snapshot and input_snapshot["PAYLOAD"]["OPERATIONAL_DATE_JST"] == "2026-09-27"
           payload = input_snapshot["PAYLOAD"]
           fields = payload["RAW38_FIELDS"]
-          ki, di = fields.index("標準レースキー"), fields.index("締切")
+          ki, di, vi = fields.index("標準レースキー"), fields.index("締切"), fields.index("場")
           deadlines = {
               row[ki]: "2026-09-27T" + row[di] + ":00+09:00"
               for row in payload["RAW38_ROWS"]
           }
+          venues = {row[ki]:row[vi] for row in payload["RAW38_ROWS"]}
           races = []
           for key in sorted(deadlines):
               deadline = dt.datetime.fromisoformat(deadlines[key])
               seven = deadline - dt.timedelta(minutes=7)
               prediction = read(f"rescue/store/snapshots/morning/prediction-{key.lower()}.json")
-              snap = prediction.get("SNAPSHOT_SHA256") if isinstance(prediction, dict) else None
+              member = members.get(f"rescue/store/snapshots/morning/prediction-{key.lower()}.json")
+              snap = hashlib.sha256(archive.extractfile(member).read()).hexdigest() if member else None
               races.append({
-                  "key":key,"deadline":deadline.isoformat(),"t7":seven.isoformat(),
+                  "key":key,"venue":venues[key],"deadline":deadline.isoformat(),"t7":seven.isoformat(),
                   "baseline_before_t7":key in completed and lock <= seven,
                   "baseline_before_deadline":key in completed and lock < deadline,
                   "baseline_snapshot_present":bool(prediction),
@@ -82,6 +85,9 @@ jobs:
               "remaining_before_t7_count":sum(r["future_t7"] for r in races),
               "remaining_before_deadline_count":sum(r["before_deadline"] for r in races),
               "remaining_t7": [r for r in races if r["future_t7"]],
+              "late_baselines": [r for r in races if r["key"] in completed and not r["baseline_before_t7"]],
+              "snapshot_sha_present_count":sum(bool(r["baseline_snapshot_sha"]) for r in races),
+              "official_source_sha":hashlib.sha256(archive.extractfile(members["rescue/store/snapshots/morning/official-day-input.json"]).read()).hexdigest(),
               "morning_promoted":manifest["CANONICAL_MORNING_PROMOTED"],
               "research_connected":manifest["NIGHT_RESEARCH_CONNECTED"],
           },ensure_ascii=False,sort_keys=True))
