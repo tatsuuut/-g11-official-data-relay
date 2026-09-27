@@ -1317,6 +1317,7 @@ jobs:
           fi
 
           echo "G11_TRANSPORT_RESCUE_PROOF=$(jq -c '{tagged:([.races[] | select((.today_rescue | type) == "object")] | length),first:(.races[0] | {key,today_rescue}),class:.SNAPSHOT_CLASS}' "${FEED}")"
+          echo "G11_TRANSPORT_THREE_ENGINE=$(jq -c '{capability:.capabilities.three_engine_comparison,summary:(.three_engine_comparison|type),first:(.races[0] | {key,three_engine_classification,three_engine_score}),missing:([.races[] | select((.three_engine_score|type)!="object" or .three_engine_classification==null)]|length)}' "${FEED}")"
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
