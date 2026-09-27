@@ -171,9 +171,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v2-${OPERATIONAL_DATE}-${{ github.run_id }}
           restore-keys: |
-            g11-state-v2-${{ steps.due.outputs.operational_date }}-
+            g11-state-v2-${OPERATIONAL_DATE}-
             g11-state-v2-
 
       - name: Fail closed when the private credential is absent
@@ -196,7 +196,7 @@ jobs:
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
             --decrypt --output "${archive}" "${encrypted}"
           exec 3<&-
-          python3 - "${archive}" "${{ steps.due.outputs.operational_date }}" <<'PY'
+          python3 - "${archive}" "${OPERATIONAL_DATE}" <<'PY'
           import json
           import pathlib
           import shutil
@@ -322,7 +322,7 @@ jobs:
               .g11-model/g11/wild-pack-oos/ \
               .relay-state/store/g11/wild-pack-oos/
           fi
-          day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
+          day_root=".relay-state/store/g11/true-ai-history/${OPERATIONAL_DATE}"
           if [ ! -f "${day_root}/morning-predictions.manifest.json" ]; then
             model_source=".g11-model/g11/true-ai-models"
             test -f "${model_source}/latest-research.json"
@@ -387,7 +387,7 @@ jobs:
           # already present too.  Do not key CatBoost installation to missing
           # artifacts: PREDEADLINE and NIGHT can still load CURRENT .cbm
           # models. Verify the exact interpreter that later executes relay.v1.
-          if [ "${{ steps.due.outputs.phase }}" != "dry-run" ]; then
+          if [ "${RELAY_PHASE}" != "dry-run" ]; then
             if ! python3 -c 'import catboost' >/dev/null 2>&1; then
               python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
             fi
@@ -492,7 +492,7 @@ jobs:
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
         run: |
           set -euo pipefail
           python3 - "${STATE_STORE}" "${OPERATIONAL_DATE}" <<'PY'
@@ -597,8 +597,8 @@ jobs:
           set -euo pipefail
           mkdir -p ../.relay-output
           args=(
-            --phase "${{ steps.due.outputs.phase }}"
-            --operational-date "${{ steps.due.outputs.operational_date }}"
+            --phase "${RELAY_PHASE}"
+            --operational-date "${OPERATIONAL_DATE}"
             --state-root "${GITHUB_WORKSPACE}/.relay-state"
             --feed-output "${GITHUB_WORKSPACE}/.relay-output/feed.json"
             --public-repository "${GITHUB_REPOSITORY}"
@@ -607,7 +607,7 @@ jobs:
             --app-origin "${G11_APP_ORIGIN}"
             --oidc-audience "${G11_OIDC_AUDIENCE}"
           )
-          if [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
+          if [ "${RELAY_PHASE}" = "predeadline" ]; then
             python3 -m g11.relay.predeadline_nowait_v1 "${args[@]}" | tee ../.relay-output/result.json
           else
           python3 -m g11.relay.v1 "${args[@]}" | tee ../.relay-output/result.json
@@ -618,7 +618,7 @@ jobs:
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
         run: |
           python3 - "${STATE_STORE}" "${OPERATIONAL_DATE}" <<'PY'
           import gzip
@@ -659,7 +659,7 @@ jobs:
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
         run: |
           set -euo pipefail
           # Official-result waiting is checkpoint-only, not completed NIGHT.
@@ -748,16 +748,18 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v2-${OPERATIONAL_DATE}-${{ github.run_id }}
 
       - name: Gate NIGHT publication on fully settled research
         id: night-ready
         if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != ''
         env:
           FEED: .relay-output/feed.json
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          RELAY_PHASE: ${{ steps.due.outputs.phase }}
         run: |
           set -euo pipefail
-          if [ "${{ steps.due.outputs.phase }}" != "night" ]; then
+          if [ "${RELAY_PHASE}" != "night" ]; then
             echo 'allowed=true' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -827,7 +829,7 @@ jobs:
           set -euo pipefail
           # Preserve already-accepted immutable race snapshots.
           if curl --fail-with-body --silent --show-error --location \
-            "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
             -o .relay-output/stored-feed.json; then
             jq -c --slurpfile stored .relay-output/stored-feed.json '
               (.canonical_authorities.growth_p3 // {}) as $growth
@@ -939,7 +941,7 @@ jobs:
           # accepted by the app, including ABEKEN.  Also keep the stored schema
           # for this legacy rescue day; WILD CURRENT becomes visible on the next
           # fresh operational day instead of rewriting 2026-09-20.
-          if [ "${{ steps.due.outputs.phase }}" = "night" ] && \
+          if [ "${RELAY_PHASE}" = "night" ] && \
              [ -f .relay-output/stored-feed.json ]; then
             jq -c --slurpfile stored .relay-output/stored-feed.json '
               ($stored[0].races | map({key: .key, value: .}) | from_entries) as $old
@@ -1059,7 +1061,7 @@ jobs:
           # daily_aggregate evidence with NOT_YET_ISSUED placeholders.
           # Race-level night_execution remains aggregate-only to stay under the
           # Site sync payload ceiling.
-          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+          if [ "${RELAY_PHASE}" = "night" ]; then
             python3 - "${FEED}" <<'PY'
           import json
           import sys
@@ -1110,7 +1112,7 @@ jobs:
           # Re-settle display-only NIGHT finance against the exact immutable
           # MORNING practical_bets already accepted by the Site. Canonical
           # RESEARCH_LEDGER60 remains untouched in encrypted state.
-          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+          if [ "${RELAY_PHASE}" = "night" ]; then
             PYTHONPATH=".g11-private" python3 -m g11.relay.night_transport_finance_v1 \
               "${FEED}" \
               ".relay-state/store/snapshots/night/workbook-ledger-projection.json"
@@ -1122,7 +1124,7 @@ jobs:
             fi
           fi
 
-          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+          if [ "${RELAY_PHASE}" = "night" ]; then
             python3 - "${FEED}" <<'PY'
           import collections, json, sys
           feed=json.load(open(sys.argv[1],encoding="utf-8"))
@@ -1201,7 +1203,7 @@ jobs:
 
           echo "G11_INCOMING_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${FEED}")"
           previous_wild="$(mktemp)"
-          accepted_reference_date="$(date --date='${{ steps.due.outputs.operational_date }} -1 day' +%F)"
+          accepted_reference_date="$(date --date="${OPERATIONAL_DATE} -1 day" +%F)"
           if curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${accepted_reference_date}" \
             -o "${previous_wild}"; then
@@ -1237,7 +1239,7 @@ jobs:
             printf 'G11 sync rejected the verified feed (HTTP %s):\n' "${http_status}" >&2
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
-            if [ "${http_status}" = "413" ] && [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+            if [ "${http_status}" = "413" ] && [ "${RELAY_PHASE}" = "night" ]; then
               if PYTHONPATH=".g11-private" python3 -m g11.relay.gzip_sync_retry_v1 "${FEED}" "${G11_APP_ORIGIN}" "${token}" "${feed_sha}"; then
                 printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
                 exit 0
@@ -1271,7 +1273,7 @@ jobs:
               jq -c . .relay-output/publish-result.json >&2 || true
             fi
             if [ "${http_status}" = "409" ] && \
-               [ "${{ steps.due.outputs.phase }}" = "night" ] && \
+               [ "${RELAY_PHASE}" = "night" ] && \
                jq -e '.error == "NIGHT_IMMUTABLE_CONFLICT"' \
                  .relay-output/publish-result.json >/dev/null 2>&1; then
               # A finalized NIGHT snapshot is immutable by design. A manual
@@ -1284,7 +1286,7 @@ jobs:
                jq -e '.error == "ODDS_IMMUTABLE_CONFLICT"' \
                  .relay-output/publish-result.json >/dev/null 2>&1; then
               curl --fail-with-body --silent --show-error --location \
-                "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
+                "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
                 -o .relay-output/stored-feed.json
               jq -cn \
                 --slurpfile stored .relay-output/stored-feed.json \
@@ -1307,7 +1309,7 @@ jobs:
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true'
         env:
           FEED: .relay-output/feed.json
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
           WILD_COMPAT: ${{ steps.publish.outputs.wild_compat }}
         run: |
           set -euo pipefail
@@ -1371,7 +1373,7 @@ jobs:
             )
             and .capabilities.canonical_authorities
           ' .relay-output/readback.json >/dev/null
-          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+          if [ "${RELAY_PHASE}" = "night" ]; then
             python3 scripts/audit_three_phase_runtime_contract.py \
               --night-ready .relay-output/readback.json --day "${OPERATIONAL_DATE}"
           fi
@@ -1379,7 +1381,7 @@ jobs:
       - name: Verify existing immutable night readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night == 'true'
         env:
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          OPERATIONAL_DATE: ${OPERATIONAL_DATE}
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --location \
