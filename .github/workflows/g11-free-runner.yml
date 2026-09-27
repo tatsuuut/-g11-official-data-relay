@@ -54,7 +54,9 @@ jobs:
     if: >-
       github.repository == 'tatsuuut/-g11-official-data-relay' &&
       github.ref == 'refs/heads/main' &&
-      vars.G11_RELAY_ENABLED == 'true'
+      (vars.G11_RELAY_ENABLED == 'true' ||
+       (github.event_name == 'push' &&
+        contains(github.event.head_commit.message, '[relay-recover-current]')))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -75,6 +77,20 @@ jobs:
 
       - name: Audit public surface
         run: python3 scripts/audit_public_surface.py
+
+      - name: Report relay enable gate state
+        env:
+          RELAY_ENABLED: ${{ vars.G11_RELAY_ENABLED }}
+        run: |
+          if [ "${RELAY_ENABLED}" = "true" ]; then
+            echo "G11_RELAY_ENABLE_GATE=ENABLED_TRUE"
+          elif [ "${RELAY_ENABLED}" = "false" ]; then
+            echo "G11_RELAY_ENABLE_GATE=ENABLED_FALSE"
+          elif [ -z "${RELAY_ENABLED}" ]; then
+            echo "G11_RELAY_ENABLE_GATE=UNSET"
+          else
+            echo "G11_RELAY_ENABLE_GATE=NONSTANDARD"
+          fi
 
       - name: Resolve the bounded phase and race day
         id: due
