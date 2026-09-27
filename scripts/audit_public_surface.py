@@ -523,6 +523,12 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
             if not isinstance(race, dict) or race.get("key") not in rescue_proof_by_key:
                 fail("rescue proof race binding")
             race["today_rescue"] = rescue_proof_by_key[race["key"]]
+            # Yesterday's optional engine fields can be shape-padded as null;
+            # absence means NOT_READY on this day, never a fabricated snapshot.
+            if race.get("abeken_shadow") is None:
+                race.pop("abeken_shadow", None)
+            if race.get("wild_pack") is None:
+                race.pop("wild_pack", None)
         dropped[:] = [item for item in dropped if item != "race.today_rescue" and not item.startswith("race.today_rescue.")]
         print("G11_SITE_TODAY_RESCUE_PROOF_PRESERVED=" + str(len(rescue_proof_by_key)))
     if rescue_reference_by_key:
