@@ -842,6 +842,33 @@ jobs:
               json.dumps(proof, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
           print("G11_VERIFIED_SPECIAL8_MORNING_LOCKS=" + str(len(proof)))
           PY
+            PYTHONPATH=".g11-private" python3 - "${FEED}" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          incoming = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          stored = json.loads(Path(".relay-output/stored-feed.json").read_text(encoding="utf-8"))
+          proof = json.loads(Path(".relay-output/special-eight-proof.json").read_text(encoding="utf-8"))
+          previous = {row["key"]: row for row in stored["races"]}
+          for row in incoming["races"]:
+              key = row["key"]
+              if key not in proof:
+                  continue
+              old = previous.get(key, {})
+              p = proof[key]
+              pre_old = old.get("predeadline") or {}
+              pre_new = row.get("predeadline") or {}
+              note = "｜SITE表示互換のみ｜正本特例8点=" + "/".join(p["bets"])
+              checks = {
+                  "snapshot": old.get("p3_snapshot_sha256") == p["snapshot_sha"],
+                  "old_root_prefix": old.get("practical_bets") == p["bets"][:7] and old.get("p3_production_bets") == p["bets"][:7] and old.get("production_points") == 7,
+                  "new_root_eight": row.get("practical_bets") == p["bets"] and row.get("p3_production_bets") == p["bets"] and row.get("production_points") == 8,
+                  "special_id": row.get("special_case_id") == "G11_P3_SPECIAL_45_2_EQ_145_V1",
+                  "old_note": (old.get("caution") or "").endswith(note),
+                  "pre": not pre_old or (pre_old.get("practical_bets") == p["bets"][:7] and pre_new.get("practical_bets") == p["bets"] and pre_old.get("captured_at_jst") == pre_new.get("captured_at_jst") and (pre_old.get("caution") or "").endswith(note)),
+              }
+              print("G11_SPECIAL8_REPLAY_CHECK=" + json.dumps({"key": key, "checks": checks}, sort_keys=True))
+          PY
             jq -c --slurpfile stored .relay-output/stored-feed.json \
                   --slurpfile special .relay-output/special-eight-proof.json '
               ($special[0] // {}) as $proof |
