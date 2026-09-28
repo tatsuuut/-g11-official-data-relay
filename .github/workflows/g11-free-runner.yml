@@ -1045,6 +1045,7 @@ jobs:
               # win_candidates remains the legacy odds-merit count expected by
               # the Site validator.
               | .counts.win_candidates = ([.races[] | select(.research_eligible == true and .odds_merit == "◎")] | length)
+              | .counts.value_alert_count = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.value_alert == true)] | length)
             ' "${FEED}" > .relay-output/feed-reconciled.json
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
