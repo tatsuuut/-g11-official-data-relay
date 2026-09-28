@@ -27,7 +27,7 @@ def decision(result: dict, operational_date: date, now: datetime) -> str:
     if status in {"NIGHT_WAITING_OFFICIAL_RESULTS", "NIGHT_RESULTS_COMPLETE"}:
         return "STOP_NIGHT"
     if operational_date < EFFECTIVE_FROM:
-        return "STOP_LEGACY" if now.time() >= time(20, 50) else "CONTINUE"
+        return "STOP_LEGACY" if now.date() != operational_date or now.time() >= time(20, 50) else "CONTINUE"
     if now.date() not in {operational_date, operational_date + timedelta(days=1)}:
         return "STOP_WRONG_DAY"
     if status != "RELAY_PHASE_COMPLETE" or result.get("PHASE") != "PREDEADLINE":
