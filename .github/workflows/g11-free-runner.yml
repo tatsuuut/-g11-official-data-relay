@@ -1309,13 +1309,6 @@ jobs:
             python3 scripts/audit_public_surface.py project-feed-schema "${FEED}" "${previous_wild}"
           fi
 
-          if jq -e '(.canonical_authorities.wild_pack | type) == "object"' "${FEED}" >/dev/null; then
-            jq -c 'del(.wild_pack) | del(.capabilities.wild_pack) | .races |= map(if ((.wild_pack.pre_race | type) == "object") then .wild_pack.pre_race |= del(.current_ids,.full_path_counts) else . end)' "${FEED}" > .relay-output/feed-site-compat-preflight.json
-            mv .relay-output/feed-site-compat-preflight.json "${FEED}"
-            echo 'wild_compat=true' >> "${GITHUB_OUTPUT}"
-            echo 'G11_WILD_SITE_COMPAT_PREFLIGHT=PASS'
-          fi
-
           echo "G11_TRANSPORT_RESCUE_PROOF=$(jq -c '{tagged:([.races[] | select((.today_rescue | type) == "object")] | length),first:(.races[0] | {key,today_rescue}),class:.SNAPSHOT_CLASS}' "${FEED}")"
           echo "G11_TRANSPORT_THREE_ENGINE=$(jq -c '{capability:.capabilities.three_engine_comparison,summary:(.three_engine_comparison|type),first:(.races[0] | {key,three_engine_classification,three_engine_score}),missing:([.races[] | select((.three_engine_score|type)!="object" or .three_engine_classification==null)]|length)}' "${FEED}")"
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
@@ -1342,33 +1335,6 @@ jobs:
                 printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
                 exit 0
               fi
-            fi
-            if [ "${http_status}" = "400" ] && \
-               jq -e '.error == "FEED_WILD_PACK_CAPABILITY"' \
-                 .relay-output/publish-result.json >/dev/null 2>&1; then
-              echo 'G11_WILD_SITE_COMPAT_FALLBACK=BEGIN'
-              jq -c '
-                del(.wild_pack)
-                | del(.capabilities.wild_pack)
-              ' "${FEED}" > .relay-output/feed-site-compat.json
-              mv .relay-output/feed-site-compat.json "${FEED}"
-              feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
-              http_status="$(curl --silent --show-error \
-                -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
-                -H "Authorization: Bearer ${token}" \
-                -H 'Content-Type: application/json' \
-                -H "x-g11-feed-sha256: ${feed_sha}" \
-                --data-binary "@${FEED}" \
-                --output .relay-output/publish-result.json \
-                --write-out '%{http_code}')"
-              if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
-                echo 'G11_WILD_SITE_COMPAT_FALLBACK=PASS'
-                echo 'wild_compat=true' >> "${GITHUB_OUTPUT}"
-                printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
-                exit 0
-              fi
-              printf 'G11 WILD compatibility retry rejected (HTTP %s):\n' "${http_status}" >&2
-              jq -c . .relay-output/publish-result.json >&2 || true
             fi
             if [ "${http_status}" = "409" ] && \
                [ "${RELAY_PHASE}" = "night" ] && \
@@ -1408,7 +1374,6 @@ jobs:
         env:
           FEED: .relay-output/feed.json
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
-          WILD_COMPAT: ${{ steps.publish.outputs.wild_compat }}
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --location \
@@ -1457,20 +1422,25 @@ jobs:
               ;;
           esac
 
-          jq -e --arg operational_date "${{ steps.due.outputs.operational_date }}" --arg wild_compat "${WILD_COMPAT}" '
+          jq -e --arg operational_date "${{ steps.due.outputs.operational_date }}" --slurpfile sent "${FEED}" '
             .operational_date_jst == $operational_date
             and (.canonical_authorities | type == "object")
             and (.canonical_authorities.growth_p3 | type == "object")
-            and (
-              if $wild_compat == "true"
-              then (.canonical_authorities.wild_pack | type) == "object"
-                and (.capabilities.wild_pack // null) == null
-                and (.wild_pack // null) == null
-              else (.canonical_authorities.wild_pack | type == "object")
-              end
-            )
+            and (.canonical_authorities.wild_pack | type == "object")
             and .capabilities.canonical_authorities
+            and .capabilities.wild_pack == $sent[0].capabilities.wild_pack
+            and .wild_pack == $sent[0].wild_pack
+            and (.races | map({
+              key, three_engine_score, three_engine_classification,
+              trifecta_confidence, special_case_id, special_strength,
+              strong_mark, predeadline, wild_pack, abeken_shadow
+            })) == ($sent[0].races | map({
+              key, three_engine_score, three_engine_classification,
+              trifecta_confidence, special_case_id, special_strength,
+              strong_mark, predeadline, wild_pack, abeken_shadow
+            }))
           ' .relay-output/readback.json >/dev/null
+          echo 'G11_CURRENT_PRE_RACE_TRANSPORT_READBACK=PASS'
           if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
             python3 scripts/audit_three_phase_runtime_contract.py \
               --night-ready .relay-output/readback.json --day "${{ steps.due.outputs.operational_date }}"
@@ -1536,6 +1506,55 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
             -d '{"ref":"main","inputs":{"phase":"predeadline"}}'
+
+      - name: Bootstrap PREDEADLINE after a verified public MORNING
+        if: >-
+          always() && !cancelled() &&
+          steps.runtime.outcome == 'success' &&
+          steps.encrypt-state.outputs.ready == 'true' &&
+          steps.due.outputs.phase == 'morning'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          now_hhmm="$(date +%H%M)"
+          if [ "${now_hhmm}" -lt 0800 ] || [ "${now_hhmm}" -gt 2055 ]; then
+            echo "G11_PUBLIC_PREDEADLINE_BOOTSTRAP=OUTSIDE_WINDOW"
+            exit 0
+          fi
+          test "${OPERATIONAL_DATE}" = "$(date +%F)"
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+            -o .relay-output/bootstrap-morning-readback.json
+          jq -e --arg day "${OPERATIONAL_DATE}" '
+            .operational_date_jst == $day and .status == "PASS"
+            and (.stage == "MORNING" or .stage == "PREDEADLINE")
+            and .canonical_authorities.growth_p3.status == "LOCKED"
+            and .canonical_authorities.growth_p3.app_readback_status == "PASS"
+          ' .relay-output/bootstrap-morning-readback.json >/dev/null
+
+          for status in queued in_progress waiting pending requested; do
+            runs="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?status=${status}&per_page=100")"
+            active="$(printf '%s' "${runs}" | jq --argjson current "${GITHUB_RUN_ID}" \
+              '[.workflow_runs[] | select(.id != $current)] | length')"
+            if [ "${active}" -gt 0 ]; then
+              echo "G11_PUBLIC_PREDEADLINE_BOOTSTRAP=ACTIVE_${status}"
+              exit 0
+            fi
+          done
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+            -d '{"ref":"main","inputs":{"phase":"predeadline"}}'
+          echo "G11_PUBLIC_PREDEADLINE_BOOTSTRAP=DISPATCHED_ONCE"
 
       - name: Propagate private runtime failure after state checkpoint
         if: always() && steps.runtime.outcome == 'failure'
