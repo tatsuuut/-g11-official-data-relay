@@ -18,14 +18,16 @@ def runtime(deadline):
 class HeartbeatPolicyTests(unittest.TestCase):
     def test_last_race_2045_stays_alive_until_private_handoff(self):
         for minute in ("20:44:59", "20:45:00"):
+            expected = "CHECK_HANDOFF" if minute == "20:45:00" else "CONTINUE"
             self.assertEqual(decision(runtime("20:45"), DAY,
-                                      datetime.fromisoformat(f"2026-09-29T{minute}+09:00")), "CONTINUE")
+                                      datetime.fromisoformat(f"2026-09-29T{minute}+09:00")), expected)
 
     def test_2241_and_2245_never_stop_at_2110(self):
         for deadline in ("22:41", "22:45"):
             for minute in ("21:10:00", "22:40:59", f"{deadline}:00"):
+                expected = "CHECK_HANDOFF" if minute == f"{deadline}:00" else "CONTINUE"
                 self.assertEqual(decision(runtime(deadline), DAY,
-                                          datetime.fromisoformat(f"2026-09-29T{minute}+09:00")), "CONTINUE")
+                                          datetime.fromisoformat(f"2026-09-29T{minute}+09:00")), expected)
 
     def test_handoff_and_bounded_night_wait_stop_predeadline(self):
         now = datetime.fromisoformat("2026-09-29T22:41:00+09:00")
@@ -35,7 +37,7 @@ class HeartbeatPolicyTests(unittest.TestCase):
 
     def test_rollover_hard_stop(self):
         for minute in ("01:59:59", "02:00:00"):
-            expected = "CONTINUE" if minute < "02:00:00" else "STOP_ROLLOVER"
+            expected = "CHECK_HANDOFF" if minute < "02:00:00" else "STOP_ROLLOVER"
             self.assertEqual(decision(runtime("22:41"), DAY,
                                       datetime.fromisoformat(f"2026-09-30T{minute}+09:00")), expected)
         self.assertEqual(decision({"STATUS": "NIGHT_HANDOFF_READY", "NIGHT_HANDOFF": True}, DAY,
