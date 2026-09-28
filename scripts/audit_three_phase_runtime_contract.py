@@ -57,17 +57,18 @@ def audit_public() -> dict[str, object]:
     pre_crons = (
         'cron: "*/5 23 * * *"',
         'cron: "*/5 0-11 * * *"',
+        'cron: "0-10/5 12 * * *"',
     )
     for cron in pre_crons:
         require_text(free, cron, f"PREDEADLINE_CRON_MISSING:{cron}")
     require_text(
         free,
-        '"*/5 23 * * *"|"*/5 0-11 * * *")',
+        '"*/5 23 * * *"|"*/5 0-11 * * *"|"0-10/5 12 * * *")',
         "PREDEADLINE_RESOLVER_SET",
     )
     require_text(free, 'phase="predeadline"', "PREDEADLINE_RESOLVER_PHASE")
 
-    # NIGHT must be dispatched only by the explicit dispatcher.
+    # No NIGHT cron in the free runner; last-race handoff and recovery may dispatch.
     require('cron: "*/5 13-16 * * *"' not in free, "NIGHT_CRON_LEAK_IN_FREE_RUNNER")
     require_text(night, 'cron: "*/5 13-16 * * *"', "NIGHT_CRON_MISSING")
     require_text(
@@ -76,6 +77,9 @@ def audit_public() -> dict[str, object]:
         "NIGHT_DISPATCH_TARGET",
     )
     require_text(night, 'phase:"night"', "NIGHT_DISPATCH_PHASE")
+    require_text(free, 'NIGHT_HANDOFF_READY', "LAST_RACE_NIGHT_HANDOFF")
+    require_text(free, 'NIGHT_WAITING_OFFICIAL_RESULTS', "BOUNDED_NIGHT_RETRY")
+    require_text(free, 'sleep 180', "NIGHT_RETRY_PACING")
 
     # Main runner cannot silently lose its safety/readback/publication chain.
     required_steps = (
