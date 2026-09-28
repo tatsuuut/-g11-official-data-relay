@@ -1878,7 +1878,11 @@ jobs:
         run: |
           set -euo pipefail
           now_hhmm="$(date +%H%M)"
-          if [ "${now_hhmm}" -lt 0800 ] || [ "${now_hhmm}" -gt 2055 ]; then
+          # The final MORNING schedules are 07:00/07:05 JST. GitHub schedule
+          # delivery is best-effort and has arrived 30+ minutes late, so let
+          # that verified MORNING run seed the bounded PREDEADLINE heartbeat
+          # instead of waiting for a separate 08:00 cron to arrive.
+          if [ "${now_hhmm}" -lt 0700 ] || [ "${now_hhmm}" -gt 2055 ]; then
             echo "G11_PUBLIC_PREDEADLINE_BOOTSTRAP=OUTSIDE_WINDOW"
             exit 0
           fi
