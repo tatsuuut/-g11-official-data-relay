@@ -1811,3 +1811,5 @@ jobs:
       - name: Propagate private runtime failure after state checkpoint
         if: always() && steps.runtime.outcome == 'failure'
         run: exit 1
+
+# operator-night-current-20260928
