@@ -1,4 +1,4 @@
-name: G11 Wild conditional position bootstrap
+name: runtime state bootstrap
 
 on:
   push:
@@ -23,11 +23,11 @@ concurrency:
 
 jobs:
   train-freeze-and-encrypt:
-    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || (!contains(github.event.head_commit.message, '[wild4-fast]') && !contains(github.event.head_commit.message, '[wild-head-repair]')))
+    if: github.repository_id == '1367703708' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || (!contains(github.event.head_commit.message, '[config-only]') && !contains(github.event.head_commit.message, '[wild4-fast]') && !contains(github.event.head_commit.message, '[wild-head-repair]')))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      G11_PRIVATE_REPOSITORY: tatsuuut/boat-brain-lab
+      G11_PRIVATE_REPOSITORY: ${{ secrets.PRIVATE_SOURCE_REPO }}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
       TZ: Asia/Tokyo
@@ -535,7 +535,7 @@ jobs:
 
   # PRE_RACE V2 rerun binds the latest private authority.
   wild-head-repair:
-    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[wild-head-repair]')
+    if: github.repository_id == '1367703708' && github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[wild-head-repair]')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     concurrency:
@@ -550,7 +550,7 @@ jobs:
       - name: Checkout private authority
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: tatsuuut/boat-brain-lab
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
           ref: main
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: private

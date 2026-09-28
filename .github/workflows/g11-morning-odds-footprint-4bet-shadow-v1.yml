@@ -1,4 +1,4 @@
-name: G11 morning odds footprint 4-bet shadow V1
+name: runtime observation
 
 on:
   workflow_dispatch:
@@ -34,14 +34,14 @@ concurrency:
 jobs:
   shadow:
     if: >-
-      github.repository == 'tatsuuut/-g11-official-data-relay' &&
+      github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 9
     env:
       TZ: Asia/Tokyo
       PYTHONPATH: ${{ github.workspace }}/.g11-private
-      G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
+      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
     steps:
       - name: Checkout public relay
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -88,7 +88,7 @@ jobs:
       - name: Checkout private detector source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: tatsuuut/boat-brain-lab
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
           ref: main
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
@@ -97,7 +97,7 @@ jobs:
       - name: Checkout private append-only research history
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: tatsuuut/boat-brain-lab
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
           ref: g11-runtime
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-history

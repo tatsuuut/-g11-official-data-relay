@@ -1,4 +1,4 @@
-name: G11 explicit night dispatcher
+name: runtime completion dispatch
 
 # 2026-09-25: operator NIGHT recovery after missing scheduled night invocation.
 # 2026-09-26: guarded same-day recovery after missed scheduled NIGHT invocation; full-result commit gate is active.
@@ -32,13 +32,13 @@ concurrency:
 
 jobs:
   dispatch-night:
-    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main'
+    if: github.repository_id == '1367703708' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       TZ: Asia/Tokyo
       GH_TOKEN: ${{ github.token }}
-      G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
+      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
     steps:
       - name: Checkout tested night dispatch policy
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -112,7 +112,7 @@ jobs:
           for day in 2026-09-17 2026-09-18 2026-09-19 2026-09-20 2026-09-21; do
             file="$(mktemp)"
             curl --fail-with-body --silent --show-error --location \
-              "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=${day}" \
+              "${G11_APP_ORIGIN}/api/g11-feed?date=${day}" \
               -o "${file}"
             echo "DAY=${day}"
             jq -c '{
@@ -142,7 +142,7 @@ jobs:
         run: |
           set -euo pipefail
           page="$(mktemp)"
-          curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site" -o "${page}"
+          curl --fail-with-body --silent --show-error --location             "${G11_APP_ORIGIN}" -o "${page}"
           python3 - "${page}" <<'PY' > "${RUNNER_TEMP}/assets.txt"
           import pathlib,re,sys
           html=pathlib.Path(sys.argv[1]).read_text(encoding="utf-8",errors="replace")
@@ -159,8 +159,8 @@ jobs:
             [ -n "${asset}" ] || continue
             case "${asset}" in
               http*) url="${asset}" ;;
-              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
-              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+              /*) url="${G11_APP_ORIGIN}${asset}" ;;
+              *) url="${G11_APP_ORIGIN}/${asset}" ;;
             esac
             js="$(mktemp)"
             curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
@@ -176,8 +176,8 @@ jobs:
             [ -n "${asset}" ] || continue
             case "${asset}" in
               http*) url="${asset}" ;;
-              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
-              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+              /*) url="${G11_APP_ORIGIN}${asset}" ;;
+              *) url="${G11_APP_ORIGIN}/${asset}" ;;
             esac
             js="$(mktemp)"
             curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
@@ -205,8 +205,8 @@ jobs:
             [ -n "${asset}" ] || continue
             case "${asset}" in
               http*) url="${asset}" ;;
-              /*) url="https://g11-race-lab.higatatsunori2.chatgpt.site${asset}" ;;
-              *) url="https://g11-race-lab.higatatsunori2.chatgpt.site/${asset}" ;;
+              /*) url="${G11_APP_ORIGIN}${asset}" ;;
+              *) url="${G11_APP_ORIGIN}/${asset}" ;;
             esac
             js="$(mktemp)"
             curl --fail-with-body --silent --show-error --location "${url}" -o "${js}" || continue
@@ -230,12 +230,12 @@ jobs:
           PY
           done < "${RUNNER_TEMP}/assets.txt"
           release="$(mktemp)"
-          if curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-app-release?client=ios"             -o "${release}"; then
+          if curl --fail-with-body --silent --show-error --location             "${G11_APP_ORIGIN}/api/g11-app-release?client=ios"             -o "${release}"; then
             echo "G11_APP_RELEASE=$(tr -d '\n' < "${release}")"
           fi
           accepted_late_reference="$(mktemp)"
           if curl --fail-with-body --silent --show-error --location \
-            "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-08" \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-08" \
             -o "${accepted_late_reference}"; then
             echo "ACCEPTED_LATE_REFERENCE_CONTRACT="
             jq -c '{
@@ -252,7 +252,7 @@ jobs:
           fi
 
           current="$(mktemp)"
-          curl --fail-with-body --silent --show-error --location             "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-21"             -o "${current}"
+          curl --fail-with-body --silent --show-error --location             "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-21"             -o "${current}"
           jq -c '{
             stage,status,counts,research_db,
             with_result_trifecta:([.races[]|select(.result_trifecta!=null)]|length),
@@ -263,7 +263,7 @@ jobs:
           }' "${current}"
           accepted="$(mktemp)"
           curl --fail-with-body --silent --show-error --location \
-            "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-09-21" \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-21" \
             -o "${accepted}"
           echo "ACCEPTED_WILD_TOP=$(jq -c '.wild_pack' "${accepted}")"
           echo "ACCEPTED_WILD_RACE_SAMPLE=$(jq -c '[.races[]|select((.wild_pack|type)=="object")][0].wild_pack' "${accepted}")"
@@ -271,7 +271,7 @@ jobs:
           for day in 2026-09-19 2026-09-20 2026-09-21 2026-09-22; do
             cap="$(mktemp)"
             if curl --fail-with-body --silent --show-error --location \
-              "https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=${day}" \
+              "${G11_APP_ORIGIN}/api/g11-feed?date=${day}" \
               -o "${cap}"; then
               echo "CAPABILITY_DAY=${day}"
               jq -c '{

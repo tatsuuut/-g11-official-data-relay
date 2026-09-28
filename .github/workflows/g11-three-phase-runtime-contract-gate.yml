@@ -1,4 +1,4 @@
-name: G11 three-phase runtime contract gate
+name: runtime contract gate
 
 on:
   pull_request:
@@ -44,7 +44,7 @@ jobs:
       - name: Checkout private G11 main
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: tatsuuut/boat-brain-lab
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
           ref: main
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
