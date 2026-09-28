@@ -1,5 +1,7 @@
 name: runtime completion dispatch
 
+# Recovery only: the verified official last-race deadline starts NIGHT.
+
 # 2026-09-25: operator NIGHT recovery after missing scheduled night invocation.
 # 2026-09-26: guarded same-day recovery after missed scheduled NIGHT invocation; full-result commit gate is active.
 # 2026-09-24: rescue reference finance diagnostic.
@@ -19,7 +21,7 @@ on:
       - scripts/audit_three_phase_runtime_contract.py
   workflow_dispatch:
   schedule:
-    # 22:00-01:55 JST, every 5 minutes until the app confirms NIGHT complete.
+    # Recovery 22:00-01:55 JST; no-op after complete app readback.
     - cron: "*/5 13-16 * * *"
 
 permissions:
@@ -313,7 +315,7 @@ jobs:
           done
 
 
-      - name: Dispatch explicit NIGHT phase
+      - name: Recover incomplete NIGHT after the last-race starter
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
@@ -351,6 +353,19 @@ jobs:
               if python3 "${policy}" --night-ready "${current_feed}" --day "${operational_date}"; then
                 echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
                 exit 0
+              fi
+              # Public preflight; the private runtime independently checks
+              # the immutable, verified full-day morning B schedule.
+              if last_deadline="$(jq -er --arg day "${operational_date}" '
+                select(.operational_date_jst == $day)
+                | [.races[].deadline_jst] as $deadlines
+                | select(($deadlines | length) == .counts.races)
+                | $deadlines | if all(.[]; type == "string") then max else empty end
+              ' "${current_feed}")"; then
+                if [ "$(date -d "${last_deadline}" +%s)" -gt "$(date +%s)" ]; then
+                  echo 'G11_NIGHT_DISPATCH=BEFORE_LAST_RACE'
+                  exit 0
+                fi
               fi
             else
               echo 'G11_NIGHT_READBACK=UNAVAILABLE_NOT_COMPLETION'
