@@ -573,6 +573,7 @@ jobs:
             g11.growth_p3.v1_1.test_current_runtime_v1 \
             g11.growth_p3.v1_1.test_confidence_evidence_v3 \
             g11.relay.test_final_bet_accounting_v1 \
+            g11.relay.test_last_race_night_v1 \
             g11.canonical.test_integrated_authority_status_v1
           do
             python3 -m unittest "${module}"
