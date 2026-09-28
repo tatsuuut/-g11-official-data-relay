@@ -151,7 +151,7 @@ jobs:
           fi
           # The additional 21:00 heartbeat begins with the next complete
           # MORNING day; do not alter 2026-09-28's already-running T-7 lane.
-          if [ "${SCHEDULE_EXPRESSION}" = "0-10/5 12 * * *" ] && [ "${operational_date}" < "2026-09-29" ]; then
+          if [ "${SCHEDULE_EXPRESSION}" = "0-10/5 12 * * *" ] && [[ "${operational_date}" < "2026-09-29" ]]; then
             phase="dry-run"
           fi
           python3 - "${operational_date}" "${phase}" <<'PY'
@@ -1644,7 +1644,7 @@ jobs:
             echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
             exit 0
           fi
-          if { [ "$(date +%F)" < "2026-09-29" ] && [ "${now_hhmm}" -ge 2050 ]; } ||
+          if { [[ "$(date +%F)" < "2026-09-29" ]] && [ "${now_hhmm}" -ge 2050 ]; } ||
              [ "${now_hhmm}" -ge 2110 ]; then
             exit 0
           fi
