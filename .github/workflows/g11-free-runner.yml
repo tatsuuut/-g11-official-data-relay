@@ -1655,7 +1655,7 @@ jobs:
             echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
             exit 0
           fi
-          if [ "${heartbeat}" != CONTINUE ]; then
+          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
             echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
             exit 0
           fi
@@ -1673,7 +1673,7 @@ jobs:
           sleep 45
           heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
             --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
-          if [ "${heartbeat}" != CONTINUE ]; then
+          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
             echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
             exit 0
           fi
