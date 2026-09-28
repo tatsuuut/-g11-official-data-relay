@@ -1001,13 +1001,30 @@ jobs:
                 )
               # Preserve accepted TRUE AI morning predictions.
               | .true_ai = $stored[0].true_ai
-              # Preserve accepted 剥きけん predictions.
+              # Preserve accepted 45% comparison snapshots and V53 MORNING.
+              # Only a formal, matching V53 PRE_RACE may fill the previously
+              # empty V53 live slot; a published live snapshot stays immutable.
               | .abeken = $stored[0].abeken
               | .races |= map(
                   . as $incoming
                   | ($prior[.key] // null) as $old
                   | if (($old | type) == "object") and ($old | has("abeken_shadow"))
-                    then .abeken_shadow = $old.abeken_shadow
+                    then
+                      if (($old.abeken_shadow.v53 | type) == "object")
+                         and ($old.abeken_shadow.v53.formal_use == true)
+                      then
+                        if (($incoming.abeken_shadow.v53 | type) != "object")
+                           or ($incoming.abeken_shadow.v53.formal_use != true)
+                           or ($incoming.abeken_shadow.v53.runtime_logic_version != $old.abeken_shadow.v53.runtime_logic_version)
+                           or ($incoming.abeken_shadow.v53.morning != $old.abeken_shadow.v53.morning)
+                        then error("ABEKEN_V53_MORNING_TRANSPORT_MISMATCH")
+                        else .abeken_shadow = ($old.abeken_shadow |
+                          .v53.live = (
+                            if (.v53.live | type) == "object" then .v53.live
+                            else $incoming.abeken_shadow.v53.live end
+                          ))
+                        end
+                      else .abeken_shadow = $old.abeken_shadow end
                     elif (($old | type) == "object")
                     then del(.abeken_shadow)
                     else .
