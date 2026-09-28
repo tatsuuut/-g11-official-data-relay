@@ -127,6 +127,8 @@ def audit_public() -> dict[str, object]:
         "sleep 45",
         "PREDEADLINE_CHAIN_SPACING",
     )
+    require_text(continuation, "scripts/dynamic_last_race_heartbeat.py", "PREDEADLINE_MORNING_DEADLINE_POLICY")
+    require("-ge 2110" not in continuation, "PREDEADLINE_FIXED_2110_CUTOFF")
     require_text(
         continuation,
         'actions/workflows/g11-free-runner.yml/dispatches',

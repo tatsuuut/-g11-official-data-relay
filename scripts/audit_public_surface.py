@@ -20,6 +20,8 @@ ALLOWED_FILES = {
     "SECURITY.md",
     "scripts/audit_public_surface.py",
     "scripts/audit_three_phase_runtime_contract.py",
+    "scripts/dynamic_last_race_heartbeat.py",
+    "scripts/test_dynamic_last_race_heartbeat.py",
 }
 IGNORED_PARTS = {".git", "__pycache__"}
 FORBIDDEN_SUFFIXES = {
