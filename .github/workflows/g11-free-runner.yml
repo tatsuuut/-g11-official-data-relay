@@ -1642,6 +1642,12 @@ jobs:
               root = Path(store_root)
               store = OfficialArtifactStore(root)
               print(f"FIRST_LIVE_MORNING_RACE_ID={race_key}")
+              expected_morning = root / "snapshots" / "morning" / f"abeken-v53-shadow-morning-{race_key.lower()}.json"
+              local_v53 = sorted(
+                  path.name for path in (root / "snapshots" / "morning").glob("abeken-v53-shadow-morning-*.json")
+              )
+              print(f"V53_LOCAL_MORNING_EXPECTED={expected_morning} EXISTS={expected_morning.is_file()} COUNT={len(local_v53)}")
+              print("V53_LOCAL_MORNING_SAMPLE=" + json.dumps(local_v53[:5]))
               try:
                   morning = store.load_verified_snapshot("morning", f"abeken-v53-shadow-morning-{race_key.lower()}")
                   payload = morning["SNAPSHOT"]["PAYLOAD"]
