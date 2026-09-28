@@ -37,8 +37,9 @@ on:
     # 08:00-20:55 JST: official predeadline data and EV-only odds capture.
     - cron: "*/5 23 * * *"
     - cron: "*/5 0-11 * * *"
-    # NIGHT is dispatched only by g11-explicit-night-dispatcher.yml.
-    # Keeping one scheduler prevents duplicate result runs.
+    # Final-race handoff coverage if the 20:55 heartbeat starts late.
+    - cron: "0-10/5 12 * * *"
+    # The existing 22:00 dispatcher remains the recovery path.
 
 permissions:
   # The Site accepts only monotonic, pre-deadline market refreshes; prediction
@@ -116,7 +117,7 @@ jobs:
               "15-55/5 17 * * *"|"*/5 18-21 * * *"|"0-5/5 22 * * *")
                 phase="morning"
                 ;;
-              "*/5 23 * * *"|"*/5 0-11 * * *")
+              "*/5 23 * * *"|"*/5 0-11 * * *"|"0-10/5 12 * * *")
                 phase="predeadline"
                 ;;
               *)
@@ -147,6 +148,11 @@ jobs:
             phase="night"
           else
             phase="auto"
+          fi
+          # The additional 21:00 heartbeat begins with the next complete
+          # MORNING day; do not alter 2026-09-28's already-running T-7 lane.
+          if [ "${SCHEDULE_EXPRESSION}" = "0-10/5 12 * * *" ] && [ "${operational_date}" < "2026-09-29" ]; then
+            phase="dry-run"
           fi
           python3 - "${operational_date}" "${phase}" <<'PY'
           import datetime as dt
@@ -1634,7 +1640,12 @@ jobs:
         run: |
           set -euo pipefail
           now_hhmm="$(date +%H%M)"
-          if [ "${now_hhmm}" -ge 2050 ]; then
+          if jq -e '.STATUS == "NIGHT_HANDOFF_READY"' .relay-output/result.json >/dev/null; then
+            echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
+            exit 0
+          fi
+          if { [ "$(date +%F)" < "2026-09-29" ] && [ "${now_hhmm}" -ge 2050 ]; } ||
+             [ "${now_hhmm}" -ge 2110 ]; then
             exit 0
           fi
 
@@ -1667,6 +1678,69 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
             -d '{"ref":"main","inputs":{"phase":"predeadline"}}'
+
+      - name: Continue bounded NIGHT after official last-race handoff
+        if: >-
+          always() && !cancelled() &&
+          steps.runtime.outcome == 'success' &&
+          steps.encrypt-state.outputs.ready == 'true' &&
+          (steps.due.outputs.phase == 'predeadline' || steps.due.outputs.phase == 'night')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          result=.relay-output/result.json
+          if jq -e '.STATUS == "NIGHT_HANDOFF_READY" and .NIGHT_HANDOFF == true' "${result}" >/dev/null; then
+            echo 'G11_NIGHT_HANDOFF=LAST_RACE_DEADLINE_REACHED'
+          elif jq -e '.STATUS == "NIGHT_WAITING_OFFICIAL_RESULTS" and .RETRY_SCHEDULED == true' "${result}" >/dev/null; then
+            sleep 180
+          else
+            exit 0
+          fi
+          now_day="$(date +%F)"
+          now_hhmm="$(date +%H%M)"
+          if [ "${now_day}" != "${OPERATIONAL_DATE}" ]; then
+            if [ "${now_hhmm}" -ge 0200 ] || [ "${now_day}" != "$(date -d "${OPERATIONAL_DATE} + 1 day" +%F)" ]; then
+              echo 'G11_NIGHT_HANDOFF=ROLLOVER_CLOSED'
+              exit 0
+            fi
+          fi
+          if curl --fail-with-body --silent --show-error --location \
+            --connect-timeout 10 --max-time 20 \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
+            -o .relay-output/night-handoff-readback.json; then
+            if python3 scripts/audit_three_phase_runtime_contract.py \
+              --night-ready .relay-output/night-handoff-readback.json \
+              --day "${OPERATIONAL_DATE}"; then
+              echo 'G11_NIGHT_HANDOFF=APP_ALREADY_COMPLETE'
+              exit 0
+            fi
+          fi
+          # Scheduled jobs may be late, so only a queued/running manual
+          # continuation is a duplicate; the shared concurrency group
+          # serializes all scheduled invocations.
+          runs="$(curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 20 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=50")"
+          active_dispatch="$(printf '%s' "${runs}" | jq --argjson current "${GITHUB_RUN_ID}" \
+            '[.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending"))] | length')"
+          if [ "${active_dispatch}" -gt 0 ]; then
+            echo 'G11_NIGHT_HANDOFF=DEFER_ACTIVE'
+            exit 0
+          fi
+          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
+            '{ref:"main",inputs:{phase:"night",operational_date:$day}}')"
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 20 -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" -d "${payload}"
+          echo "G11_NIGHT_HANDOFF=DISPATCHED day=${OPERATIONAL_DATE}"
 
       - name: Bootstrap PREDEADLINE after a verified public MORNING
         if: >-
