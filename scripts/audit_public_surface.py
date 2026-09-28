@@ -518,6 +518,57 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
         if isinstance(race, dict) else race
         for race in incoming_races
     ]
+
+    # A previous day's feed is a display reference, never the authority for
+    # removing today's formal prediction and three-engine read-model fields.
+    # Copy only fields present in the verified incoming feed; missing snapshots
+    # remain missing, without manufacturing an evaluated or missed prediction.
+    current_race_fields = (
+        "three_engine_score", "three_engine_classification",
+        "trifecta_confidence", "special_case_id", "special_strength",
+        "strong_mark", "wild_pack", "abeken_shadow",
+    )
+    current_live_fields = (
+        "trifecta_confidence", "special_case_id",
+        "special_strength", "strong_mark",
+    )
+    preserved = set()
+    for source, projected in zip(incoming_races, feed["races"]):
+        if not isinstance(source, dict) or not isinstance(projected, dict):
+            continue
+        for field in current_race_fields:
+            if field in source:
+                projected[field] = source[field]
+                preserved.add("race." + field)
+        source_pre = source.get("predeadline")
+        projected_pre = projected.get("predeadline")
+        if isinstance(source_pre, dict):
+            if not isinstance(projected_pre, dict):
+                fail("formal PRE_RACE snapshot removed by schema projection")
+            for field in current_live_fields:
+                if field in source_pre:
+                    projected_pre[field] = source_pre[field]
+                    preserved.add("race.predeadline." + field)
+        if (
+            isinstance(feed.get("capabilities"), dict)
+            and feed["capabilities"].get("three_engine_comparison")
+                == "G11_THREE_ENGINE_COMPARISON_V1"
+            and (
+                not isinstance(projected.get("three_engine_score"), dict)
+                or not isinstance(projected.get("three_engine_classification"), str)
+            )
+        ):
+            fail("three-engine capability without race-level contract")
+    dropped[:] = [
+        path for path in dropped
+        if not any(
+            path == field or path.startswith(field + ".")
+            or path.startswith(field + "[")
+            for field in preserved
+        )
+    ]
+    print("G11_SITE_CURRENT_FIELDS_PRESERVED=" + json.dumps(
+        sorted(preserved), ensure_ascii=False))
     if rescue_proof_by_key:
         for race in feed["races"]:
             if not isinstance(race, dict) or race.get("key") not in rescue_proof_by_key:
