@@ -40,9 +40,9 @@ def decision(result: dict, operational_date: date, now: datetime) -> str:
     deadline = datetime.fromisoformat(raw)
     if deadline.utcoffset() != timedelta(hours=9) or deadline.date() != operational_date:
         raise ValueError("HEARTBEAT_VERIFIED_MORNING_DEADLINE_INVALID")
-    # After the deadline, one final bounded PREDEADLINE run is still needed
-    # if this run began earlier; the private runtime then returns HANDOFF.
-    return "CONTINUE"
+    # A run that started before the deadline may finish after it. Send one
+    # more bounded PREDEADLINE invocation to receive the private handoff.
+    return "CHECK_HANDOFF" if now >= deadline else "CONTINUE"
 
 
 def main() -> None:
