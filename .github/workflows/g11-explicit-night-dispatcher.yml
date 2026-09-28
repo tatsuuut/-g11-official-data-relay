@@ -353,6 +353,19 @@ jobs:
                 echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
                 exit 0
               fi
+              # Preflight the displayed official B deadlines; private runtime
+              # independently re-verifies its immutable MORNING binding.
+              if last_deadline="$(jq -er --arg day "${operational_date}" '
+                select(.operational_date_jst == $day)
+                | [.races[].deadline_jst] as $deadlines
+                | select(($deadlines | length) == .counts.races)
+                | $deadlines | if all(.[]; type == "string") then max else empty end
+              ' "${current_feed}")"; then
+                if [ "$(date -d "${last_deadline}" +%s)" -gt "$(date +%s)" ]; then
+                  echo 'G11_NIGHT_DISPATCH=BEFORE_LAST_RACE'
+                  exit 0
+                fi
+              fi
             else
               echo 'G11_NIGHT_READBACK=UNAVAILABLE_NOT_COMPLETION'
             fi
