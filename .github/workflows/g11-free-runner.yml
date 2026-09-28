@@ -132,7 +132,11 @@ jobs:
             # Explicit bounded recovery markers may launch today's MORNING or
             # NIGHT phase independently. Ordinary pushes remain PREDEADLINE
             # diagnostics.
-            if [[ "${COMMIT_MESSAGE}" == *"[night-current]"* ]]; then
+            # Installing tomorrow's heartbeat policy must not replay today's
+            # completed PREDEADLINE races on the workflow-file push.
+            if [[ "${COMMIT_MESSAGE}" == *"[heartbeat-config-only]"* ]] && [[ "${operational_date}" < "2026-09-29" ]]; then
+              phase="dry-run"
+            elif [[ "${COMMIT_MESSAGE}" == *"[night-current]"* ]]; then
               phase="night"
               operational_date="$(date +%F)"
             elif [[ "${COMMIT_MESSAGE}" == *"[morning-current]"* ]]; then
