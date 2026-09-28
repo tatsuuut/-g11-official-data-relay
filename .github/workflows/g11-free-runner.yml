@@ -1367,6 +1367,113 @@ jobs:
             --output .relay-output/publish-result.json \
             --write-out '%{http_code}')"
           if [[ ! "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
+            # Legacy same-day PREDEADLINE feeds can have an older accepted Site
+            # schema than the current canonical NIGHT feed. On the exact
+            # historical Site adapter failure, retry once with a result-only
+            # overlay on top of the already accepted same-day schema.
+            if [ "${http_status}" = "400" ] && [ "${RELAY_PHASE}" = "night" ] && \
+               jq -e '.error == "Cannot read properties of undefined (reading '"'"'reduce'"'"')"' \
+                 .relay-output/publish-result.json >/dev/null 2>&1 && \
+               [ -f .relay-output/stored-feed.json ]; then
+              python3 - "${FEED}" .relay-output/stored-feed.json \
+                .relay-output/feed-night-stored-schema.json <<'PY'
+          import copy
+          import json
+          import sys
+          from pathlib import Path
+
+          incoming = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          stored = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          if incoming.get("operational_date_jst") != stored.get("operational_date_jst"):
+              raise SystemExit("NIGHT_STORED_SCHEMA_DATE_MISMATCH")
+          if incoming.get("stage") != "NIGHT" or incoming.get("status") != "PASS":
+              raise SystemExit("NIGHT_STORED_SCHEMA_INCOMING_NOT_FINAL")
+
+          incoming_by_key = {row["key"]: row for row in incoming.get("races", [])}
+          stored_rows = stored.get("races")
+          if not isinstance(stored_rows, list) or not stored_rows:
+              raise SystemExit("NIGHT_STORED_SCHEMA_RACES")
+          stored_keys = {row.get("key") for row in stored_rows}
+          if stored_keys != set(incoming_by_key):
+              raise SystemExit(
+                  "NIGHT_STORED_SCHEMA_RACE_SET:"
+                  + json.dumps({
+                      "stored_only": sorted(stored_keys - set(incoming_by_key)),
+                      "incoming_only": sorted(set(incoming_by_key) - stored_keys),
+                  }, ensure_ascii=False)
+              )
+
+          out = copy.deepcopy(stored)
+          for field in ("stage", "status", "generated_at_jst", "source"):
+              if field in out and field in incoming:
+                  out[field] = copy.deepcopy(incoming[field])
+
+          for section in ("counts", "research", "research_db", "original_display_research"):
+              old = out.get(section)
+              new = incoming.get(section)
+              if isinstance(old, dict) and isinstance(new, dict):
+                  for key in list(old):
+                      if key in new:
+                          old[key] = copy.deepcopy(new[key])
+
+          safe_scalar = {
+              "result_trifecta", "payout", "practical_hit", "validation_hit",
+              "miss_classification", "research_decision",
+              "three_engine_classification",
+          }
+          safe_dict = {
+              "research_finance", "actual_purchase", "result_meta",
+              "three_engine_score",
+          }
+          for old in out["races"]:
+              new = incoming_by_key[old["key"]]
+              for field in safe_scalar:
+                  if field in old and field in new:
+                      old[field] = copy.deepcopy(new[field])
+              for field in safe_dict:
+                  if isinstance(old.get(field), dict) and isinstance(new.get(field), dict):
+                      for key in list(old[field]):
+                          if key in new[field]:
+                              old[field][key] = copy.deepcopy(new[field][key])
+              old_shadow = old.get("original_display_shadow")
+              new_shadow = new.get("original_display_shadow")
+              if isinstance(old_shadow, dict) and isinstance(new_shadow, dict):
+                  for key in list(old_shadow):
+                      if key in new_shadow:
+                          old_shadow[key] = copy.deepcopy(new_shadow[key])
+
+          counts = out.get("counts", {})
+          if not (
+              counts.get("pending") == 0
+              and counts.get("results") == counts.get("races")
+          ):
+              raise SystemExit("NIGHT_STORED_SCHEMA_NOT_COMPLETE")
+
+          Path(sys.argv[3]).write_text(
+              json.dumps(out, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          print("G11_NIGHT_STORED_SCHEMA_OVERLAY=READY")
+          PY
+              mv .relay-output/feed-night-stored-schema.json "${FEED}"
+              feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+              http_status="$(curl --silent --show-error \
+                --location \
+                --output .relay-output/publish-result-stored-schema.json \
+                --write-out '%{http_code}' \
+                -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
+                -H "Authorization: Bearer ${token}" \
+                -H 'Content-Type: application/json' \
+                -H "x-g11-feed-sha256: ${feed_sha}" \
+                --data-binary "@${FEED}")"
+              if [[ "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
+                echo 'G11_NIGHT_STORED_SCHEMA_OVERLAY=ACCEPTED'
+                printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+              echo "G11_NIGHT_STORED_SCHEMA_OVERLAY=REJECTED HTTP=${http_status}" >&2
+              cat .relay-output/publish-result-stored-schema.json >&2 || true
+            fi
             printf 'G11 sync rejected the verified feed (HTTP %s):\n' "${http_status}" >&2
             jq -c . .relay-output/publish-result.json >&2 || \
               sed -n '1,40p' .relay-output/publish-result.json >&2
