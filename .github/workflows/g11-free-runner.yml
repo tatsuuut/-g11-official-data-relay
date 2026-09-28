@@ -53,6 +53,7 @@ concurrency:
 
 jobs:
   run-private-runtime:
+    name: runtime
     if: >-
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&

@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   dispatch-bounded-night-backfill:
+    name: recovery
     if: github.repository_id == '1367703708' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[config-only]'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15

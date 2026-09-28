@@ -33,6 +33,7 @@ concurrency:
 
 jobs:
   shadow:
+    name: observation
     if: >-
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main'

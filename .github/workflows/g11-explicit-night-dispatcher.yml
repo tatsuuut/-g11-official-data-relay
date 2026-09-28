@@ -32,6 +32,7 @@ concurrency:
 
 jobs:
   dispatch-night:
+    name: completion dispatch
     if: github.repository_id == '1367703708' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5

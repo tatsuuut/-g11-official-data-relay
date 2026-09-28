@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   contract-gate:
+    name: contract
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

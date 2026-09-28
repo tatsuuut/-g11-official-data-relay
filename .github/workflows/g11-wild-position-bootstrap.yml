@@ -23,6 +23,7 @@ concurrency:
 
 jobs:
   train-freeze-and-encrypt:
+    name: state preparation
     if: github.repository_id == '1367703708' && github.ref == 'refs/heads/main' && (github.event_name != 'push' || (!contains(github.event.head_commit.message, '[config-only]') && !contains(github.event.head_commit.message, '[wild4-fast]') && !contains(github.event.head_commit.message, '[wild-head-repair]')))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -535,6 +536,7 @@ jobs:
 
   # PRE_RACE V2 rerun binds the latest private authority.
   wild-head-repair:
+    name: state repair
     if: github.repository_id == '1367703708' && github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[wild-head-repair]')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
