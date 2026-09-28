@@ -55,6 +55,7 @@ class HeartbeatPolicyTests(unittest.TestCase):
         old = date(2026, 9, 28)
         self.assertEqual(decision({}, old, datetime.fromisoformat("2026-09-28T20:49:59+09:00")), "CONTINUE")
         self.assertEqual(decision({}, old, datetime.fromisoformat("2026-09-28T20:50:00+09:00")), "STOP_LEGACY")
+        self.assertEqual(decision({}, old, datetime.fromisoformat("2026-09-29T00:10:00+09:00")), "STOP_LEGACY")
 
 
 if __name__ == "__main__":
