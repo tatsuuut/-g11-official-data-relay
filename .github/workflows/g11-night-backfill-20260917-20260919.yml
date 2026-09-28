@@ -1,14 +1,8 @@
 name: runtime recovery
 
 on:
-  # This bounded recovery runs only when this exact file changes or by an
-  # explicit manual dispatch. Revision 6 skips an already complete immutable NIGHT snapshot.
+  # Historical bounded recovery is explicit/manual only.
   # It has no schedule and cannot expand its dates.
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/g11-night-backfill-20260917-20260919.yml
   workflow_dispatch:
 
 permissions:
