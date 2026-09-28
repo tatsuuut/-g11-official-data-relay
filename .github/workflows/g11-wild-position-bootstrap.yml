@@ -1,10 +1,6 @@
 name: runtime state bootstrap
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/g11-wild-position-bootstrap.yml
   workflow_dispatch:
     inputs:
       source_state_cache_key:
