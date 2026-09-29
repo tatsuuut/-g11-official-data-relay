@@ -1462,6 +1462,12 @@ jobs:
                       for key in list(old[field]):
                           if key in new[field]:
                               old[field][key] = copy.deepcopy(new[field][key])
+              # These official settlement fields are absent before NIGHT.
+              # Add them from the verified result without touching locks.
+              if isinstance(old.get("result_meta"), dict) and isinstance(new.get("result_meta"), dict):
+                  for key in ("result_status", "dead_heat", "trifecta_settlements"):
+                      if key in new["result_meta"]:
+                          old["result_meta"][key] = copy.deepcopy(new["result_meta"][key])
               old_shadow = old.get("original_display_shadow")
               new_shadow = new.get("original_display_shadow")
               if isinstance(old_shadow, dict) and isinstance(new_shadow, dict):
