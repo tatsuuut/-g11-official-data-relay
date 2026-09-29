@@ -55,7 +55,9 @@ concurrency:
 
 jobs:
   run-private-runtime:
-    name: runtime
+    # Job names identify the active LIVE continuation in the jobs API. A
+    # repair or diagnostic dispatch has the ordinary runtime name instead.
+    name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || 'runtime' }}
     if: >-
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
@@ -1780,9 +1782,9 @@ jobs:
           # sufficient authority to keep the heartbeat alive, including the
           # isolated SAME_DAY_RESCUE_NONRESEARCH lane.
           #
-          # Only an already queued/running workflow_dispatch continuation is a
-          # duplicate.  Delayed schedule events are deliberately ignored here;
-          # the shared concurrency group serializes them safely.
+          # Only a queued/running PREDEADLINE job for this operational day is
+          # a duplicate. Repair and diagnostic dispatches cannot stop LIVE.
+          # Delayed schedule events are serialized by the shared group.
           sleep 45
           heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
             --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
@@ -1794,20 +1796,30 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=20")"
-          active_dispatch="$(printf '%s' "${runs}" | jq \
-            --argjson current "${GITHUB_RUN_ID}" \
-            '[.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending"))] | length')"
-          if [ "${active_dispatch}" -gt 0 ]; then
-            exit 0
-          fi
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=100")"
+          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_ID}" \
+            '.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
+          for active_id in ${active_ids}; do
+            jobs="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${active_id}/jobs?per_page=100")"
+            if printf '%s' "${jobs}" | jq -e --arg target "LIVE-predeadline-${OPERATIONAL_DATE}" \
+              'any(.jobs[]; .name == $target and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending"))' >/dev/null; then
+              echo "G11_PREDEADLINE_CHAIN=DEFER_ACTIVE_LIVE run=${active_id}"
+              exit 0
+            fi
+          done
+          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
+            '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
           curl --fail-with-body --silent --show-error \
             -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
-            -d '{"ref":"main","inputs":{"phase":"predeadline"}}'
+            -d "${payload}"
 
       - name: Continue bounded NIGHT after official last-race handoff
         if: >-
@@ -1847,21 +1859,30 @@ jobs:
               exit 0
             fi
           fi
-          # Scheduled jobs may be late, so only a queued/running manual
-          # continuation is a duplicate; the shared concurrency group
-          # serializes all scheduled invocations.
+          # Only a queued/running NIGHT job for this operational day is a
+          # duplicate. Repair and diagnostic dispatches cannot block handoff;
+          # the shared concurrency group serializes scheduled invocations.
           runs="$(curl --fail-with-body --silent --show-error \
             --connect-timeout 10 --max-time 20 \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=50")"
-          active_dispatch="$(printf '%s' "${runs}" | jq --argjson current "${GITHUB_RUN_ID}" \
-            '[.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending"))] | length')"
-          if [ "${active_dispatch}" -gt 0 ]; then
-            echo 'G11_NIGHT_HANDOFF=DEFER_ACTIVE'
-            exit 0
-          fi
+          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_ID}" \
+            '.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
+          for active_id in ${active_ids}; do
+            jobs="$(curl --fail-with-body --silent --show-error \
+              --connect-timeout 10 --max-time 20 \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${active_id}/jobs?per_page=100")"
+            if printf '%s' "${jobs}" | jq -e --arg target "LIVE-night-${OPERATIONAL_DATE}" \
+              'any(.jobs[]; .name == $target and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending"))' >/dev/null; then
+              echo "G11_NIGHT_HANDOFF=DEFER_ACTIVE_LIVE run=${active_id}"
+              exit 0
+            fi
+          done
           payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
             '{ref:"main",inputs:{phase:"night",operational_date:$day}}')"
           curl --fail-with-body --silent --show-error \
