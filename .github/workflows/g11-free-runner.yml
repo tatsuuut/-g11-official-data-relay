@@ -898,16 +898,16 @@ jobs:
           PY
             jq -c --slurpfile stored .relay-output/stored-feed.json \
                   --slurpfile special .relay-output/special-eight-proof.json '
-              def confidence_metadata($old; $new):
-                if (($old | type) == "object") and (($new | type) == "object")
-                   and (($old | del(.raw_set_probability, .calibrated_set_estimate, .certification_status))
-                        == ($new | del(.raw_set_probability, .calibrated_set_estimate, .certification_status)))
-                   and (($old.raw_set_probability == null) or ($old.raw_set_probability == $new.raw_set_probability))
-                   and (($old.calibrated_set_estimate == null) or ($old.calibrated_set_estimate == $new.calibrated_set_estimate))
-                   and (($old.certification_status == null) or ($old.certification_status == $new.certification_status))
-                   and (($new.raw_set_probability | type) == "number")
-                   and ($new.raw_set_probability >= 0) and ($new.raw_set_probability <= 1)
-                then $new else $old end;
+              def confidence_metadata($a;$b):
+                if (($a|type)=="object" and ($b|type)=="object"
+                    and ($a|del(.raw_set_probability,.calibrated_set_estimate,.certification_status))
+                        == ($b|del(.raw_set_probability,.calibrated_set_estimate,.certification_status))
+                    and ($a.raw_set_probability==null or $a.raw_set_probability==$b.raw_set_probability)
+                    and ($a.calibrated_set_estimate==null or $a.calibrated_set_estimate==$b.calibrated_set_estimate)
+                    and ($a.certification_status==null or $a.certification_status==$b.certification_status)
+                    and ($b.raw_set_probability|type)=="number"
+                    and $b.raw_set_probability>=0 and $b.raw_set_probability<=1)
+                then $b else $a end;
               ($special[0] // {}) as $proof |
               (.canonical_authorities.growth_p3 // {}) as $growth
               | (($growth.logic_id == "CURRENT_GROWTH_P3")
@@ -919,10 +919,6 @@ jobs:
                   . as $incoming
                   | ($prior[.key] // null) as $old
                   | ($proof[$incoming.key] // null) as $locked
-                  # Root prediction fields are the immutable morning
-                  # projection. LIVE/CURRENT recalculation is carried only by
-                  # .predeadline plus the legacy root odds mirror. Preserve the
-                  # accepted morning prediction for every already-stored race.
                   | if (($old | type) == "object")
                     then
                       .top_boat = $old.top_boat
@@ -949,13 +945,6 @@ jobs:
                         else del(.trifecta_confidence) end
                     else .
                     end
-                  # Once the app has accepted a race PREDEADLINE
-                  # snapshot, keep that exact live object immutable on every
-                  # later relay pass. Only races that still have no stored
-                  # predeadline object may receive a newly completed live
-                  # snapshot. This prevents repeated CURRENT recomputation or
-                  # later transport enrichment from tripping
-                  # FEED_PREDEADLINE_FIELDS.
                   | if (($old | type) == "object")
                        and (($old.predeadline | type) == "object")
                     then .odds_merit = $old.odds_merit
@@ -1022,10 +1011,6 @@ jobs:
                         else . end
                     else . end
                 )
-              # The deployed VALUE ALERTS UI currently keys on the live
-              # PREDEADLINE marker. Keep the race-root odds contract legacy for
-              # validator/count compatibility, while allowing the nested
-              # PREDEADLINE odds_merit to represent only the canonical alert.
               | .races |= map(
                   if ((.predeadline | type) == "object")
                      and ((.predeadline.legacy_odds_merit | type) == "string")
@@ -1033,11 +1018,6 @@ jobs:
                     else .
                     end
                 )
-              # The Site freezes race-level morning schema/fields after the
-              # first accepted feed.  Notification-research metadata belongs
-              # to the verified PREDEADLINE object, not the immutable top-level
-              # morning projection. Strip only these newly-added transport
-              # helper fields from the race root before sync.
               | .races |= map(
                   del(
                     .legacy_odds_merit,
