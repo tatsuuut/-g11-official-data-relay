@@ -1446,7 +1446,6 @@ jobs:
           safe_scalar = {
               "result_trifecta", "payout", "practical_hit", "validation_hit",
               "miss_classification", "research_decision",
-              "three_engine_classification",
           }
           safe_dict = {
               "research_finance", "actual_purchase", "result_meta",
