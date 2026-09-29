@@ -614,6 +614,7 @@ jobs:
         env:
           G11_PRIVATE_REPO_TOKEN: ""
           G11_PRIVATE_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          G11_BOUNDED_NIGHT_REPLAY: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[night-20260929]') && '2026-09-29' || '' }}
         run: |
           set -euo pipefail
           mkdir -p ../.relay-output
