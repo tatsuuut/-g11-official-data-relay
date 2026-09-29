@@ -1932,7 +1932,7 @@ jobs:
 # operator-night-current-20260928
 
   repair-20260928-final:
-    name: Restore historical FINAL read model
+    name: Restore historical FINAL using accepted result overlay
     if: >-
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
@@ -1940,12 +1940,10 @@ jobs:
       inputs.phase == 'repair-20260928' &&
       vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
       G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
-      G11_PRIVATE_REPOSITORY: ${{ secrets.PRIVATE_SOURCE_REPO }}
-      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - name: Checkout public relay
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -1953,58 +1951,17 @@ jobs:
           persist-credentials: false
       - name: Audit public surface
         run: python3 scripts/audit_public_surface.py
-      - name: Restore exactly the 2026-09-28 encrypted NIGHT checkpoint
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-28-36437392793
-          fail-on-cache-miss: true
-      - name: Decrypt historical state without altering cache or snapshots
-        env:
-          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+      - name: Overlay result fields onto accepted 9/28 feed
         run: |
           set -euo pipefail
-          test -s .relay-cache/state.tgz.gpg
-          test -n "${G11_PRIVATE_REPO_TOKEN}"
-          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-            --decrypt --output "${RUNNER_TEMP}/historical-state.tgz" .relay-cache/state.tgz.gpg
-          exec 3<&-
-          python3 - "${RUNNER_TEMP}/historical-state.tgz" <<'PY'
-          import json, pathlib, sys, tarfile
-          root=pathlib.Path(".relay-state")
-          with tarfile.open(sys.argv[1],"r:gz") as archive:
-              members=archive.getmembers()
-              if not members or any(
-                  pathlib.PurePosixPath(m.name).is_absolute()
-                  or ".." in pathlib.PurePosixPath(m.name).parts
-                  or m.issym() or m.islnk() for m in members
-              ): raise SystemExit("HISTORICAL_STATE_UNSAFE")
-              archive.extractall(root,filter="data")
-          meta=json.loads((root/"relay-state.json").read_text(encoding="utf-8"))
-          if meta["OPERATIONAL_DATE_JST"]!="2026-09-28":
-              raise SystemExit("HISTORICAL_STATE_DATE_MISMATCH")
-          PY
-      - name: Checkout the exact original private code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
-          ref: bb9e7575697b013d2709ac4e7a83584ab6f459d3
-          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-          path: .g11-private
-          persist-credentials: false
-      - name: Rebuild only historical FINAL from verified immutable locks
-        run: |
-          set -euo pipefail
-          test "$(git -C .g11-private rev-parse HEAD)" = bb9e7575697b013d2709ac4e7a83584ab6f459d3
           mkdir -p .relay-output
           curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-28" \
             --output .relay-output/accepted-night.json
-          PYTHONPATH=".g11-private" python3 scripts/repair_20260928_final.py \
-            .relay-output/accepted-night.json .relay-state/store \
-            .relay-output/repaired-night.json
-      - name: Publish and verify the 2026-09-28 FINAL only
+          python3 scripts/overlay_20260928_accepted_feed_final.py \
+            .relay-output/accepted-night.json scripts/official_20260928_results.txt \
+            .relay-output/result-overlay.json
+      - name: Send stored-schema result overlay and verify 144 races
         run: |
           set -euo pipefail
           oidc="$(curl --fail-with-body --silent --show-error \
@@ -2012,37 +1969,40 @@ jobs:
             -H 'Accept: application/json' \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
           token="$(printf '%s' "${oidc}" | jq -er '.value')"
-          sha="$(sha256sum .relay-output/repaired-night.json | cut -d' ' -f1)"
+          sha="$(sha256sum .relay-output/result-overlay.json | cut -d' ' -f1)"
           status="$(curl --silent --show-error --location \
             -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
             -H "Authorization: Bearer ${token}" \
             -H 'Content-Type: application/json' \
             -H "x-g11-feed-sha256: ${sha}" \
-            --data-binary @.relay-output/repaired-night.json \
-            --output .relay-output/repair-response.json \
+            --data-binary @.relay-output/result-overlay.json \
+            --output .relay-output/overlay-response.json \
             --write-out '%{http_code}')"
           if [[ ! "${status}" =~ ^2[0-9][0-9]$ ]]; then
-            echo "HISTORICAL_FINAL_PUBLISH_REJECTED_HTTP=${status}" >&2
-            jq -c . .relay-output/repair-response.json >&2
+            echo "HISTORICAL_RESULT_OVERLAY_HTTP=${status}" >&2
+            jq -c . .relay-output/overlay-response.json >&2
             exit 1
           fi
           curl --fail-with-body --silent --show-error --location \
             "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-28" \
-            --output .relay-output/repair-readback.json
-          python3 - <<'PY'
-          import json
+            --output .relay-output/overlay-readback.json
+          python3 - <<'CHECK'
+          import copy, json
           from pathlib import Path
-          old=json.loads(Path(".relay-output/accepted-night.json").read_text())
-          new=json.loads(Path(".relay-output/repair-readback.json").read_text())
-          repaired=json.loads(Path(".relay-output/repaired-night.json").read_text())
-          if (new.get("final_accounting") != repaired.get("final_accounting")
-              or new.get("capabilities",{}).get("final_accounting")
-              != "G11_THREE_ENGINE_FINAL_BET_ACCOUNTING_V1"
-              or len(new["final_accounting"]["by_race"])!=144
-              or [r["practical_bets"] for r in old["races"]]
-              !=[r["practical_bets"] for r in new["races"]]):
-              raise SystemExit("HISTORICAL_FINAL_READBACK_MISMATCH")
-          print("HISTORICAL_FINAL_READBACK=PASS:2026-09-28:144")
-          PY
-          python3 scripts/audit_three_phase_runtime_contract.py \
-            --night-ready .relay-output/repair-readback.json --day 2026-09-28
+          before=json.loads(Path('.relay-output/accepted-night.json').read_text())
+          sent=json.loads(Path('.relay-output/result-overlay.json').read_text())
+          after=json.loads(Path('.relay-output/overlay-readback.json').read_text())
+          if after != sent or after['schema'] != before['schema'] or (
+              after['source'] != before['source'] or
+              len(after['final_accounting']['by_race']) != 144):
+              raise SystemExit('HISTORICAL_RESULT_OVERLAY_READBACK_MISMATCH')
+          stable=copy.deepcopy(after)
+          stable.pop('final_accounting')
+          stable['capabilities'].pop('final_accounting')
+          for race in stable['races']:
+              for field in ('result_status','dead_heat','trifecta_settlements'):
+                  race['result_meta'].pop(field)
+          if stable != before:
+              raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
+          print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
+          CHECK

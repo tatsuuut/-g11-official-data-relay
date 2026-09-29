@@ -20,6 +20,8 @@ ALLOWED_FILES = {
     "SECURITY.md",
     "scripts/audit_public_surface.py",
     "scripts/repair_20260928_final.py",
+    "scripts/overlay_20260928_accepted_feed_final.py",
+    "scripts/official_20260928_results.txt",
     "scripts/audit_three_phase_runtime_contract.py",
     "scripts/dynamic_last_race_heartbeat.py",
     "scripts/test_dynamic_last_race_heartbeat.py",
