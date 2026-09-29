@@ -580,6 +580,8 @@ jobs:
           # cannot leak into later runtime contract checks on long-lived schedules.
           # The Growth P3 suite proves confidence is read-only, pending ranks
           # stay null, and legacy locks can append pre-result RAW evidence.
+          # The relay suite also proves next-day rollover preserves the V53 daily pin
+          # before rebuilding the new MORNING official store.
           for module in \
             g11.relay.test_v1 \
             g11.relay.test_night_transport_finance_v1 \
