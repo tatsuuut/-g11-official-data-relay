@@ -957,14 +957,14 @@ jobs:
                            and ($old.p3_snapshot_sha256 == $incoming.p3_snapshot_sha256)
                            and (($old.predeadline | type) == "object")
                            and (($incoming.predeadline | type) == "object")
-                           and ($old.predeadline.status == "READY")
-                           and ($old.predeadline.legacy_odds_merit == $incoming.predeadline.legacy_odds_merit)
-                           and ($incoming.predeadline.odds_merit == $old.predeadline.legacy_odds_merit)
-                           and (($old.predeadline | del(.odds_merit, .trifecta_confidence)) ==
-                                ($incoming.predeadline | del(.odds_merit, .trifecta_confidence)))
-                        then .predeadline.odds_merit = $incoming.predeadline.odds_merit
-                          | .predeadline.trifecta_confidence =
-                              confidence_metadata($old.predeadline.trifecta_confidence; $incoming.predeadline.trifecta_confidence)
+                        then .predeadline.trifecta_confidence =
+                               confidence_metadata($old.predeadline.trifecta_confidence; $incoming.predeadline.trifecta_confidence)
+                          | if ($old.predeadline.legacy_odds_merit == $incoming.predeadline.legacy_odds_merit)
+                               and ($incoming.predeadline.odds_merit == $old.predeadline.legacy_odds_merit)
+                               and (($old.predeadline | del(.odds_merit, .trifecta_confidence)) ==
+                                    ($incoming.predeadline | del(.odds_merit, .trifecta_confidence)))
+                            then .predeadline.odds_merit = $incoming.predeadline.odds_merit
+                            else . end
                         else . end
                     else .
                     end
