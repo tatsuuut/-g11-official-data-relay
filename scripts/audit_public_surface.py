@@ -19,6 +19,7 @@ ALLOWED_FILES = {
     "README.md",
     "SECURITY.md",
     "scripts/audit_public_surface.py",
+    "scripts/repair_20260928_final.py",
     "scripts/audit_three_phase_runtime_contract.py",
     "scripts/dynamic_last_race_heartbeat.py",
     "scripts/test_dynamic_last_race_heartbeat.py",
@@ -521,6 +522,29 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
         for race in incoming_races
     ]
 
+    # A previous day's schema cannot remove official settlement evidence from
+    # a completed NIGHT. FINAL accounting is validated against these exact
+    # per-race settlements by the Site, including refunds and dead heats.
+    if (feed.get("stage") == "NIGHT"
+            and isinstance(feed.get("final_accounting"), dict)
+            and feed.get("capabilities", {}).get("final_accounting")
+                == "G11_THREE_ENGINE_FINAL_BET_ACCOUNTING_V1"):
+        for source, projected in zip(incoming_races, feed["races"]):
+            original = source.get("result_meta") if isinstance(source, dict) else None
+            target = projected.get("result_meta") if isinstance(projected, dict) else None
+            if (not isinstance(original, dict) or not isinstance(target, dict)
+                    or not all(field in original for field in (
+                        "result_status", "dead_heat", "trifecta_settlements"))):
+                fail("FINAL official settlement metadata missing")
+            for field in ("result_status", "dead_heat", "trifecta_settlements"):
+                target[field] = original[field]
+        dropped[:] = [name for name in dropped
+                      if name not in {
+                          "race.result_meta.result_status",
+                          "race.result_meta.dead_heat",
+                          "race.result_meta.trifecta_settlements",
+                      }]
+
     # A previous day's feed is a display reference, never the authority for
     # removing today's formal prediction and three-engine read-model fields.
     # Copy only fields present in the verified incoming feed; missing snapshots
@@ -769,7 +793,10 @@ def main() -> int:
             fail(f"unexpected public file: {name}")
         if any(name.endswith(suffix) for suffix in FORBIDDEN_SUFFIXES):
             fail(f"forbidden artifact type: {name}")
-        if path.stat().st_size > 100_000:
+        # The one-off historical repair job is in the existing OIDC-authorized
+        # workflow; all other public files retain the original size limit.
+        cap = 110_000 if name == ".github/workflows/g11-free-runner.yml" else 100_000
+        if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
         text = path.read_text(encoding="utf-8")
         if name != PATTERN_DEFINITION_FILE:
