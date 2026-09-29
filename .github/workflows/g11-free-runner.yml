@@ -898,6 +898,16 @@ jobs:
           PY
             jq -c --slurpfile stored .relay-output/stored-feed.json \
                   --slurpfile special .relay-output/special-eight-proof.json '
+              def confidence_metadata($old; $new):
+                if (($old | type) == "object") and (($new | type) == "object")
+                   and (($old | del(.raw_set_probability, .calibrated_set_estimate, .certification_status))
+                        == ($new | del(.raw_set_probability, .calibrated_set_estimate, .certification_status)))
+                   and (($old.raw_set_probability == null) or ($old.raw_set_probability == $new.raw_set_probability))
+                   and (($old.calibrated_set_estimate == null) or ($old.calibrated_set_estimate == $new.calibrated_set_estimate))
+                   and (($old.certification_status == null) or ($old.certification_status == $new.certification_status))
+                   and (($new.raw_set_probability | type) == "number")
+                   and ($new.raw_set_probability >= 0) and ($new.raw_set_probability <= 1)
+                then $new else $old end;
               ($special[0] // {}) as $proof |
               (.canonical_authorities.growth_p3 // {}) as $growth
               | (($growth.logic_id == "CURRENT_GROWTH_P3")
@@ -934,7 +944,9 @@ jobs:
                       | .p3_snapshot = $old.p3_snapshot
                       | .p3_snapshot_sha256 = $old.p3_snapshot_sha256
                       | .p3_status = $old.p3_status
-                      | if ($old | has("trifecta_confidence")) then .trifecta_confidence = $old.trifecta_confidence else del(.trifecta_confidence) end
+                      | if ($old | has("trifecta_confidence"))
+                        then .trifecta_confidence = confidence_metadata($old.trifecta_confidence; $incoming.trifecta_confidence)
+                        else del(.trifecta_confidence) end
                     else .
                     end
                   # Once the app has accepted a race PREDEADLINE
@@ -952,6 +964,19 @@ jobs:
                       | .value_bets = $old.value_bets
                       | .odds_captured_at_jst = $old.odds_captured_at_jst
                       | .predeadline = $old.predeadline
+                      | if ($old.p3_logic_id == "CURRENT_GROWTH_P3")
+                           and ($old.p3_snapshot_sha256 == $incoming.p3_snapshot_sha256)
+                           and (($old.predeadline | type) == "object")
+                           and (($incoming.predeadline | type) == "object")
+                           and ($old.predeadline.status == "READY")
+                           and ($old.predeadline.legacy_odds_merit == $incoming.predeadline.legacy_odds_merit)
+                           and ($incoming.predeadline.odds_merit == $old.predeadline.legacy_odds_merit)
+                           and (($old.predeadline | del(.odds_merit, .trifecta_confidence)) ==
+                                ($incoming.predeadline | del(.odds_merit, .trifecta_confidence)))
+                        then .predeadline.odds_merit = $incoming.predeadline.odds_merit
+                          | .predeadline.trifecta_confidence =
+                              confidence_metadata($old.predeadline.trifecta_confidence; $incoming.predeadline.trifecta_confidence)
+                        else . end
                     else .
                     end
                   # Restore an old public display prefix only when its
@@ -1055,11 +1080,9 @@ jobs:
               | ([.races[] | select(.research_eligible == true and .odds_captured_at_jst != null)] | length) as $enriched
               | .counts.odds_enriched = $enriched
               | .counts.odds_waiting = (.counts.formal - $enriched)
-              # Preserve the existing public feed count contract.
-              # New notification ◎ is carried by value_alert on each race;
-              # win_candidates remains the legacy odds-merit count expected by
-              # the Site validator.
-              | .counts.win_candidates = ([.races[] | select(.research_eligible == true and .odds_merit == "◎")] | length)
+              # Count canonical PRE_RACE ◎ independently from VALUE ALERT.
+              | .counts.win_candidates_basis = "FORMAL_READY_PRE_RACE_ODDS_MERIT"
+              | .counts.win_candidates = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.odds_merit == "◎")] | length)
               | .counts.value_alert_count = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.value_alert == true)] | length)
             ' "${FEED}" > .relay-output/feed-reconciled.json
             mv .relay-output/feed-reconciled.json "${FEED}"
