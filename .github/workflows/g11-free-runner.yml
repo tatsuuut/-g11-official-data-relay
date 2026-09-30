@@ -1831,6 +1831,10 @@ jobs:
             echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
             exit 0
           fi
+          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
+            exit 0
+          fi
           if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
             echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
             exit 0
@@ -1849,6 +1853,10 @@ jobs:
           sleep 45
           heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
             --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
+          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
+            exit 0
+          fi
           if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
             echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
             exit 0
@@ -1905,6 +1913,18 @@ jobs:
           result=.relay-output/result.json
           if jq -e '.STATUS == "NIGHT_HANDOFF_READY" and .NIGHT_HANDOFF == true' "${result}" >/dev/null; then
             echo 'G11_NIGHT_HANDOFF=LAST_RACE_DEADLINE_REACHED'
+          elif jq -e '
+              .STATUS == "SAME_DAY_RESCUE_COMPLETE"
+              and .PHASE == "PREDEADLINE_RESCUE"
+              and .CANONICAL_MORNING_PROMOTED == false
+              and .NIGHT_RESEARCH_CONNECTED == false
+              and (.LAST_RACE_DEADLINE_JST | type) == "string"
+            ' "${result}" >/dev/null; then
+            rescue_deadline="$(jq -er '.LAST_RACE_DEADLINE_JST' "${result}")"
+            if [ "$(date -d "${rescue_deadline}" +%s)" -gt "$(date +%s)" ]; then
+              exit 0
+            fi
+            echo 'G11_NIGHT_HANDOFF=RESCUE_LAST_RACE_DEADLINE_REACHED'
           elif jq -e '.STATUS == "NIGHT_WAITING_OFFICIAL_RESULTS" and .RETRY_SCHEDULED == true' "${result}" >/dev/null; then
             sleep 180
           else
