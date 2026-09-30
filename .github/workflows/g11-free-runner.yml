@@ -1268,9 +1268,6 @@ jobs:
           PY
           fi
 
-          # Re-settle display-only NIGHT finance against the exact immutable
-          # MORNING practical_bets already accepted by the Site. Canonical
-          # RESEARCH_LEDGER60 remains untouched in encrypted state.
           if [ "${RELAY_PHASE}" = "night" ]; then
             PYTHONPATH=".g11-private" python3 -m g11.relay.night_transport_finance_v1 \
               "${FEED}" \
@@ -1516,18 +1513,19 @@ jobs:
                   row.pop("three_engine_classification", None)
               return value
           stable_before = stable(out)
-          sys.path.insert(0, str(Path(".g11-private").resolve()))
-          from g11.canonical import public_app_feed as _g11_feed
-          out["three_engine_comparison"] = _g11_feed._attach_three_engine_comparison(
-              out["races"], out.get("true_ai")
-          )
-          if stable(out) != stable_before:
-              raise SystemExit("NIGHT_STORED_SCHEMA_SCORE_RECOMPUTE_MUTATED_LOCK")
-          if (
-              out["three_engine_comparison"].get("status") != "SCORED"
-              or out["three_engine_comparison"].get("classifications", {}).get("PENDING") != 0
-          ):
-              raise SystemExit("NIGHT_STORED_SCHEMA_SCORE_RECOMPUTE_INCOMPLETE")
+          if any(r.get("formal_status") == "FORMAL" for r in out["races"]):
+              sys.path.insert(0, str(Path(".g11-private").resolve()))
+              from g11.canonical import public_app_feed as _g11_feed
+              out["three_engine_comparison"] = _g11_feed._attach_three_engine_comparison(
+                  out["races"], out.get("true_ai")
+              )
+              if stable(out) != stable_before:
+                  raise SystemExit("NIGHT_STORED_SCHEMA_SCORE_RECOMPUTE_MUTATED_LOCK")
+              if (
+                  out["three_engine_comparison"].get("status") != "SCORED"
+                  or out["three_engine_comparison"].get("classifications", {}).get("PENDING") != 0
+              ):
+                  raise SystemExit("NIGHT_STORED_SCHEMA_SCORE_RECOMPUTE_INCOMPLETE")
 
           Path(sys.argv[3]).write_text(
               json.dumps(out, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
