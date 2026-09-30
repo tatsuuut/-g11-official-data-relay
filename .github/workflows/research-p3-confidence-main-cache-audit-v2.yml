@@ -25,6 +25,29 @@ jobs:
       - name: Prepare read-only audit workspace
         run: mkdir -p .audit/states .relay-cache
 
+      - name: List available runtime cache keys
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+            --jq '.actions_caches[] | select(.key | startswith("g11-state")) | [.key,.ref,.created_at,.last_accessed_at] | @tsv' \
+            > .audit/cache-keys.tsv
+          cat .audit/cache-keys.tsv
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[]
+          for line in Path(".audit/cache-keys.tsv").read_text().splitlines():
+              if not line: continue
+              key,ref,created,last=line.split("\t")
+              rows.append({"key":key,"ref":ref,"created_at":created,"last_accessed_at":last})
+          Path(".audit/cache-keys.json").write_text(json.dumps(rows,indent=2)+"\n")
+          PY
+          content="$(base64 -w0 .audit/cache-keys.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/research-evidence/p3-confidence-cache-keys-v2.json?ref=research/p3-confidence-history-audit-v2" --jq .sha 2>/dev/null || true)"
+          args=(--method PUT -f "message=Record available G11 runtime cache keys" -f "content=${content}" -f "branch=research/p3-confidence-history-audit-v2")
+          if [ -n "${existing_sha}" ]; then args+=( -f "sha=${existing_sha}" ); fi
+          gh api "repos/${GITHUB_REPOSITORY}/contents/research-evidence/p3-confidence-cache-keys-v2.json" "${args[@]}" >/dev/null
+
       - name: Record audit start on research branch
         run: |
           set -euo pipefail
