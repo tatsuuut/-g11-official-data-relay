@@ -159,8 +159,27 @@ jobs:
           echo "feed_sha=${sha}" >> "${GITHUB_OUTPUT}"
           echo "G11_FOOTPRINT_FEED=READY sha=${sha}"
 
-      - name: Capture earliest complete MORNING exact-120 odds
+      - name: Require a formal MORNING research scope
+        id: scope
         if: steps.mode.outputs.mode == 'capture' && steps.feed.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A same-day rescue has a valid app feed but no formal MORNING
+          # research races. Do not turn its missing scope into a research lock.
+          if jq -e '
+            .counts.formal == 0
+            and .counts.excluded == (.races | length)
+            and all(.races[]; .formal_status == "EXCLUDED" and .research_eligible == false)
+          ' .shadow-work/feed.json >/dev/null; then
+            echo 'capture=false' >> "${GITHUB_OUTPUT}"
+            echo 'G11_FOOTPRINT_CAPTURE=NO_FORMAL_MORNING_SCOPE'
+          else
+            echo 'capture=true' >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Capture earliest complete MORNING exact-120 odds
+        if: steps.mode.outputs.mode == 'capture' && steps.feed.outputs.ready == 'true' && steps.scope.outputs.capture == 'true'
         shell: bash
         env:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
