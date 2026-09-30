@@ -1,4 +1,5 @@
 name: runtime contract gate
+# one-shot post-audit verification
 
 on:
   pull_request:
