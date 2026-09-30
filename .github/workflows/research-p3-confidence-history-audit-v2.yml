@@ -1,0 +1,191 @@
+name: research P3 confidence immutable-store inventory
+
+on:
+  push:
+    branches:
+      - research/p3-confidence-history-audit-v2
+    paths:
+      - .github/workflows/research-p3-confidence-history-audit-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Restore latest encrypted runtime state read-only
+        id: cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: confidence-audit-never-written-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-
+          fail-on-cache-miss: true
+
+      - name: Decrypt state read-only
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s .relay-cache/state.tgz.gpg
+          test -n "${G11_PRIVATE_REPO_TOKEN}"
+          mkdir -p .audit/state
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/state.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/state.tgz" <<'PY'
+          import pathlib, sys, tarfile
+          root=pathlib.Path(".audit/state")
+          with tarfile.open(sys.argv[1],"r:gz") as archive:
+              members=archive.getmembers()
+              if not members or any(
+                  pathlib.PurePosixPath(m.name).is_absolute()
+                  or ".." in pathlib.PurePosixPath(m.name).parts
+                  or m.issym() or m.islnk() for m in members
+              ):
+                  raise SystemExit("UNSAFE_STATE_ARCHIVE")
+              archive.extractall(root,filter="data")
+          PY
+
+      - name: Inventory immutable snapshots without mutation
+        env:
+          RESTORED_CACHE_KEY: ${{ steps.cache.outputs.cache-primary-key }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, re
+          from collections import Counter, defaultdict
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          roots=list(Path(".audit/state").rglob("snapshots"))
+          if not roots:
+              raise SystemExit("SNAPSHOT_ROOT_NOT_FOUND")
+          # Prefer the snapshot tree with the most JSON files.
+          root=max(roots,key=lambda p:sum(1 for _ in p.rglob("*.json")))
+          race_re=re.compile(r"\d{8}-\d{2}-(?:0[1-9]|1[0-2])")
+          rows=[]
+          file_counts={}
+          names=[]
+          for stage in ("morning","predeadline","night"):
+              d=root/stage
+              files=sorted(d.glob("*.json")) if d.is_dir() else []
+              file_counts[stage]=len(files)
+              for path in files:
+                  names.append((stage,path))
+          verified_envelopes=0
+          malformed=0
+          p3=Counter()
+          dates=defaultdict(Counter)
+          sidecars=Counter()
+          night_payloads=Counter()
+          examples=[]
+          for stage,path in names:
+              try:
+                  raw=path.read_bytes()
+                  env=json.loads(raw)
+              except Exception:
+                  malformed+=1; continue
+              if (isinstance(env,dict) and env.get("STAGE")==stage.upper()
+                  and env.get("NAME")==path.stem and isinstance(env.get("PAYLOAD"),dict)
+                  and isinstance(env.get("SOURCE_RECEIPTS"),list)):
+                  verified_envelopes+=1
+              payload=env.get("PAYLOAD") if isinstance(env,dict) else None
+              if not isinstance(payload,dict): continue
+              schema=payload.get("SCHEMA")
+              status=payload.get("STATUS")
+              race=payload.get("RACE_ID") or payload.get("STANDARD_RACE_KEY")
+              if isinstance(race,str) and race_re.fullmatch(race):
+                  day=race[:8]
+              else:
+                  day=None
+              snap=payload.get("SNAPSHOT")
+              if (payload.get("LOGIC_ID")=="CURRENT_GROWTH_P3"
+                  or (isinstance(status,str) and status.startswith("CURRENT_GROWTH_P3"))):
+                  key=("MORNING" if snap=="MORNING" else "LIVE" if snap=="LIVE" else str(snap))
+                  points=payload.get("PRODUCTION_POINTS")
+                  special=(payload.get("SPECIAL_CASE") or {}).get("SPECIAL_CASE_ID") if isinstance(payload.get("SPECIAL_CASE"),dict) else None
+                  conf=payload.get("TRIFECTA_CONFIDENCE")
+                  embedded=isinstance(conf,dict)
+                  rawp=conf.get("RAW_SET_PROBABILITY") if embedded else None
+                  p3[(key,points,"EMBEDDED" if embedded else "NO_CONF")]+=1
+                  if day: dates[day][f"{key}_{points}_{'RAW' if rawp is not None else 'NO_RAW'}"]+=1
+                  if len(examples)<8:
+                      examples.append({"stage":stage,"name":path.stem,"race":race,
+                        "snapshot":snap,"points":points,"embedded_confidence":embedded,
+                        "raw":rawp,"prediction_at":payload.get("PREDICTION_AT"),
+                        "bet_sha":payload.get("BET_ARTIFACT_SHA"),
+                        "snapshot_sha256":hashlib.sha256(raw).hexdigest()})
+              if schema=="G11_P3_TRIFECTA_CONFIDENCE_PROSPECTIVE_EVIDENCE_V1":
+                  sidecars[(payload.get("SNAPSHOT"),payload.get("STATUS"))]+=1
+              if stage=="night":
+                  if isinstance(payload.get("RESULT_RAW16_ROWS"),list):
+                      night_payloads["WITH_RESULT_RAW16"]+=1
+                      night_payloads["RESULT_ROWS"]+=len(payload["RESULT_RAW16_ROWS"])
+                  if isinstance(payload.get("RESEARCH_LEDGER60_ROWS"),list):
+                      night_payloads["WITH_LEDGER60"]+=1
+                      night_payloads["LEDGER_ROWS"]+=len(payload["RESEARCH_LEDGER60_ROWS"])
+                  if isinstance(payload.get("OFFICIAL_TRIFECTA_SETTLEMENTS"),dict):
+                      night_payloads["WITH_SETTLEMENT_SET"]+=1
+
+          report={
+            "schema":"G11_P3_CONFIDENCE_IMMUTABLE_STORE_INVENTORY_V2",
+            "observed_at_utc":datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "restored_cache_key":os.environ.get("RESTORED_CACHE_KEY"),
+            "cache_hit":os.environ.get("CACHE_HIT"),
+            "snapshot_root":str(root),
+            "snapshot_files":file_counts,
+            "verified_envelope_shape":verified_envelopes,
+            "malformed_json":malformed,
+            "p3_counts":[
+              {"snapshot":k[0],"points":k[1],"confidence":k[2],"n":v}
+              for k,v in sorted(p3.items(),key=lambda x:str(x[0]))
+            ],
+            "confidence_sidecars":[
+              {"snapshot":k[0],"status":k[1],"n":v}
+              for k,v in sorted(sidecars.items(),key=lambda x:str(x[0]))
+            ],
+            "night_payload_counts":dict(night_payloads),
+            "date_count":len(dates),
+            "date_min":min(dates) if dates else None,
+            "date_max":max(dates) if dates else None,
+            "by_date":{d:dict(v) for d,v in sorted(dates.items())},
+            "examples":examples,
+            "production_mutated":False,
+            "cache_saved":False,
+          }
+          Path(".audit/inventory.json").write_text(
+            json.dumps(report,ensure_ascii=False,sort_keys=True,indent=2)+"\n",encoding="utf-8")
+          print(json.dumps(report,ensure_ascii=False,sort_keys=True))
+          PY
+
+      - name: Persist evidence on research branch only
+        env:
+          EVIDENCE_PATH: research-evidence/p3-confidence-immutable-store-inventory-v2.json
+        run: |
+          set -euo pipefail
+          content="$(base64 -w0 .audit/inventory.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}?ref=${GITHUB_REF_NAME}" --jq .sha 2>/dev/null || true)"
+          args=(
+            --method PUT
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+            -f "message=Record read-only P3 confidence immutable-store inventory"
+            -f "content=${content}"
+            -f "branch=${GITHUB_REF_NAME}"
+          )
+          if [ -n "${existing_sha}" ]; then args+=( -f "sha=${existing_sha}" ); fi
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}" "${args[@]}" >/dev/null
