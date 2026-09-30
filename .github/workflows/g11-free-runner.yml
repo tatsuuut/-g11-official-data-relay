@@ -1,4 +1,5 @@
 name: runtime sync
+# 2026-09-30: bounded 9/29 FINAL display readback retry; no prediction mutation.
 run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
 
 on:
