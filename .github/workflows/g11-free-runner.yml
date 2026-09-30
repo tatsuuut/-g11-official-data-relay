@@ -136,7 +136,6 @@ jobs:
               operational_date="2026-09-29"
             elif [[ "${COMMIT_MESSAGE}" == *"[night-current]"* ]]; then
               phase="night"
-              operational_date="$(date +%F)"
             elif [[ "${COMMIT_MESSAGE}" == *"[morning-current]"* ]]; then
               phase="morning"
               operational_date="$(date +%F)"
