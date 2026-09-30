@@ -3,6 +3,7 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'pred
 
 on:
   # 2026-09-30 deadline-safe rescue recovery; research CI stays off main.
+  # 2026-09-30 bounded rescue NIGHT recovery dispatched after the 22:41 gate.
   # 9/23 MORNING special-eight compatibility inside projector. WILD4 repaired-food carryover refresh.
   push:
     branches:
