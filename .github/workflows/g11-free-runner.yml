@@ -654,6 +654,37 @@ jobs:
           print("G11_RELAY_RESULT_EXTRACT=PASS")
           PY
 
+      - name: Capture Mashiro V4 prospective shadow sidecars
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run'
+        working-directory: .g11-private
+        env:
+          STATE_STORE: ${{ github.workspace }}/.relay-state/store
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          RELAY_PHASE: ${{ steps.due.outputs.phase }}
+        run: |
+          set -uo pipefail
+          # Research-only, future-effective 2026-10-01. The module itself
+          # rejects 2026-09-30 and earlier, never edits feed/P3/bets/LOCK, and
+          # returns no production authority. Any observer failure is logged but
+          # must not block the ordinary relay.
+          if [ "${RELAY_PHASE}" = "predeadline" ]; then
+            if ! python3 -m g11.growth_p3.v1_1.mashiro_v4_runtime_adapter_v1 \
+              --store "${STATE_STORE}" \
+              --date "${OPERATIONAL_DATE}" \
+              --phase predeadline; then
+              echo "MASHIRO_V4_SHADOW_STATUS=HOLD_PREDEADLINE"
+            fi
+          elif [ "${RELAY_PHASE}" = "night" ]; then
+            if ! python3 -m g11.growth_p3.v1_1.mashiro_v4_runtime_adapter_v1 \
+              --store "${STATE_STORE}" \
+              --date "${OPERATIONAL_DATE}" \
+              --phase night; then
+              echo "MASHIRO_V4_SHADOW_STATUS=HOLD_NIGHT"
+            fi
+          else
+            echo "MASHIRO_V4_SHADOW_STATUS=NOT_APPLICABLE"
+          fi
+
       - name: Audit WILD4 training-food capture
         if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run'
         working-directory: .g11-private
