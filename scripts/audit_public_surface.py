@@ -806,6 +806,7 @@ def project_rescue_stored_schema(feed_path: pathlib.Path, stored_path: pathlib.P
         raise SystemExit("RESCUE_STORED_SCHEMA_NO_ACCEPTED_LIVE")
     added = []
     locked = []
+    expired_unpublished = []
     for row in out["races"]:
         new = current[row["key"]]
         proof = new.get("today_rescue")
@@ -825,6 +826,11 @@ def project_rescue_stored_schema(feed_path: pathlib.Path, stored_path: pathlib.P
         if not isinstance(pre, dict):
             continue
         deadline = datetime.fromisoformat(row["deadline_jst"])
+        # A valid earlier capture is still not permission to publish a missed
+        # PRE_RACE after its deadline. Keep the accepted Site row untouched.
+        if deadline <= datetime.now(deadline.tzinfo):
+            expired_unpublished.append(row["key"])
+            continue
         lock = proof.get("locked_at_jst")
         if (proof.get("status") != "LOCKED" or pre.get("status") != "READY"
                 or proof.get("p3_snapshot_sha256") != pre.get("snapshot_sha256")
@@ -848,6 +854,7 @@ def project_rescue_stored_schema(feed_path: pathlib.Path, stored_path: pathlib.P
     path.write_text(payload, encoding="utf-8")
     print("G11_RESCUE_STORED_SCHEMA_TRANSPORT=" + json.dumps({
         "day": day, "race_count": 144, "new_live_locks": added,
+        "expired_unpublished": expired_unpublished,
         "locked_proof": locked, "today_rescue_published": 0,
         "canonical_morning_promoted": False, "result_leakage": 0,
         "raw_bytes": len(payload.encode("utf-8")),
