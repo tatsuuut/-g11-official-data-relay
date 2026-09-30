@@ -567,13 +567,6 @@ jobs:
               if calibration["CALIBRATION_SHA256"] != registry["CALIBRATION_SHA256"]:
                   raise SystemExit(f"{wild_id}_CALIBRATION_HASH")
           PY
-          # Scheduled PREDEADLINE is time-critical. Full regression checks run
-          # on push/manual invocations, while schedule invocations acquire first
-          # and avoid queueing behind a redundant test suite.
-          # Run each module in a fresh interpreter so test-local module state
-          # cannot leak into later runtime contract checks on long-lived schedules.
-          # The Growth P3 suite proves confidence is read-only, pending ranks
-          # stay null, and legacy locks can append pre-result RAW evidence.
           for module in \
             g11.relay.test_v1 \
             g11.relay.test_rescue_fake_wild4_display_v1 \
@@ -811,10 +804,6 @@ jobs:
             echo 'allowed=true' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          # A same-day rescue NIGHT is deliberately nonresearch.  Its runtime
-          # result is authoritative only for display/official result attachment,
-          # so gate it on complete official race results rather than the normal
-          # RESEARCH_LEDGER60 completeness contract.
           if [ -f .relay-output/result.json ] && \
              jq -e '.STATUS == "SAME_DAY_RESCUE_NIGHT_RESULTS_COMPLETE"' \
                .relay-output/result.json >/dev/null 2>&1; then
@@ -1428,10 +1417,6 @@ jobs:
             --output .relay-output/publish-result.json \
             --write-out '%{http_code}')"
           if [[ ! "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
-            # Legacy same-day PREDEADLINE feeds can have an older accepted Site
-            # schema than the current canonical NIGHT feed. On the exact
-            # historical Site adapter failure or its 2 MB transport ceiling,
-            # retry once with the existing stored-schema result-only overlay.
             if [ "${RELAY_PHASE}" = "night" ] && \
                { { [ "${http_status}" = "413" ] && \
                    jq -e '.error == "PAYLOAD_TOO_LARGE"' .relay-output/publish-result.json >/dev/null 2>&1; } || \
@@ -2001,10 +1986,6 @@ jobs:
         run: |
           set -euo pipefail
           now_hhmm="$(date +%H%M)"
-          # The final MORNING schedules are 07:00/07:05 JST. GitHub schedule
-          # delivery is best-effort and has arrived 30+ minutes late, so let
-          # that verified MORNING run seed the bounded PREDEADLINE heartbeat
-          # instead of waiting for a separate 08:00 cron to arrive.
           if [ "${now_hhmm}" -lt 0700 ] || [ "${now_hhmm}" -gt 2055 ]; then
             echo "G11_PUBLIC_PREDEADLINE_BOOTSTRAP=OUTSIDE_WINDOW"
             exit 0
