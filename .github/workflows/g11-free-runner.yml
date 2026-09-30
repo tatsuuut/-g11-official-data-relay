@@ -60,6 +60,7 @@ jobs:
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
       inputs.phase != 'repair-20260928' &&
+      !contains(github.event.head_commit.message || '', '[repair-20260929-final-score]') &&
       vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -2138,6 +2139,97 @@ jobs:
             args+=( -f "sha=${existing_sha}" )
           fi
           gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}" "${args[@]}" >/dev/null
+
+  repair-20260929-final-score:
+    name: Repair historical 9/29 three-engine FINAL score
+    if: >-
+      github.repository_id == '1367703708' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      contains(github.event.head_commit.message || '', '[repair-20260929-final-score]') &&
+      vars.G11_RELAY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
+      G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
+    steps:
+      - name: Checkout public relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Read accepted 9/29 NIGHT feed
+        run: |
+          set -euo pipefail
+          mkdir -p .repair
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-29" \
+            --output .repair/before.json
+          jq -e '
+            .operational_date_jst == "2026-09-29"
+            and .stage == "NIGHT"
+            and .status == "PASS"
+            and .counts.races == 144
+            and .counts.results == 144
+            and .counts.pending == 0
+          ' .repair/before.json >/dev/null
+
+      - name: Build result-only FINAL score overlay
+        run: |
+          set -euo pipefail
+          python3 scripts/repair_20260929_three_engine_final.py \
+            .repair/before.json .repair/overlay.json
+          jq -e '
+            .three_engine_comparison.status == "SCORED"
+            and .three_engine_comparison.classifications.PENDING == 0
+            and (.three_engine_comparison.engines | all(.settled_races == 144))
+            and ([.races[] | select(.three_engine_classification == "PENDING")] | length) == 0
+          ' .repair/overlay.json >/dev/null
+
+      - name: Publish trusted 9/29 result-only overlay
+        run: |
+          set -euo pipefail
+          oidc="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            -H 'Accept: application/json' \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
+          token="$(printf '%s' "${oidc}" | jq -er '.value')"
+          sha="$(sha256sum .repair/overlay.json | cut -d' ' -f1)"
+          status="$(curl --silent --show-error --location \
+            -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Content-Type: application/json' \
+            -H "x-g11-feed-sha256: ${sha}" \
+            --data-binary @.repair/overlay.json \
+            --output .repair/publish-response.json \
+            --write-out '%{http_code}')"
+          if [[ ! "${status}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "G11_20260929_FINAL_SCORE_REPAIR_HTTP=${status}" >&2
+            jq -c . .repair/publish-response.json >&2 || cat .repair/publish-response.json >&2
+            exit 1
+          fi
+          echo "G11_20260929_FINAL_SCORE_REPAIR_HTTP=${status}"
+
+      - name: Verify exact 9/29 FINAL score readback
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-29" \
+            --output .repair/after.json
+          cmp .repair/overlay.json .repair/after.json
+          jq -e '
+            .operational_date_jst == "2026-09-29"
+            and .stage == "NIGHT"
+            and .counts.races == 144
+            and .counts.results == 144
+            and .counts.pending == 0
+            and .three_engine_comparison.status == "SCORED"
+            and .three_engine_comparison.classifications.PENDING == 0
+            and (.three_engine_comparison.engines | all(.settled_races == 144))
+            and ([.races[] | select(.three_engine_classification == "PENDING")] | length) == 0
+          ' .repair/after.json >/dev/null
+          echo "G11_20260929_FINAL_SCORE_READBACK=PASS"
 
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
