@@ -2,8 +2,6 @@ name: runtime sync
 run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
 
 on:
-  # 9/23 MORNING special-eight compatibility inside projector. WILD4 repaired-food carryover refresh.
-  # 2026-09-20: verify WILD OOS, daily rollover, and unavailable-phase fail-closed. Transport compactness recheck. 9/23 morning schema inspection.
   push:
     branches:
       - main
@@ -28,20 +26,14 @@ on:
         required: false
         type: string
   schedule:
-    # 02:15-07:05 JST: morning start plus bounded official-data retries.
     - cron: "15-55/5 17 * * *"
     - cron: "*/5 18-21 * * *"
     - cron: "0-5/5 22 * * *"
-    # 08:00-20:55 JST: official predeadline data and EV-only odds capture.
     - cron: "*/5 23 * * *"
     - cron: "*/5 0-11 * * *"
-    # Final-race handoff coverage if the 20:55 heartbeat starts late.
     - cron: "0-10/5 12 * * *"
-    # The existing 22:00 dispatcher remains the recovery path.
 
 permissions:
-  # The Site accepts only monotonic, pre-deadline market refreshes; prediction
-  # and morning-lock fields remain immutable.
   actions: write
   contents: read
   id-token: write
@@ -52,8 +44,6 @@ concurrency:
 
 jobs:
   run-private-runtime:
-    # Job names identify the active LIVE continuation in the jobs API. A
-    # repair or diagnostic dispatch has the ordinary runtime name instead.
     name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || 'runtime' }}
     if: >-
       github.repository_id == '1367703708' &&
@@ -114,10 +104,6 @@ jobs:
               operational_date="${REQUESTED_DATE}"
             fi
           elif [ "${EVENT_NAME}" = "schedule" ]; then
-            # GitHub scheduled jobs are best-effort and can start after the
-            # intended clock window. Resolve the phase from the triggering
-            # cron expression so a delayed predeadline job can never enter the
-            # night result path before the official K file exists.
             case "${SCHEDULE_EXPRESSION}" in
               "15-55/5 17 * * *"|"*/5 18-21 * * *"|"0-5/5 22 * * *")
                 phase="morning"
@@ -130,11 +116,6 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # Explicit bounded recovery markers may launch today's MORNING or
-            # NIGHT phase independently. Ordinary pushes remain PREDEADLINE
-            # diagnostics.
-            # Installing tomorrow's heartbeat policy must not replay today's
-            # completed PREDEADLINE races on the workflow-file push.
             if [[ "${COMMIT_MESSAGE}" == *"[historical-final-repair]"* ]]; then
               phase="dry-run"
             elif [[ "${COMMIT_MESSAGE}" == *"[heartbeat-config-only]"* ]] && [[ "${operational_date}" < "2026-09-29" ]]; then
@@ -163,8 +144,6 @@ jobs:
           else
             phase="auto"
           fi
-          # The additional 21:00 heartbeat begins with the next complete
-          # MORNING day; do not alter 2026-09-28's already-running T-7 lane.
           if [ "${SCHEDULE_EXPRESSION}" = "0-10/5 12 * * *" ] && [[ "${operational_date}" < "2026-09-29" ]]; then
             phase="dry-run"
           fi
@@ -246,9 +225,6 @@ jobs:
                           shutil.rmtree(target)
                       elif target.exists():
                           target.unlink()
-                  # A rescue snapshot is date-bound and non-promotable. Never
-                  # carry yesterday's complete rescue envelope into a new race
-                  # day where it could be mistaken for today's fallback.
                   rescue = state_root / "rescue"
                   if rescue.is_dir():
                       shutil.rmtree(rescue)
@@ -318,10 +294,6 @@ jobs:
               .relay-state/store/g11/wild-pack-history/
           fi
           mkdir -p .relay-state/store/g11/wild-pack-models
-          # The encrypted state is the authoritative handoff for a newly
-          # trained FIRST CURRENT.  The read-only g11-runtime checkout may lag
-          # when its PAT cannot push, so never overwrite a verified CURRENT
-          # pack that already survived the encrypted checkpoint.
           if [ -s .relay-state/store/g11/wild-pack-models/acceptance-readback.json ]; then
             echo "WILD_CURRENT_SOURCE=ENCRYPTED_STATE"
           elif [ -d .g11-model/g11/wild-pack-models ]; then
@@ -331,9 +303,6 @@ jobs:
           fi
           mkdir -p .relay-state/store/g11/wild-pack-oos
           if [ -d .g11-model/g11/wild-pack-oos ]; then
-            # Encrypted state is the live append-only authority.  Runtime
-            # branch OOS assets are a seed/fallback only and must never
-            # overwrite a newer historical bootstrap or same-day packets.
             rsync -a --ignore-existing \
               .g11-model/g11/wild-pack-oos/ \
               .relay-state/store/g11/wild-pack-oos/
@@ -370,9 +339,6 @@ jobs:
               )
               target = model_root / str(registry["MODEL_FILE"])
               expected_sha = str(registry["MODEL_SHA256"])
-              # Restored encrypted state may still contain the previous direct
-              # file. When the immutable runtime branch now supplies a parts
-              # manifest, the verified chunk representation is authoritative.
               if chunks.manifest_path(target).is_file() and target.exists():
                   target.unlink()
               value = chunks.read_verified(target, expected_sha)
@@ -399,10 +365,6 @@ jobs:
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
 
-          # WILD runtime inference is used after the morning admission is
-          # already present too.  Do not key CatBoost installation to missing
-          # artifacts: PREDEADLINE and NIGHT can still load CURRENT .cbm
-          # models. Verify the exact interpreter that later executes relay.v1.
           if [ "${{ steps.due.outputs.phase }}" != "dry-run" ]; then
             if ! python3 -c 'import catboost' >/dev/null 2>&1; then
               python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
@@ -430,10 +392,6 @@ jobs:
             capture_mode="CANONICAL"
           elif [ -f "${RESCUE_STORE}/manifest.json" ] && \
                [ -f "${RESCUE_STORE}/snapshots/morning/official-day-input.json" ]; then
-            # A missing canonical MORNING must not disable the time-critical
-            # T-7 official capture.  The isolated rescue store is already
-            # future-only/nonresearch and carries its own sealed PREDEADLINE
-            # plan, so it can safely protect the capture window here.
             capture_store="${RESCUE_STORE}"
             capture_mode="SAME_DAY_RESCUE"
           else
@@ -540,7 +498,6 @@ jobs:
           PY
 
       - name: Verify relay schedule and authority contracts
-        # Push/manual runs execute the full private regression gate.
         if: github.event_name != 'schedule'
         working-directory: .g11-private
         env:
@@ -587,9 +544,6 @@ jobs:
             python3 -m unittest "${module}"
           done
 
-          # PREDEADLINE feed is also WILD4 training-food infrastructure.
-          # Keep the widened incomplete-HTML retry policy under focused CI
-          # without running the entire canonical suite every two minutes.
           python3 -m unittest \
             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_urls_and_dynamic_budget_cover_168_races \
             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_bootstrap_scope_is_sealed_from_b_cardinality \
@@ -663,10 +617,6 @@ jobs:
           RELAY_PHASE: ${{ steps.due.outputs.phase }}
         run: |
           set -uo pipefail
-          # Research-only, future-effective 2026-10-01. The module itself
-          # rejects 2026-09-30 and earlier, never edits feed/P3/bets/LOCK, and
-          # returns no production authority. Any observer failure is logged but
-          # must not block the ordinary relay.
           if [ "${RELAY_PHASE}" = "predeadline" ]; then
             if ! python3 -m g11.growth_p3.v1_1.mashiro_v4_runtime_adapter_v1 \
               --store "${STATE_STORE}" \
@@ -734,7 +684,6 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
           set -euo pipefail
-          # Official-result waiting is checkpoint-only, not completed NIGHT.
           if [ -f ../.relay-output/result.json ] && \
              jq -e --arg day "${{ steps.due.outputs.operational_date }}" '
                .STATUS == "NIGHT_WAITING_OFFICIAL_RESULTS"
@@ -744,9 +693,6 @@ jobs:
             echo 'G11_NIGHT_RESEARCH_LEDGER_CHECK=DEFER_OFFICIAL_RESULTS'
             exit 0
           fi
-          # A same-day rescue NIGHT is intentionally nonresearch. It can attach
-          # the complete official result set and publish score-only display
-          # without creating canonical TRUE-AI/WILD research ledgers.
           if [ -f ../.relay-output/result.json ] && \
              jq -e '.STATUS == "SAME_DAY_RESCUE_NIGHT_RESULTS_COMPLETE"' \
                ../.relay-output/result.json >/dev/null 2>&1; then
@@ -897,12 +843,10 @@ jobs:
           RELAY_PHASE: ${{ steps.due.outputs.phase }}
         run: |
           set -euo pipefail
-          # Preserve already-accepted immutable race snapshots.
           if curl --fail-with-body --silent --show-error --location \
             --retry 3 --retry-delay 2 \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
             -o .relay-output/stored-feed.json; then
-            # Load only the verified immutable CURRENT P3 morning eight-ticket lock.
             PYTHONPATH=".g11-private" python3 - "${FEED}" <<'PY'
           import json
           from pathlib import Path
@@ -1123,7 +1067,6 @@ jobs:
               | ([.races[] | select(.research_eligible == true and .odds_captured_at_jst != null)] | length) as $enriched
               | .counts.odds_enriched = $enriched
               | .counts.odds_waiting = (.counts.formal - $enriched)
-              # Count canonical PRE_RACE ◎ independently from VALUE ALERT.
               | .counts.win_candidates_basis = "FORMAL_READY_PRE_RACE_ODDS_MERIT"
               | .counts.win_candidates = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.odds_merit == "◎")] | length)
               | .counts.value_alert_count = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.value_alert == true)] | length)
@@ -1246,11 +1189,6 @@ jobs:
           PY
           fi
 
-          # Preserve verified original-display NIGHT research emitted by the
-          # private relay.  Do not replace settled CAPTURED_RESEARCH_ONLY /
-          # daily_aggregate evidence with NOT_YET_ISSUED placeholders.
-          # Race-level night_execution remains aggregate-only to stay under the
-          # Site sync payload ceiling.
           if [ "${RELAY_PHASE}" = "night" ]; then
             python3 - "${FEED}" <<'PY'
           import json
@@ -1299,21 +1237,15 @@ jobs:
           PY
           fi
 
-          # Re-settle display-only NIGHT finance against the exact immutable
-          # MORNING practical_bets already accepted by the Site. Canonical
-          # RESEARCH_LEDGER60 remains untouched in encrypted state.
           if [ "${RELAY_PHASE}" = "night" ]; then
             PYTHONPATH=".g11-private" python3 -m g11.relay.night_transport_finance_v1 \
               "${FEED}" \
               ".relay-state/store/snapshots/night/workbook-ledger-projection.json"
             if [ -f .relay-state/store/snapshots/night/workbook-ledger-projection.json ]; then
-              # Settle FINAL only after accepted MORNING/PRE_RACE reconciliation.
               PYTHONPATH=".g11-private" python3 -m g11.relay.final_bet_accounting_v1 \
                 "${FEED}" \
                 ".relay-state/store/snapshots/night/workbook-ledger-projection.json"
             fi
-            # Preserve the historical published confidence boundary; a newer
-            # result-revision review remains in encrypted research state.
             if [ -f .relay-output/stored-feed.json ] && \
                jq -e 'has("confidence_result_revision_review") | not' .relay-output/stored-feed.json >/dev/null; then
               jq -c 'del(.confidence_result_revision_review)' "${FEED}" > .relay-output/feed-confidence-history.json
@@ -1595,9 +1527,6 @@ jobs:
                [ "${RELAY_PHASE}" = "night" ] && \
                jq -e '.error == "NIGHT_IMMUTABLE_CONFLICT"' \
                  .relay-output/publish-result.json >/dev/null 2>&1; then
-              # A finalized NIGHT snapshot is immutable by design. A manual
-              # replay may still verify and checkpoint research ledgers, but
-              # it must not rewrite the already published production result.
               echo 'immutable_night=true' >> "${GITHUB_OUTPUT}"
               exit 0
             fi
@@ -1911,8 +1840,6 @@ jobs:
               echo "G11_PREDEADLINE_CHAIN=DEFER_ACTIVE_LIVE run=${active_id}"
               exit 0
             fi
-            # GitHub can queue a run under concurrency before materializing
-            # any jobs. Its phase/day run-name is authoritative until then.
             if [ "$(printf '%s' "${jobs}" | jq '.jobs | length')" -eq 0 ] && \
                [ "${active_title}" = "LIVE-predeadline-${OPERATIONAL_DATE}" ]; then
               echo "G11_PREDEADLINE_CHAIN=DEFER_QUEUED_LIVE run=${active_id}"
@@ -2071,7 +1998,6 @@ jobs:
         if: always() && steps.runtime.outcome == 'failure'
         run: exit 1
 
-# operator-night-current-20260928
 
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
