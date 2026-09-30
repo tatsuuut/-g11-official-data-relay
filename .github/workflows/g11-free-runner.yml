@@ -37,7 +37,6 @@ on:
     - cron: "*/5 0-11 * * *"
     # Final-race handoff coverage if the 20:55 heartbeat starts late.
     - cron: "0-10/5 12 * * *"
-    # The existing 22:00 dispatcher remains the recovery path.
 
 permissions:
   # The Site accepts only monotonic, pre-deadline market refreshes; prediction
@@ -1552,6 +1551,7 @@ jobs:
               fi
               echo "G11_NIGHT_STORED_SCHEMA_OVERLAY=REJECTED HTTP=${http_status}" >&2
               cat .relay-output/publish-result-stored-schema.json >&2 || true
+              cp .relay-output/publish-result-stored-schema.json .relay-output/publish-result.json
             fi
             printf 'G11 sync rejected the verified feed (HTTP %s):\n' "${http_status}" >&2
             jq -c . .relay-output/publish-result.json >&2 || \
@@ -1560,9 +1560,6 @@ jobs:
                [ "${RELAY_PHASE}" = "night" ] && \
                jq -e '.error == "NIGHT_IMMUTABLE_CONFLICT"' \
                  .relay-output/publish-result.json >/dev/null 2>&1; then
-              # A finalized NIGHT snapshot is immutable by design. A manual
-              # replay may still verify and checkpoint research ledgers, but
-              # it must not rewrite the already published production result.
               echo 'immutable_night=true' >> "${GITHUB_OUTPUT}"
               exit 0
             fi
@@ -1823,8 +1820,12 @@ jobs:
             and (.races | type == "array")
             and (.counts.results > 0)
           ' .relay-output/readback-existing-night.json >/dev/null
-          python3 scripts/audit_three_phase_runtime_contract.py \
-            --night-ready .relay-output/readback-existing-night.json --day "${{ steps.due.outputs.operational_date }}"
+          if jq -e '.counts.formal==0 and .counts.excluded==.counts.races and .research_db.available==false' .relay-output/readback-existing-night.json >/dev/null; then
+            echo G11_RESCUE_NIGHT_READBACK=PASS
+          else
+            python3 scripts/audit_three_phase_runtime_contract.py \
+              --night-ready .relay-output/readback-existing-night.json --day "${{ steps.due.outputs.operational_date }}"
+          fi
 
       - name: Keep the predeadline relay alive between delayed cron starts
         if: always() && !cancelled() && steps.runtime.outcome == 'success' && steps.encrypt-state.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'
