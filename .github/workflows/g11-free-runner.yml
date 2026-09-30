@@ -2,8 +2,6 @@ name: runtime sync
 run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
 
 on:
-  # 2026-09-30 deadline-safe rescue recovery; research CI stays off main.
-  # 9/23 MORNING special-eight compatibility inside projector. WILD4 repaired-food carryover refresh.
   push:
     branches:
       - main
@@ -28,19 +26,14 @@ on:
         required: false
         type: string
   schedule:
-    # 02:15-07:05 JST: morning start plus bounded official-data retries.
     - cron: "15-55/5 17 * * *"
     - cron: "*/5 18-21 * * *"
     - cron: "0-5/5 22 * * *"
-    # 08:00-20:55 JST: official predeadline data and EV-only odds capture.
     - cron: "*/5 23 * * *"
     - cron: "*/5 0-11 * * *"
-    # Final-race handoff coverage if the 20:55 heartbeat starts late.
     - cron: "0-10/5 12 * * *"
 
 permissions:
-  # The Site accepts only monotonic, pre-deadline market refreshes; prediction
-  # and morning-lock fields remain immutable.
   actions: write
   contents: read
   id-token: write
@@ -162,8 +155,6 @@ jobs:
           else
             phase="auto"
           fi
-          # The additional 21:00 heartbeat begins with the next complete
-          # MORNING day; do not alter 2026-09-28's already-running T-7 lane.
           if [ "${SCHEDULE_EXPRESSION}" = "0-10/5 12 * * *" ] && [[ "${operational_date}" < "2026-09-29" ]]; then
             phase="dry-run"
           fi
@@ -539,7 +530,6 @@ jobs:
           PY
 
       - name: Verify relay schedule and authority contracts
-        # Push/manual runs execute the full private regression gate.
         if: github.event_name != 'schedule'
         working-directory: .g11-private
         env:
@@ -1476,6 +1466,15 @@ jobs:
           }
           for old in out["races"]:
               new = incoming_by_key[old["key"]]
+              reference = new.get("late_reference")
+              prior = old.get("late_reference")
+              if (isinstance(reference, dict) and reference.get("status") == "RECORDED_NON_FORMAL_SETTLED"
+                      and isinstance(prior, dict) and prior.get("status") == "RECORDED_NON_FORMAL_PENDING"):
+                  for key in ("schema", "captured_at_jst", "morning_lock_established",
+                              "included_in_formal_metrics", "purchase_executed"):
+                      if reference.get(key) != prior.get(key):
+                          raise SystemExit("NIGHT_REFERENCE_LOCK_CHANGED:" + old["key"])
+                  old["late_reference"] = copy.deepcopy(reference)
               for field in safe_scalar:
                   if field in old and field in new:
                       old[field] = copy.deepcopy(new[field])
