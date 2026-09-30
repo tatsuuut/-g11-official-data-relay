@@ -1525,6 +1525,34 @@ jobs:
           ):
               raise SystemExit("NIGHT_STORED_SCHEMA_NOT_COMPLETE")
 
+          # The accepted PRE_RACE Site shape can carry stale PREDICTIONS_ONLY
+          # comparison values even after official NIGHT settlements are added.
+          # Recompute only the read-model score fields from the already locked
+          # prediction surfaces plus the official result metadata. No engine is
+          # invoked and no prediction/bet/LOCK field is changed.
+          stable_before = copy.deepcopy(out)
+          stable_before.pop("three_engine_comparison", None)
+          for row in stable_before["races"]:
+              row.pop("three_engine_score", None)
+              row.pop("three_engine_classification", None)
+          sys.path.insert(0, str(Path(".g11-private").resolve()))
+          from g11.canonical import public_app_feed as _g11_feed
+          out["three_engine_comparison"] = _g11_feed._attach_three_engine_comparison(
+              out["races"], out.get("true_ai")
+          )
+          stable_after = copy.deepcopy(out)
+          stable_after.pop("three_engine_comparison", None)
+          for row in stable_after["races"]:
+              row.pop("three_engine_score", None)
+              row.pop("three_engine_classification", None)
+          if stable_after != stable_before:
+              raise SystemExit("NIGHT_STORED_SCHEMA_SCORE_RECOMPUTE_MUTATED_LOCK")
+          if (
+              out["three_engine_comparison"].get("status") != "SCORED"
+              or out["three_engine_comparison"].get("classifications", {}).get("PENDING") != 0
+          ):
+              raise SystemExit("NIGHT_STORED_SCHEMA_SCORE_RECOMPUTE_INCOMPLETE")
+
           Path(sys.argv[3]).write_text(
               json.dumps(out, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
               encoding="utf-8",
