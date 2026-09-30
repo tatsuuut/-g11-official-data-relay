@@ -1,0 +1,57 @@
+name: P3 confidence frozen holdout research CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/p3-confidence-frozen-holdout-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout private research branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: research/p3-confidence-frozen-holdout-v2
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Compile and run frozen holdout tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile g11/growth_p3/v1_1/confidence_calibration_research_v1.py
+          python3 -m py_compile g11/growth_p3/v1_1/test_confidence_calibration_research_v1.py
+          python3 -m unittest g11.growth_p3.v1_1.test_confidence_calibration_research_v1 -v
+      - name: Prove 9/29 baseline remains development-only
+        run: |
+          set -euo pipefail
+          python3 -m g11.growth_p3.v1_1.confidence_calibration_research_v1 \
+            --legacy-ledger g11/growth_p3/v1_1/calibration_evidence/2026-09-29/MORNING_3.json \
+            --legacy-ledger g11/growth_p3/v1_1/calibration_evidence/2026-09-29/MORNING_5.json \
+            --legacy-ledger g11/growth_p3/v1_1/calibration_evidence/2026-09-29/MORNING_7.json \
+            --legacy-ledger g11/growth_p3/v1_1/calibration_evidence/2026-09-29/LIVE_3.json \
+            --legacy-ledger g11/growth_p3/v1_1/calibration_evidence/2026-09-29/LIVE_5.json \
+            --legacy-ledger g11/growth_p3/v1_1/calibration_evidence/2026-09-29/LIVE_7.json \
+            --output /tmp/p3-confidence-929-v2.json
+          python3 - <<'PY'
+          import json
+          v=json.load(open("/tmp/p3-confidence-929-v2.json"))
+          assert v["STATUS"]=="WAITING_FROZEN_HOLDOUT"
+          assert v["DAY_COUNT"]==1
+          assert v["TOTAL_RECORDS"]==238
+          assert v["DEVELOPMENT_DAYS"]==["2026-09-29"]
+          assert v["HOLDOUT_DAYS"]==[]
+          assert v["NEXT_SCHEDULED_HOLDOUT_DATE"]=="2026-10-03"
+          assert v["SPLIT_POLICY"]["HOLDOUT_RECYCLING_TO_DEVELOPMENT"] is False
+          assert v["SPLIT_POLICY"]["RESULT_DEPENDENT_ASSIGNMENT"] is False
+          assert v["CALIBRATION_VERSION_WRITTEN"] is False
+          assert v["GRADE_BOUNDARIES_WRITTEN"] is False
+          assert v["FORMAL_CERTIFICATION_ISSUED"] is False
+          print("P3_CONFIDENCE_FROZEN_HOLDOUT_BASELINE=PASS")
+          PY
