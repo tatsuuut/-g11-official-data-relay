@@ -104,10 +104,6 @@ jobs:
               operational_date="${REQUESTED_DATE}"
             fi
           elif [ "${EVENT_NAME}" = "schedule" ]; then
-            # GitHub scheduled jobs are best-effort and can start after the
-            # intended clock window. Resolve the phase from the triggering
-            # cron expression so a delayed predeadline job can never enter the
-            # night result path before the official K file exists.
             case "${SCHEDULE_EXPRESSION}" in
               "15-55/5 17 * * *"|"*/5 18-21 * * *"|"0-5/5 22 * * *")
                 phase="morning"
@@ -120,11 +116,6 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            # Explicit bounded recovery markers may launch today's MORNING or
-            # NIGHT phase independently. Ordinary pushes remain PREDEADLINE
-            # diagnostics.
-            # Installing tomorrow's heartbeat policy must not replay today's
-            # completed PREDEADLINE races on the workflow-file push.
             if [[ "${COMMIT_MESSAGE}" == *"[historical-final-repair]"* ]]; then
               phase="dry-run"
             elif [[ "${COMMIT_MESSAGE}" == *"[heartbeat-config-only]"* ]] && [[ "${operational_date}" < "2026-09-29" ]]; then
@@ -1194,11 +1185,6 @@ jobs:
           PY
           fi
 
-          # Preserve verified original-display NIGHT research emitted by the
-          # private relay.  Do not replace settled CAPTURED_RESEARCH_ONLY /
-          # daily_aggregate evidence with NOT_YET_ISSUED placeholders.
-          # Race-level night_execution remains aggregate-only to stay under the
-          # Site sync payload ceiling.
           if [ "${RELAY_PHASE}" = "night" ]; then
             python3 - "${FEED}" <<'PY'
           import json
@@ -1473,6 +1459,18 @@ jobs:
                           and reference.get("reference_practical_hit") == any(bet in paid for bet in bets)
                           and reference.get("reference_validation_hit") == any(bet in paid for bet in reference.get("validation_bets", []))):
                       old["late_reference"] = copy.deepcopy(reference)
+                  elif (isinstance(bets, list) and bets == new.get("practical_bets") and len(bets) == 8
+                        and old.get("special_case_id") == "G11_P3_SPECIAL_45_2_EQ_145_V1"
+                        and isinstance(finance, dict) and finance.get("gross_stake") == 700
+                        and finance.get("refund_amount") == 0
+                        and old["research_finance"].get("race_refund_occurred") is False
+                        and finance.get("prize_return") == sum(paid.get(bet, 0) for bet in bets[:7])):
+                      fixed = copy.deepcopy(reference)
+                      prize = sum(paid.get(bet, 0) for bet in bets)
+                      fixed["reference_finance"].update(gross_stake=800, net_investment=800,
+                          prize_return=prize, total_return=prize, profit=prize-800)
+                      fixed["reference_practical_hit"] = any(bet in paid for bet in bets)
+                      old["late_reference"] = fixed
               for field in safe_scalar:
                   if field in old and field in new:
                       old[field] = copy.deepcopy(new[field])
