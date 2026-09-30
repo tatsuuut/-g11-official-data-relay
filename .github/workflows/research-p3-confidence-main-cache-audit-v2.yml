@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
+      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
     steps:
       - name: Checkout research branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -407,6 +408,122 @@ jobs:
               a.extractall(root,filter="data")
           PY
           rm -f .relay-cache/state.tgz.gpg
+
+      - name: Classify verified 9/29 confidence locks against official FINAL
+        run: |
+          set -euo pipefail
+          test -d .audit/states/2026-09-29
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-29" \
+            --output .audit/feed-2026-09-29.json
+          python3 - <<'PY'
+          import hashlib,json,math
+          from collections import Counter,defaultdict
+          from datetime import datetime
+          from pathlib import Path
+
+          feed=json.loads(Path(".audit/feed-2026-09-29.json").read_text())
+          if not (feed.get("operational_date_jst")=="2026-09-29"
+                  and feed.get("stage")=="NIGHT"
+                  and feed.get("counts",{}).get("results")==144
+                  and feed.get("counts",{}).get("pending")==0):
+              raise SystemExit("FINAL_FEED_NOT_CLOSED")
+          by={r["key"]:r for r in feed["races"]}
+          roots=list(Path(".audit/states/2026-09-29").rglob("snapshots"))
+          if not roots: raise SystemExit("SNAPSHOT_ROOT")
+          root=max(roots,key=lambda p:sum(1 for _ in p.rglob("*.json")))
+          buckets=defaultdict(Counter)
+          reasons=Counter(); records=0; special=0
+          raw_values=defaultdict(list)
+          feed_source=feed.get("source")
+          for stage_dir,stage in (("morning","MORNING"),("predeadline","LIVE")):
+              d=root/stage_dir
+              if not d.is_dir(): continue
+              for path in d.glob("*.json"):
+                  raw=path.read_bytes()
+                  try: env=json.loads(raw)
+                  except Exception: continue
+                  p=env.get("PAYLOAD") if isinstance(env,dict) else None
+                  if not isinstance(p,dict) or p.get("SNAPSHOT")!=stage: continue
+                  status=p.get("STATUS")
+                  if not (p.get("LOGIC_ID")=="CURRENT_GROWTH_P3"
+                          or (isinstance(status,str) and status.startswith("CURRENT_GROWTH_P3"))):
+                      continue
+                  race=p.get("RACE_ID")
+                  if race not in by: reasons["NO_FINAL_RACE_BINDING"]+=1; continue
+                  points=p.get("PRODUCTION_POINTS")
+                  conf=p.get("TRIFECTA_CONFIDENCE")
+                  if points==8:
+                      special+=1; reasons["SPECIAL_FIXED_8"]+=1; continue
+                  if points not in (3,5,7):
+                      reasons["WRONG_POINTS"]+=1; continue
+                  records+=1; unit=f"{stage}_{points}"; row=by[race]
+                  deadline=row.get("deadline_jst"); locked=p.get("PREDICTION_AT")
+                  checks={
+                    "EMBEDDED_CONFIDENCE":isinstance(conf,dict),
+                    "RAW_FINITE":isinstance(conf,dict) and type(conf.get("RAW_SET_PROBABILITY")) in (int,float)
+                      and math.isfinite(conf["RAW_SET_PROBABILITY"]) and 0<=conf["RAW_SET_PROBABILITY"]<=1,
+                    "BET_ORDER_BINDING":isinstance(conf,dict) and conf.get("PRODUCTION_BET_ORDER")==p.get("PRODUCTION_BETS"),
+                    "BET_SHA_BINDING":isinstance(conf,dict) and conf.get("BET_ARTIFACT_SHA")==p.get("BET_ARTIFACT_SHA"),
+                    "NO_RESULT_INPUT":isinstance(p.get("RESEARCH_PACKET"),dict) and p["RESEARCH_PACKET"].get("RESULT_INPUT_USED") is False,
+                    "NO_BACKFLOW":isinstance(conf,dict) and conf.get("CONFIDENCE_TO_BET_BACKFLOW")==0 and conf.get("CONFIDENCE_TO_P3_BACKFLOW")==0,
+                    "TIME_FIELDS":isinstance(deadline,str) and isinstance(locked,str),
+                  }
+                  if checks["TIME_FIELDS"]:
+                      try: checks["LOCK_BEFORE_DEADLINE"]=datetime.fromisoformat(locked)<datetime.fromisoformat(deadline)
+                      except Exception: checks["LOCK_BEFORE_DEADLINE"]=False
+                  else: checks["LOCK_BEFORE_DEADLINE"]=False
+                  meta=row.get("result_meta") if isinstance(row.get("result_meta"),dict) else {}
+                  result_status=meta.get("result_status")
+                  settlements=meta.get("trifecta_settlements")
+                  checks["OFFICIAL_RESULT_BOUND"]=result_status in ("ESTABLISHED","TRIFECTA_NOT_ESTABLISHED") and isinstance(settlements,list)
+                  failed=[k for k,v in checks.items() if not v]
+                  if failed:
+                      buckets[unit]["UNDETERMINED"]+=1
+                      for x in failed: reasons[x]+=1
+                      continue
+                  buckets[unit]["PROSPECTIVE_REUSABLE"]+=1
+                  raw_values[unit].append(conf["RAW_SET_PROBABILITY"])
+                  if result_status=="TRIFECTA_NOT_ESTABLISHED":
+                      buckets[unit]["VOID"]+=1
+                  else:
+                      winners={x["trifecta"] for x in settlements}
+                      hit=bool(set(p["PRODUCTION_BETS"]) & winners)
+                      buckets[unit]["HIT" if hit else "MISS"]+=1
+          summary={}
+          for unit in ("MORNING_3","MORNING_5","MORNING_7","LIVE_3","LIVE_5","LIVE_7"):
+              b=buckets[unit]; vals=raw_values[unit]
+              summary[unit]={
+                "N":b["PROSPECTIVE_REUSABLE"],"HIT":b["HIT"],"MISS":b["MISS"],"VOID":b["VOID"],
+                "UNDETERMINED":b["UNDETERMINED"],
+                "RAW_MIN":min(vals) if vals else None,"RAW_MAX":max(vals) if vals else None,
+                "RAW_MEAN":sum(vals)/len(vals) if vals else None,
+              }
+          total=sum(x["N"] for x in summary.values())
+          report={
+            "schema":"G11_P3_CONFIDENCE_20260929_IMMUTABLE_JOIN_AUDIT_V2",
+            "date":"2026-09-29","source_cache":"g11-state-v2-2026-09-29-36656547307",
+            "final_feed_source":feed_source,
+            "final_feed_counts":feed.get("counts"),
+            "normal_records_seen":records,"special_fixed_8_excluded":special,
+            "CALIBRATION_DEV_PROSPECTIVE_REUSABLE_N":total,
+            "CALIBRATION_DEV_HISTORICAL_RECONSTRUCTABLE_N":0,
+            "CALIBRATION_DEV_TOTAL_USABLE_N":total,
+            "FORMAL_CERTIFICATION_PROSPECTIVE_REUSABLE_N":0,
+            "FORMAL_CERTIFICATION_REASON":"NO_PRE_RESULT_APPROVED_CALIBRATION_AND_EVIDENCE_PLAN",
+            "BUCKETS":summary,"FAIL_OR_EXCLUSION_REASONS":dict(reasons),
+            "TIME_LEAK_COUNT":sum(buckets[u]["UNDETERMINED"] for u in buckets),
+            "RESULT_INPUT_USED_COUNT":0,"PAYOUT_INPUT_USED_COUNT":0,
+            "PRODUCTION_MUTATED":False,"LOCK_MUTATED":False,
+          }
+          Path(".audit/20260929-join-summary.json").write_text(json.dumps(report,ensure_ascii=False,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(report,ensure_ascii=False,sort_keys=True))
+          PY
+          content="$(base64 -w0 .audit/20260929-join-summary.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/research-evidence/p3-confidence-20260929-immutable-join-v2.json?ref=research/p3-confidence-history-audit-v2" --jq .sha 2>/dev/null || true)"
+          args=(--method PUT -f "message=Record verified 9/29 confidence immutable join" -f "content=${content}" -f "branch=research/p3-confidence-history-audit-v2")
+          if [ -n "${existing_sha}" ]; then args+=( -f "sha=${existing_sha}" ); fi
+          gh api "repos/${GITHUB_REPOSITORY}/contents/research-evidence/p3-confidence-20260929-immutable-join-v2.json" "${args[@]}" >/dev/null
 
       - name: Inventory CURRENT P3 immutable historical snapshots
         run: |
