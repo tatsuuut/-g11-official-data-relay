@@ -554,7 +554,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     current_race_fields = (
         "three_engine_score", "three_engine_classification",
         "trifecta_confidence", "special_case_id", "special_strength",
-        "strong_mark", "wild_pack", "abeken_shadow",
+        "strong_mark", "wild_pack", "abeken_shadow", "p3_verification",
     )
     current_live_fields = (
         "trifecta_confidence", "special_case_id",
@@ -566,6 +566,14 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
             continue
         for field in current_race_fields:
             if field in source:
+                if field == "p3_verification" and not (
+                    feed.get("operational_date_jst", "") >= "2026-10-01"
+                    and isinstance(source[field], dict)
+                    and source[field].get("SCHEMA")
+                        == "G11_MASHIRO_P3_INTEGRATED_VERIFICATION_V1"
+                    and source[field].get("RACE_ID") == source.get("key")
+                ):
+                    continue
                 projected[field] = source[field]
                 preserved.add("race." + field)
         source_pre = source.get("predeadline")
