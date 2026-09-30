@@ -1473,7 +1473,8 @@ jobs:
                               "included_in_formal_metrics", "purchase_executed"):
                       if reference.get(key) != prior.get(key):
                           raise SystemExit("NIGHT_REFERENCE_LOCK_CHANGED:" + old["key"])
-                  old["late_reference"] = copy.deepcopy(reference)
+                  if old.get("practical_bets") == new.get("practical_bets"):
+                      old["late_reference"] = copy.deepcopy(reference)
               for field in safe_scalar:
                   if field in old and field in new:
                       old[field] = copy.deepcopy(new[field])
