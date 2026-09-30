@@ -1,0 +1,42 @@
+name: Mashiro dormant P3 special scaffold CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/mashiro-p3-special-scaffold-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout private scaffold branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: research/mashiro-p3-special-main-scaffold-v1
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Compile and test dormant special
+        run: |
+          set -euo pipefail
+          python3 -m py_compile g11/growth_p3/v1_1/special_mashiro_v1.py
+          python3 -m py_compile g11/growth_p3/v1_1/test_special_mashiro_v1.py
+          python3 -m unittest g11.growth_p3.v1_1.test_special_mashiro_v1 -v
+      - name: Prove CURRENT runtime has no Mashiro activation hook
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          runtime=Path("g11/growth_p3/v1_1/current_runtime_v1.py").read_text()
+          special=Path("g11/growth_p3/v1_1/special_mashiro_v1.py").read_text()
+          assert "special_mashiro_v1" not in runtime
+          assert 'PRODUCTION_AUTHORITY=False' in special
+          assert '"ACTIVE":False' in special
+          print("MASHIRO_SPECIAL_DORMANT=PASS")
+          PY
