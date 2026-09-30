@@ -1,0 +1,181 @@
+{
+  "by_date": {
+    "20260930": {
+      "LIVE_3_RAW": 16,
+      "LIVE_5_RAW": 32,
+      "LIVE_7_RAW": 9,
+      "LIVE_8_RAW": 3,
+      "MORNING_3_RAW": 36,
+      "MORNING_5_RAW": 74,
+      "MORNING_7_RAW": 25,
+      "MORNING_8_RAW": 6
+    }
+  },
+  "cache_hit": "false",
+  "cache_saved": false,
+  "confidence_sidecars": [],
+  "date_count": 1,
+  "date_max": "20260930",
+  "date_min": "20260930",
+  "examples": [
+    {
+      "bet_sha": "036361d156e5f8a9b653b9e5d8180605557c42d8561fb361ff21a2919bef2512",
+      "embedded_confidence": true,
+      "name": "current-growth-p3-20260930-02-01",
+      "points": 5,
+      "prediction_at": "2026-09-30T09:02:08+09:00",
+      "race": "20260930-02-01",
+      "raw": 0.09028020836941114,
+      "snapshot": "MORNING",
+      "snapshot_sha256": "9d2fa0e1de0485a3bd868db6fff50cb42a3752a8e78d4d0bae85412237c7a469",
+      "stage": "morning"
+    },
+    {
+      "bet_sha": "9a95d439762ee64e32efc541cf01b521c8e5c148e27e1511fd302db9dec92554",
+      "embedded_confidence": true,
+      "name": "current-growth-p3-20260930-02-02",
+      "points": 5,
+      "prediction_at": "2026-09-30T09:02:08+09:00",
+      "race": "20260930-02-02",
+      "raw": 0.09944050632887372,
+      "snapshot": "MORNING",
+      "snapshot_sha256": "f1397793f26dfd082ec964ca39afbc40b7427d7190837e889b6e6f800aed5d88",
+      "stage": "morning"
+    },
+    {
+      "bet_sha": "ec4b3b19a10dc769f43c65ad8e6d3b3773b03f8abdb88d000ea6f6b2efaeb28f",
+      "embedded_confidence": true,
+      "name": "current-growth-p3-20260930-02-03",
+      "points": 5,
+      "prediction_at": "2026-09-30T09:02:08+09:00",
+      "race": "20260930-02-03",
+      "raw": 0.08710145892837681,
+      "snapshot": "MORNING",
+      "snapshot_sha256": "3ead3b1abc16615f31203a440e474a99a681c10b9ae6beabb13d957bfdf42953",
+      "stage": "morning"
+    },
+    {
+      "bet_sha": "5664c2d562ead5c6501cb79f945b3e5cb9990f73992aab29a6ab917d42d6ee5a",
+      "embedded_confidence": true,
+      "name": "current-growth-p3-20260930-02-04",
+      "points": 8,
+      "prediction_at": "2026-09-30T09:02:08+09:00",
+      "race": "20260930-02-04",
+      "raw": 0.10073278893234418,
+      "snapshot": "MORNING",
+      "snapshot_sha256": "6f42111ec15d84fda91c998251a10e504eeb853d10c06d4ffcafad99cfe528bb",
+      "stage": "morning"
+    },
+    {
+      "bet_sha": "f3e45ada6459f67bc1ce45725668980b6d38ac683df3da6c1dd0fbf4932e28f1",
+      "embedded_confidence": true,
+      "name": "current-growth-p3-20260930-02-05",
+      "points": 5,
+      "prediction_at": "2026-09-30T09:02:08+09:00",
+      "race": "20260930-02-05",
+      "raw": 0.07805220555021262,
+      "snapshot": "MORNING",
+      "snapshot_sha256": "61e6a34a06c33902529e0d9efc966aa13fcdc8d2043388321eda438f60aad22c",
+      "stage": "morning"
+    },
+    {
+      "bet_sha": "ec98332f383b28a697be1b1293084ca0e7a29ac553755aa044291e5a1b99fa1b",
+      "embedded_confidence": true,
+      "name": "current-growth-p3-20260930-02-06",
+      "points": 5,
+      "prediction_at": "2026-09-30T09:02:08+09:00",
+      "race": "20260930-02-06",
+      "raw": 0.07588691441156253,
+      "snapshot": "MORNING",
+      "snapshot_sha256": "935da8bd4d3a3b6d2c0f58556f693f2456ccf3129564db88dc0c8c2ce9e9a813",
+      "stage": "morning"
+    },
+    {
+      "bet_sha": "261db32785412058624994474159f518abb7cb9e1c9280d372e4121d1e1ac813",
+      "embedded_confidence": true,
+      "name": "current-growth-p3-20260930-02-07",
+      "points": 3,
+      "prediction_at": "2026-09-30T09:02:08+09:00",
+      "race": "20260930-02-07",
+      "raw": 0.06625787996549379,
+      "snapshot": "MORNING",
+      "snapshot_sha256": "4822d966a0b60915a94b19fbbda6ab6392829e7133951cefe67d919be81a2229",
+      "stage": "morning"
+    },
+    {
+      "bet_sha": "7f63aedd5ab1ac0dfdc73f0b7de5212022f90b957b8973b8c851f32a0967c887",
+      "embedded_confidence": true,
+      "name": "current-growth-p3-20260930-02-08",
+      "points": 3,
+      "prediction_at": "2026-09-30T09:02:08+09:00",
+      "race": "20260930-02-08",
+      "raw": 0.05420182448260249,
+      "snapshot": "MORNING",
+      "snapshot_sha256": "1c9acba5c9616cc2bc0c1b3aa1f43a6eb29801901525410c40e1d0a0f6dcfcb9",
+      "stage": "morning"
+    }
+  ],
+  "malformed_json": 0,
+  "night_payload_counts": {},
+  "observed_at_utc": "2026-09-30T05:05:41+00:00",
+  "p3_counts": [
+    {
+      "confidence": "EMBEDDED",
+      "n": 16,
+      "points": 3,
+      "snapshot": "LIVE"
+    },
+    {
+      "confidence": "EMBEDDED",
+      "n": 32,
+      "points": 5,
+      "snapshot": "LIVE"
+    },
+    {
+      "confidence": "EMBEDDED",
+      "n": 9,
+      "points": 7,
+      "snapshot": "LIVE"
+    },
+    {
+      "confidence": "EMBEDDED",
+      "n": 3,
+      "points": 8,
+      "snapshot": "LIVE"
+    },
+    {
+      "confidence": "EMBEDDED",
+      "n": 36,
+      "points": 3,
+      "snapshot": "MORNING"
+    },
+    {
+      "confidence": "EMBEDDED",
+      "n": 74,
+      "points": 5,
+      "snapshot": "MORNING"
+    },
+    {
+      "confidence": "EMBEDDED",
+      "n": 25,
+      "points": 7,
+      "snapshot": "MORNING"
+    },
+    {
+      "confidence": "EMBEDDED",
+      "n": 6,
+      "points": 8,
+      "snapshot": "MORNING"
+    }
+  ],
+  "production_mutated": false,
+  "restored_cache_key": "confidence-audit-never-written-36671811656",
+  "schema": "G11_P3_CONFIDENCE_IMMUTABLE_STORE_INVENTORY_V2",
+  "snapshot_files": {
+    "morning": 425,
+    "night": 0,
+    "predeadline": 305
+  },
+  "snapshot_root": ".audit/state/rescue/store/snapshots",
+  "verified_envelope_shape": 730
+}
