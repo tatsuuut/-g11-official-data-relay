@@ -28,7 +28,10 @@ jobs:
           set -euo pipefail
           python3 -m py_compile g11/research/mashiro_giant_kill/v1/type_definition_v2.py
           python3 -m py_compile g11/research/mashiro_giant_kill/v1/test_type_definition_v2.py
+          python3 -m py_compile g11/research/mashiro_giant_kill/v1/opportunity_trigger_v3.py
+          python3 -m py_compile g11/research/mashiro_giant_kill/v1/test_opportunity_trigger_v3.py
           python3 -m unittest g11.research.mashiro_giant_kill.v1.test_type_definition_v2 -v
+          python3 -m unittest g11.research.mashiro_giant_kill.v1.test_opportunity_trigger_v3 -v
       - name: Run real 19-vs-35 contrast
         run: |
           set -euo pipefail
@@ -48,5 +51,29 @@ jobs:
           print(json.dumps({
             "COMPONENTS":v["DESCRIPTIVE_COMPONENT_CANDIDATES"],
             "COMPARISONS":v["COMPARISONS"],
+          },ensure_ascii=False,sort_keys=True))
+          PY
+      - name: Run real 434-opportunity V3 trigger split
+        run: |
+          set -euo pipefail
+          python3 -m g11.research.mashiro_giant_kill.v1.opportunity_trigger_v3 \
+            --input docs/research/evidence/g11-mashiro-giant-kill-v1-independent-holdout.json \
+            --output /tmp/mashiro-v3.json | tee /tmp/mashiro-v3-summary.txt
+          python3 - <<'PY'
+          import json
+          v=json.load(open("/tmp/mashiro-v3.json"))
+          assert v["TOTAL_OPPORTUNITIES"]==434
+          assert v["TOTAL_HITS"]==22
+          assert v["SPLIT_POLICY"]["RESULT_LABEL_USED_TO_CHOOSE_SPLIT"] is False
+          assert v["PRODUCTION_MUTATED"] is False
+          assert v["PREDICTION_MUTATED"] is False
+          assert v["BET_MUTATED"] is False
+          assert v["FEED_MUTATED"] is False
+          print(json.dumps({
+            "SPLIT":v["SPLIT_POLICY"],
+            "THRESHOLDS":v["DEVELOPMENT_MEDIAN_THRESHOLDS"],
+            "SIGNALS":v["REPLICATED_DIRECTIONAL_SIGNALS"],
+            "MULTIPLICITY":v["MULTIPLICITY_005_SIGNALS"],
+            "CONTRASTS":v["CONTRASTS"],
           },ensure_ascii=False,sort_keys=True))
           PY
