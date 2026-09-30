@@ -44,8 +44,6 @@ concurrency:
 
 jobs:
   run-private-runtime:
-    # Job names identify the active LIVE continuation in the jobs API. A
-    # repair or diagnostic dispatch has the ordinary runtime name instead.
     name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || 'runtime' }}
     if: >-
       github.repository_id == '1367703708' &&
@@ -388,10 +386,6 @@ jobs:
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
 
-          # WILD runtime inference is used after the morning admission is
-          # already present too.  Do not key CatBoost installation to missing
-          # artifacts: PREDEADLINE and NIGHT can still load CURRENT .cbm
-          # models. Verify the exact interpreter that later executes relay.v1.
           if [ "${{ steps.due.outputs.phase }}" != "dry-run" ]; then
             if ! python3 -c 'import catboost' >/dev/null 2>&1; then
               python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
@@ -575,9 +569,6 @@ jobs:
             python3 -m unittest "${module}"
           done
 
-          # PREDEADLINE feed is also WILD4 training-food infrastructure.
-          # Keep the widened incomplete-HTML retry policy under focused CI
-          # without running the entire canonical suite every two minutes.
           python3 -m unittest \
             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_urls_and_dynamic_budget_cover_168_races \
             g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_bootstrap_scope_is_sealed_from_b_cardinality \
@@ -1473,7 +1464,14 @@ jobs:
                               "included_in_formal_metrics", "purchase_executed"):
                       if reference.get(key) != prior.get(key):
                           raise SystemExit("NIGHT_REFERENCE_LOCK_CHANGED:" + old["key"])
-                  if old.get("practical_bets") == new.get("practical_bets"):
+                  finance = reference.get("reference_finance")
+                  bets = old.get("practical_bets")
+                  paid = {item["trifecta"]: item["payout"] for item in old["result_meta"]["trifecta_settlements"]}
+                  if (isinstance(bets, list) and bets == new.get("practical_bets")
+                          and isinstance(finance, dict) and finance.get("gross_stake") == len(bets) * 100
+                          and finance.get("prize_return") == sum(paid.get(bet, 0) for bet in bets)
+                          and reference.get("reference_practical_hit") == any(bet in paid for bet in bets)
+                          and reference.get("reference_validation_hit") == any(bet in paid for bet in reference.get("validation_bets", []))):
                       old["late_reference"] = copy.deepcopy(reference)
               for field in safe_scalar:
                   if field in old and field in new:
