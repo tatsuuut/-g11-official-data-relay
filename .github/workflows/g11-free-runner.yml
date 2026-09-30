@@ -868,6 +868,7 @@ jobs:
           set -euo pipefail
           # Preserve already-accepted immutable race snapshots.
           if curl --fail-with-body --silent --show-error --location \
+            --retry 3 --retry-delay 2 \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
             -o .relay-output/stored-feed.json; then
             # Load only the verified immutable CURRENT P3 morning eight-ticket lock.
@@ -1097,6 +1098,18 @@ jobs:
               | .counts.value_alert_count = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.value_alert == true)] | length)
             ' "${FEED}" > .relay-output/feed-reconciled.json
             mv .relay-output/feed-reconciled.json "${FEED}"
+          fi
+
+          # A same-day rescue must project onto the already accepted Site
+          # schema. A transient readback error cannot authorize yesterday's
+          # schema or publishing an unprojected rescue feed.
+          if jq -e '.SNAPSHOT_CLASS=="TODAY_ONLY_RESCUE_PREDEADLINE"' "${FEED}" >/dev/null; then
+            if ! jq -e --arg day "${OPERATIONAL_DATE}" \
+              '.operational_date_jst==$day and (.races|type)=="array" and (.races|length)>0' \
+              .relay-output/stored-feed.json >/dev/null 2>&1; then
+              echo 'G11_RESCUE_ACCEPTED_FEED_READBACK_REQUIRED' >&2
+              exit 1
+            fi
           fi
 
           if [ "${RELAY_PHASE}" = "night" ] && \
