@@ -775,6 +775,89 @@ def special_eight_site_compat(feed_path: pathlib.Path) -> int:
     print("G11_SITE_SPECIAL8_CANONICAL=" + json.dumps(verified, ensure_ascii=False, sort_keys=True))
     return 0
 
+def project_rescue_stored_schema(feed_path: pathlib.Path, stored_path: pathlib.Path) -> int:
+    """Carry timely rescue LIVE locks in the accepted same-day Site shape."""
+    import copy
+    from datetime import datetime
+    import hashlib
+    import json
+    from pathlib import Path
+
+    path = feed_path
+    incoming = json.loads(path.read_text(encoding="utf-8"))
+    stored = json.loads(stored_path.read_text(encoding="utf-8"))
+    day = "2026-09-30"
+    if (incoming.get("operational_date_jst") != day or stored.get("operational_date_jst") != day
+            or incoming.get("stage") != "PREDEADLINE" or stored.get("stage") != "PREDEADLINE"
+            or incoming.get("SNAPSHOT_CLASS") != "TODAY_ONLY_RESCUE_PREDEADLINE"
+            or incoming.get("CANONICAL_MORNING_PROMOTED") is not False
+            or incoming.get("RESEARCH_ELIGIBLE_AS_MORNING") is not False):
+        raise SystemExit("RESCUE_STORED_SCHEMA_BOUNDARY")
+    current = {row["key"]: row for row in incoming["races"]}
+    prior = {row["key"]: row for row in stored["races"]}
+    if len(current) != 144 or len(prior) != 144 or set(current) != set(prior):
+        raise SystemExit("RESCUE_STORED_SCHEMA_RACE_SET")
+    out = copy.deepcopy(stored)
+    out["source"] = copy.deepcopy(incoming["source"])
+    out["generated_at_jst"] = incoming["generated_at_jst"]
+    accepted_pre = next((row["predeadline"] for row in stored["races"]
+                         if isinstance(row.get("predeadline"), dict)), None)
+    if accepted_pre is None:
+        raise SystemExit("RESCUE_STORED_SCHEMA_NO_ACCEPTED_LIVE")
+    added = []
+    locked = []
+    for row in out["races"]:
+        new = current[row["key"]]
+        proof = new.get("today_rescue")
+        if not isinstance(proof, dict) or proof.get("snapshot_class") != "TODAY_ONLY_RESCUE_PREDEADLINE":
+            raise SystemExit("RESCUE_TRANSPORT_PROOF_MISSING:" + row["key"])
+        for field in ("p3_snapshot_sha256", "practical_bets", "p3_production_bets", "production_points"):
+            if row.get(field) != new.get(field):
+                raise SystemExit("RESCUE_TRANSPORT_P3_LOCK_CHANGED:" + row["key"])
+        pre = new.get("predeadline")
+        previous = row.get("predeadline")
+        if isinstance(previous, dict):
+            if (not isinstance(pre, dict) or
+                any(previous.get(field) != pre.get(field) for field in
+                    ("snapshot_sha256", "captured_at_jst", "practical_bets", "production_points"))):
+                raise SystemExit("RESCUE_TRANSPORT_LIVE_LOCK_CHANGED:" + row["key"])
+            continue
+        if not isinstance(pre, dict):
+            continue
+        deadline = datetime.fromisoformat(row["deadline_jst"])
+        lock = proof.get("locked_at_jst")
+        if (proof.get("status") != "LOCKED" or pre.get("status") != "READY"
+                or proof.get("p3_snapshot_sha256") != pre.get("snapshot_sha256")
+                or not isinstance(lock, str) or datetime.fromisoformat(lock) >= deadline
+                or datetime.fromisoformat(pre["captured_at_jst"]) >= deadline
+                or datetime.fromisoformat(pre["odds_captured_at_jst"]) >= deadline
+                or row.get("result_trifecta") is not None or row.get("research_eligible") is not False
+                or set(pre) != set(accepted_pre)
+                or set(pre["trifecta_confidence"]) != set(accepted_pre["trifecta_confidence"])):
+            raise SystemExit("RESCUE_TRANSPORT_LIVE_PROOF_INVALID:" + row["key"])
+        row["predeadline"] = copy.deepcopy(pre)
+        for field in ("best_ev", "best_ev_bet", "value_bets", "odds_captured_at_jst"):
+            row[field] = copy.deepcopy(pre[field])
+        row["odds_merit"] = pre["legacy_odds_merit"]
+        added.append(row["key"])
+        locked.append({"key": row["key"], "snapshot_sha256": pre["snapshot_sha256"], "locked_at_jst": lock})
+    if (set(out) != set(stored) or
+        any(set(row) != set(prior[row["key"]]) for row in out["races"])):
+        raise SystemExit("RESCUE_STORED_SCHEMA_KEYSET_CHANGED")
+    payload = json.dumps(out, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    path.write_text(payload, encoding="utf-8")
+    print("G11_RESCUE_STORED_SCHEMA_TRANSPORT=" + json.dumps({
+        "day": day, "race_count": 144, "new_live_locks": added,
+        "locked_proof": locked, "today_rescue_published": 0,
+        "canonical_morning_promoted": False, "result_leakage": 0,
+        "raw_bytes": len(payload.encode("utf-8")),
+        "evidence_sha256": hashlib.sha256(json.dumps(
+            [current[key]["today_rescue"] for key in sorted(current)],
+            ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest(),
+    }, ensure_ascii=False, sort_keys=True))
+    return 0
+
 def fail(message: str) -> None:
     raise SystemExit(f"PUBLIC_SURFACE_AUDIT_FAIL: {message}")
 
@@ -814,6 +897,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "project-rescue-stored-schema":
+        sys.exit(project_rescue_stored_schema(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])))
     if len(sys.argv) == 4 and sys.argv[1] == "project-feed-schema":
         sys.exit(project_feed_schema(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])))
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
