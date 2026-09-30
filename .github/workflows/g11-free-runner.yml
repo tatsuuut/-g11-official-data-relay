@@ -59,7 +59,6 @@ jobs:
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
       inputs.phase != 'repair-20260928' &&
-      !contains(github.event.head_commit.message || '', '[confidence-audit-only]') &&
       vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
