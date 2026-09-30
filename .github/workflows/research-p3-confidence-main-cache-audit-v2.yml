@@ -63,7 +63,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-20-35518938053
+          key: confidence-audit-2026-09-20-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-20-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-20 state if present
@@ -96,7 +98,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-21-35610408491
+          key: confidence-audit-2026-09-21-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-21-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-21 state if present
@@ -129,7 +133,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-22-35812512914
+          key: confidence-audit-2026-09-22-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-22-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-22 state if present
@@ -162,7 +168,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-23-35865334059
+          key: confidence-audit-2026-09-23-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-23-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-23 state if present
@@ -195,7 +203,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-24-36010403940
+          key: confidence-audit-2026-09-24-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-24-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-24 state if present
@@ -228,7 +238,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-25-36144427920
+          key: confidence-audit-2026-09-25-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-25-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-25 state if present
@@ -261,7 +273,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-26-36296643571
+          key: confidence-audit-2026-09-26-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-26-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-26 state if present
@@ -294,7 +308,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-27-36306161358
+          key: confidence-audit-2026-09-27-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-27-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-27 state if present
@@ -327,7 +343,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-28-36437392793
+          key: confidence-audit-2026-09-28-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-28-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-28 state if present
@@ -360,7 +378,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-09-29-36576576405
+          key: confidence-audit-2026-09-29-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-09-29-
           fail-on-cache-miss: false
 
       - name: Extract 2026-09-29 state if present
