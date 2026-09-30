@@ -1,0 +1,35 @@
+name: focused P3 confidence evidence CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/p3-confidence-evidence-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: contains(github.event.head_commit.message || '', '[confidence-audit-only]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout private source main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Compile confidence evidence path
+        run: |
+          set -euo pipefail
+          python3 -m py_compile g11/growth_p3/v1_1/confidence_daily_evidence_v1.py
+          python3 -m py_compile g11/canonical/official_pipeline.py
+          python3 -m py_compile g11/canonical/test_p3_confidence_daily_evidence.py
+      - name: Run focused confidence evidence tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest g11.canonical.test_p3_confidence_daily_evidence -v
