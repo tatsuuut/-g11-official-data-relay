@@ -1,0 +1,44 @@
+name: Mashiro V4 prospective runtime CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/mashiro-v4-prospective-runtime-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout private prospective branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: research/mashiro-v4-prospective-runtime-20261001
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Compile and run prospective runtime tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile g11/growth_p3/v1_1/mashiro_v4_shadow_v1.py
+          python3 -m py_compile g11/growth_p3/v1_1/mashiro_v4_runtime_adapter_v1.py
+          python3 -m py_compile g11/growth_p3/v1_1/test_mashiro_v4_runtime_adapter_v1.py
+          python3 -m unittest g11.growth_p3.v1_1.test_mashiro_v4_runtime_adapter_v1 -v
+      - name: Prove 9/30 cannot enter prospective cohort
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from datetime import date
+          from g11.growth_p3.v1_1 import mashiro_v4_runtime_adapter_v1 as A
+          class Dummy:
+              root=None
+          v=A.collect_predeadline(Dummy(),date(2026,9,30))
+          assert v["STATUS"]=="BEFORE_PROSPECTIVE_START"
+          assert v["COUNT"]==0
+          print("MASHIRO_V4_20260930_EXCLUDED=PASS")
+          PY
