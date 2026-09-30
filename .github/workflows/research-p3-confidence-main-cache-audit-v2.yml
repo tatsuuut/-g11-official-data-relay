@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - .github/workflows/research-p3-confidence-history-audit-v2.yml
+      - .github/workflows/research-p3-confidence-main-cache-audit-v2.yml
   workflow_dispatch:
 
 permissions:
