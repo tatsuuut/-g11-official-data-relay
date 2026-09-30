@@ -2035,6 +2035,110 @@ jobs:
 
 # operator-night-current-20260928
 
+  audit-20260929-final-display-readback:
+    name: Audit 2026-09-29 deployed FINAL display
+    needs: run-private-runtime
+    if: >-
+      always() &&
+      github.repository_id == '1367703708' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      contains(github.event.head_commit.message, '[night-20260929]') &&
+      vars.G11_RELAY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Capture deployed 9/29 Site readback
+        run: |
+          set -euo pipefail
+          mkdir -p .evidence
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-29" \
+            --dump-header .evidence/readback.headers \
+            --output .evidence/readback.json
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          feed = json.loads(Path(".evidence/readback.json").read_text(encoding="utf-8"))
+          races = feed.get("races", [])
+          settled_statuses = {"ESTABLISHED", "TRIFECTA_NOT_ESTABLISHED"}
+          by_race = {}
+          for race in races:
+              key = race.get("key")
+              scores = race.get("three_engine_score") if isinstance(race.get("three_engine_score"), dict) else {}
+              by_race[key] = {
+                  "result_trifecta": race.get("result_trifecta"),
+                  "result_status": (race.get("result_meta") or {}).get("result_status"),
+                  "three_engine_classification": race.get("three_engine_classification"),
+                  "three_engine_outcomes": {
+                      name: {
+                          "status": value.get("status"),
+                          "trifecta_hit": value.get("trifecta_hit"),
+                          "head_hit": value.get("head_hit"),
+                      }
+                      for name, value in scores.items() if isinstance(value, dict)
+                  },
+              }
+          result_statuses = [
+              (race.get("result_meta") or {}).get("result_status")
+              for race in races
+          ]
+          comparison = feed.get("three_engine_comparison")
+          final = feed.get("final_accounting")
+          evidence = {
+              "schema": "G11_SITE_FINAL_DISPLAY_READBACK_EVIDENCE_V1",
+              "observed_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+              "source_trigger_sha": os.environ.get("GITHUB_SHA"),
+              "operational_date_jst": feed.get("operational_date_jst"),
+              "stage": feed.get("stage"),
+              "status": feed.get("status"),
+              "race_count": len(races),
+              "settled_result_count": sum(status in settled_statuses for status in result_statuses),
+              "pending_result_count": sum(status not in settled_statuses for status in result_statuses),
+              "counts": feed.get("counts"),
+              "three_engine_comparison": comparison,
+              "final_accounting_summary": None if not isinstance(final, dict) else {
+                  "status": final.get("status"),
+                  "engines": final.get("engines"),
+                  "classifications": final.get("classifications"),
+                  "source_counts": final.get("source_counts"),
+              },
+              "by_race": by_race,
+          }
+          Path(".evidence/2026-09-29-final-display.json").write_text(
+              json.dumps(evidence, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Persist bounded readback evidence
+        env:
+          EVIDENCE_PATH: readback-evidence/2026-09-29-final-display.json
+        run: |
+          set -euo pipefail
+          content="$(base64 -w0 .evidence/2026-09-29-final-display.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}?ref=${GITHUB_REF_NAME}" --jq .sha 2>/dev/null || true)"
+          args=(
+            --method PUT
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+            -f "message=Record bounded 2026-09-29 FINAL Site readback"
+            -f "content=${content}"
+            -f "branch=${GITHUB_REF_NAME}"
+          )
+          if [ -n "${existing_sha}" ]; then
+            args+=( -f "sha=${existing_sha}" )
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}" "${args[@]}" >/dev/null
+
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
     if: >-
