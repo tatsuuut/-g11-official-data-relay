@@ -26,6 +26,21 @@ def decision(result: dict, operational_date: date, now: datetime) -> str:
         return "HANDOFF"
     if status in {"NIGHT_WAITING_OFFICIAL_RESULTS", "NIGHT_RESULTS_COMPLETE"}:
         return "STOP_NIGHT"
+    if status == "SAME_DAY_RESCUE_COMPLETE":
+        if (
+            result.get("PHASE") != "PREDEADLINE_RESCUE"
+            or result.get("OPERATIONAL_DATE_JST") != operational_date.isoformat()
+            or result.get("CANONICAL_MORNING_PROMOTED") is not False
+            or result.get("NIGHT_RESEARCH_CONNECTED") is not False
+        ):
+            raise ValueError("HEARTBEAT_RESCUE_BINDING_INVALID")
+        raw = result.get("LAST_RACE_DEADLINE_JST")
+        if not isinstance(raw, str):
+            raise ValueError("HEARTBEAT_RESCUE_DEADLINE_MISSING")
+        deadline = datetime.fromisoformat(raw)
+        if deadline.utcoffset() != timedelta(hours=9) or deadline.date() != operational_date:
+            raise ValueError("HEARTBEAT_RESCUE_DEADLINE_INVALID")
+        return "RESCUE_HANDOFF" if now >= deadline else "CONTINUE"
     if operational_date < EFFECTIVE_FROM:
         return "STOP_LEGACY" if now.date() != operational_date or now.time() >= time(20, 50) else "CONTINUE"
     if now.date() not in {operational_date, operational_date + timedelta(days=1)}:
