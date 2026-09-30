@@ -25,6 +25,16 @@ jobs:
       - name: Prepare read-only audit workspace
         run: mkdir -p .audit/states .relay-cache
 
+      - name: Record audit start on research branch
+        run: |
+          set -euo pipefail
+          printf '{"status":"STARTED","run_id":"%s","sha":"%s"}\n' "${GITHUB_RUN_ID}" "${GITHUB_SHA}" > /tmp/confidence-audit-start.json
+          content="$(base64 -w0 /tmp/confidence-audit-start.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/research-evidence/p3-confidence-main-cache-audit-start.json?ref=research/p3-confidence-history-audit-v2" --jq .sha 2>/dev/null || true)"
+          args=(--method PUT -f "message=Record confidence audit start" -f "content=${content}" -f "branch=research/p3-confidence-history-audit-v2")
+          if [ -n "${existing_sha}" ]; then args+=( -f "sha=${existing_sha}" ); fi
+          gh api "repos/${GITHUB_REPOSITORY}/contents/research-evidence/p3-confidence-main-cache-audit-start.json" "${args[@]}" >/dev/null
+
       - name: Restore 2026-09-20 encrypted state
         id: cache0
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
