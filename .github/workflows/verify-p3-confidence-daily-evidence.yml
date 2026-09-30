@@ -32,3 +32,5 @@ jobs:
         run: |
           cd private-src
           python3 -m unittest g11.canonical.test_p3_confidence_daily_evidence -v
+          python3 -m unittest g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_night_partial_http_200_is_rejected_then_full_k_can_retry -v
+          python3 -m unittest g11.canonical.test_official_pipeline.CanonicalOfficialPipelineTests.test_permanent_daily_history_restore_audit_rehashes_all_layers -v
