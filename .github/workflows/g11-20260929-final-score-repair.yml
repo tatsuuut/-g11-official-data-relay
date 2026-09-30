@@ -1,0 +1,179 @@
+name: repair 2026-09-29 three-engine FINAL score
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/g11-20260929-final-score-repair.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
+      G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Read accepted 9/29 Site feed
+        run: |
+          set -euo pipefail
+          mkdir -p .repair
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-29" \
+            --dump-header .repair/before.headers \
+            --output .repair/before.json
+          jq -e '
+            .operational_date_jst == "2026-09-29"
+            and .stage == "NIGHT"
+            and .status == "PASS"
+            and .counts.races == 144
+            and .counts.results == 144
+            and .counts.pending == 0
+            and ([.races[] | select(.result_meta.result_status == "ESTABLISHED"
+                  or .result_meta.result_status == "TRIFECTA_NOT_ESTABLISHED")] | length) == 144
+          ' .repair/before.json >/dev/null
+
+      - name: Recompute result-only three-engine FINAL scores
+        run: |
+          set -euo pipefail
+          python3 scripts/repair_20260929_three_engine_final.py \
+            .repair/before.json .repair/overlay.json
+          jq -e '
+            .three_engine_comparison.status == "SCORED"
+            and .three_engine_comparison.classifications.PENDING == 0
+            and (.three_engine_comparison.engines
+                 | all(.settled_races == 144))
+            and ([.races[] | select(.three_engine_classification == "PENDING")] | length) == 0
+            and ([.races[] | select(
+              (.three_engine_score.p3.trifecta_hit | type) != "boolean"
+              or (.three_engine_score.true_ai.trifecta_hit | type) != "boolean"
+              or (.three_engine_score.abeken.trifecta_hit | type) != "boolean"
+            )] | length) == 0
+          ' .repair/overlay.json >/dev/null
+
+      - name: Publish result-only overlay
+        id: publish
+        run: |
+          set -euo pipefail
+          oidc="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            -H 'Accept: application/json' \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
+          token="$(printf '%s' "${oidc}" | jq -er '.value')"
+          sha="$(sha256sum .repair/overlay.json | cut -d' ' -f1)"
+          status="$(curl --silent --show-error --location \
+            -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Content-Type: application/json' \
+            -H "x-g11-feed-sha256: ${sha}" \
+            --data-binary @.repair/overlay.json \
+            --output .repair/publish-response.json \
+            --write-out '%{http_code}')"
+          printf 'http_status=%s\n' "${status}" >> "${GITHUB_OUTPUT}"
+          printf 'overlay_sha=%s\n' "${sha}" >> "${GITHUB_OUTPUT}"
+          echo "G11_20260929_FINAL_REPAIR_HTTP=${status}"
+          if [[ ! "${status}" =~ ^2[0-9][0-9]$ ]]; then
+            cat .repair/publish-response.json
+            exit 1
+          fi
+
+      - name: Verify exact deployed readback
+        if: steps.publish.outcome == 'success'
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=2026-09-29" \
+            --dump-header .repair/after.headers \
+            --output .repair/after.json
+          cmp .repair/overlay.json .repair/after.json
+          jq -e '
+            .stage == "NIGHT"
+            and .counts.races == 144
+            and .counts.results == 144
+            and .counts.pending == 0
+            and .three_engine_comparison.status == "SCORED"
+            and .three_engine_comparison.classifications.PENDING == 0
+            and (.three_engine_comparison.engines | all(.settled_races == 144))
+            and ([.races[] | select(.three_engine_classification == "PENDING")] | length) == 0
+          ' .repair/after.json >/dev/null
+          echo "G11_20260929_FINAL_SCORE_READBACK=PASS"
+
+      - name: Persist repair evidence
+        if: always()
+        env:
+          EVIDENCE_PATH: readback-evidence/2026-09-29-final-score-repair.json
+          HTTP_STATUS: ${{ steps.publish.outputs.http_status }}
+          OVERLAY_SHA: ${{ steps.publish.outputs.overlay_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          def load(path):
+              p=Path(path)
+              if not p.is_file():
+                  return None
+              try:
+                  return json.loads(p.read_text(encoding="utf-8"))
+              except Exception:
+                  return {"raw": p.read_text(encoding="utf-8", errors="replace")[:4000]}
+
+          before=load(".repair/before.json")
+          overlay=load(".repair/overlay.json")
+          after=load(".repair/after.json")
+          response=load(".repair/publish-response.json")
+          source=after or overlay or before or {}
+          races=source.get("races", []) if isinstance(source, dict) else []
+          comparison=source.get("three_engine_comparison") if isinstance(source, dict) else None
+          evidence={
+              "schema":"G11_20260929_FINAL_SCORE_REPAIR_EVIDENCE_V1",
+              "observed_at_utc":datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+              "trigger_sha":os.environ.get("GITHUB_SHA"),
+              "http_status":os.environ.get("HTTP_STATUS") or None,
+              "overlay_sha256":os.environ.get("OVERLAY_SHA") or None,
+              "publish_response":response,
+              "readback_present":after is not None,
+              "operational_date_jst":source.get("operational_date_jst") if isinstance(source,dict) else None,
+              "stage":source.get("stage") if isinstance(source,dict) else None,
+              "counts":source.get("counts") if isinstance(source,dict) else None,
+              "three_engine_comparison":comparison,
+              "pending_three_engine_races":sum(
+                  1 for row in races if row.get("three_engine_classification") == "PENDING"
+              ),
+              "sample": None if not races else {
+                  "key":races[0].get("key"),
+                  "result_trifecta":races[0].get("result_trifecta"),
+                  "classification":races[0].get("three_engine_classification"),
+                  "score":races[0].get("three_engine_score"),
+              },
+          }
+          Path(".repair/evidence.json").write_text(
+              json.dumps(evidence, ensure_ascii=False, sort_keys=True, indent=2)+"\n",
+              encoding="utf-8",
+          )
+          PY
+          content="$(base64 -w0 .repair/evidence.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}?ref=${GITHUB_REF_NAME}" --jq .sha 2>/dev/null || true)"
+          args=(
+            --method PUT
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+            -f "message=Record 2026-09-29 FINAL score repair evidence"
+            -f "content=${content}"
+            -f "branch=${GITHUB_REF_NAME}"
+          )
+          if [ -n "${existing_sha}" ]; then args+=( -f "sha=${existing_sha}" ); fi
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}" "${args[@]}" >/dev/null
