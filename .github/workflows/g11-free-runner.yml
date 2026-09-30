@@ -1,5 +1,4 @@
 name: runtime sync
-# 2026-09-30: bounded 9/29 FINAL display readback retry; no prediction mutation.
 run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
 
 on:
@@ -1465,16 +1464,6 @@ jobs:
                       if key in new:
                           old[key] = copy.deepcopy(new[key])
 
-          # NIGHT-only result aggregates may already exist in the accepted
-          # Site schema. Refresh those result-side values without adding new
-          # schema keys or touching any prediction/LOCK field.
-          if isinstance(out.get("three_engine_comparison"), dict) and isinstance(incoming.get("three_engine_comparison"), dict):
-              old_cmp = out["three_engine_comparison"]
-              new_cmp = incoming["three_engine_comparison"]
-              for key in list(old_cmp):
-                  if key in new_cmp:
-                      old_cmp[key] = copy.deepcopy(new_cmp[key])
-
           if isinstance(out.get("final_accounting"), dict) and isinstance(incoming.get("final_accounting"), dict):
               old_final = out["final_accounting"]
               new_final = incoming["final_accounting"]
@@ -1485,15 +1474,10 @@ jobs:
           safe_scalar = {
               "result_trifecta", "payout", "practical_hit", "validation_hit",
               "miss_classification", "research_decision",
-              "three_engine_classification",
           }
           safe_dict = {
               "research_finance", "actual_purchase", "result_meta",
-              "three_engine_score",
           }
-          # Stored-schema NIGHT repair must be allowed to carry the already
-          # accepted per-engine result fields. It never creates prediction
-          # keys and never changes any locked bet.
           for old in out["races"]:
               new = incoming_by_key[old["key"]]
               for field in safe_scalar:
@@ -1504,8 +1488,6 @@ jobs:
                       for key in list(old[field]):
                           if key in new[field]:
                               old[field][key] = copy.deepcopy(new[field][key])
-              # These official settlement fields are absent before NIGHT.
-              # Add them from the verified result without touching locks.
               if isinstance(old.get("result_meta"), dict) and isinstance(new.get("result_meta"), dict):
                   for key in ("result_status", "dead_heat", "trifecta_settlements"):
                       if key in new["result_meta"]:
@@ -1524,27 +1506,20 @@ jobs:
           ):
               raise SystemExit("NIGHT_STORED_SCHEMA_NOT_COMPLETE")
 
-          # The accepted PRE_RACE Site shape can carry stale PREDICTIONS_ONLY
-          # comparison values even after official NIGHT settlements are added.
-          # Recompute only the read-model score fields from the already locked
-          # prediction surfaces plus the official result metadata. No engine is
-          # invoked and no prediction/bet/LOCK field is changed.
-          stable_before = copy.deepcopy(out)
-          stable_before.pop("three_engine_comparison", None)
-          for row in stable_before["races"]:
-              row.pop("three_engine_score", None)
-              row.pop("three_engine_classification", None)
+          def stable(value):
+              value = copy.deepcopy(value)
+              value.pop("three_engine_comparison", None)
+              for row in value["races"]:
+                  row.pop("three_engine_score", None)
+                  row.pop("three_engine_classification", None)
+              return value
+          stable_before = stable(out)
           sys.path.insert(0, str(Path(".g11-private").resolve()))
           from g11.canonical import public_app_feed as _g11_feed
           out["three_engine_comparison"] = _g11_feed._attach_three_engine_comparison(
               out["races"], out.get("true_ai")
           )
-          stable_after = copy.deepcopy(out)
-          stable_after.pop("three_engine_comparison", None)
-          for row in stable_after["races"]:
-              row.pop("three_engine_score", None)
-              row.pop("three_engine_classification", None)
-          if stable_after != stable_before:
+          if stable(out) != stable_before:
               raise SystemExit("NIGHT_STORED_SCHEMA_SCORE_RECOMPUTE_MUTATED_LOCK")
           if (
               out["three_engine_comparison"].get("status") != "SCORED"
