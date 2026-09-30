@@ -1424,7 +1424,9 @@ jobs:
                { { [ "${http_status}" = "413" ] && \
                    jq -e '.error == "PAYLOAD_TOO_LARGE"' .relay-output/publish-result.json >/dev/null 2>&1; } || \
                  { [ "${http_status}" = "400" ] && \
-                   jq -e '.error == "Cannot read properties of undefined (reading '"'"'reduce'"'"')"' .relay-output/publish-result.json >/dev/null 2>&1; }; } && \
+                   jq -e '.error == "Cannot read properties of undefined (reading '"'"'reduce'"'"')"' .relay-output/publish-result.json >/dev/null 2>&1; } || \
+                 { [ "${http_status}" = "400" ] && \
+                   jq -e '.error == "FEED_ABEKEN_OBJECT"' .relay-output/publish-result.json >/dev/null 2>&1; }; } && \
                [ -f .relay-output/stored-feed.json ]; then
               python3 - "${FEED}" .relay-output/stored-feed.json \
                 .relay-output/feed-night-stored-schema.json <<'PY'
