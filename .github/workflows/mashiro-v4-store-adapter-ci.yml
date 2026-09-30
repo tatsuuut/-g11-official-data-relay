@@ -1,0 +1,41 @@
+name: Mashiro V4 store adapter CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/mashiro-v4-store-adapter-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout private Mashiro V4 adapter branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: research/mashiro-v4-store-adapter-20260930
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Compile and run adapter tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile g11/research/mashiro_giant_kill/v1/prospective_store_adapter_v4.py
+          python3 -m py_compile g11/research/mashiro_giant_kill/v1/test_prospective_store_adapter_v4.py
+          python3 -m unittest g11.research.mashiro_giant_kill.v1.test_prospective_store_adapter_v4 -v
+      - name: Prove no production import hook
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          target=Path("g11/research/mashiro_giant_kill/v1/prospective_store_adapter_v4.py")
+          text=target.read_text()
+          assert "P3_MUTATED" in text and '"FEED_MUTATED":False' in text
+          assert "publish_shadow" in text and "publish_result_join" in text
+          print("MASHIRO_V4_STORE_ADAPTER=PASS")
+          PY
