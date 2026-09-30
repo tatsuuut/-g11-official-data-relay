@@ -1488,6 +1488,9 @@ jobs:
               "research_finance", "actual_purchase", "result_meta",
               "three_engine_score",
           }
+          # Stored-schema NIGHT repair must be allowed to carry the already
+          # accepted per-engine result fields. It never creates prediction
+          # keys and never changes any locked bet.
           for old in out["races"]:
               new = incoming_by_key[old["key"]]
               for field in safe_scalar:
