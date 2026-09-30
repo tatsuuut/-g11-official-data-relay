@@ -1386,7 +1386,90 @@ jobs:
             echo "G11_ACCEPTED_REFERENCE_DATE=${accepted_reference_date}"
             echo "G11_ACCEPTED_REFERENCE_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${previous_wild}")"
             echo "G11_ACCEPTED_REFERENCE_RACE_FIELDS=$(jq -c '[.races[] | keys] | add | unique' "${previous_wild}")"
-            if jq -e '.SNAPSHOT_CLASS == "SAME_DAY_RESCUE_NONRESEARCH"' "${FEED}" >/dev/null; then
+            if jq -e '.SNAPSHOT_CLASS == "TODAY_ONLY_RESCUE_PREDEADLINE" and .operational_date_jst == "2026-09-30"' "${FEED}" >/dev/null && [ -f .relay-output/stored-feed.json ]; then
+              python3 - "${FEED}" .relay-output/stored-feed.json <<'PY'
+          import copy
+          from datetime import datetime
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          incoming = json.loads(path.read_text(encoding="utf-8"))
+          stored = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          day = "2026-09-30"
+          if (incoming.get("operational_date_jst") != day or stored.get("operational_date_jst") != day
+                  or incoming.get("stage") != "PREDEADLINE" or stored.get("stage") != "PREDEADLINE"
+                  or incoming.get("SNAPSHOT_CLASS") != "TODAY_ONLY_RESCUE_PREDEADLINE"
+                  or incoming.get("CANONICAL_MORNING_PROMOTED") is not False
+                  or incoming.get("RESEARCH_ELIGIBLE_AS_MORNING") is not False):
+              raise SystemExit("RESCUE_STORED_SCHEMA_BOUNDARY")
+          current = {row["key"]: row for row in incoming["races"]}
+          prior = {row["key"]: row for row in stored["races"]}
+          if len(current) != 144 or len(prior) != 144 or set(current) != set(prior):
+              raise SystemExit("RESCUE_STORED_SCHEMA_RACE_SET")
+          out = copy.deepcopy(stored)
+          out["source"] = copy.deepcopy(incoming["source"])
+          out["generated_at_jst"] = incoming["generated_at_jst"]
+          accepted_pre = next((row["predeadline"] for row in stored["races"]
+                               if isinstance(row.get("predeadline"), dict)), None)
+          if accepted_pre is None:
+              raise SystemExit("RESCUE_STORED_SCHEMA_NO_ACCEPTED_LIVE")
+          added = []
+          locked = []
+          for row in out["races"]:
+              new = current[row["key"]]
+              proof = new.get("today_rescue")
+              if not isinstance(proof, dict) or proof.get("snapshot_class") != "TODAY_ONLY_RESCUE_PREDEADLINE":
+                  raise SystemExit("RESCUE_TRANSPORT_PROOF_MISSING:" + row["key"])
+              for field in ("p3_snapshot_sha256", "practical_bets", "p3_production_bets", "production_points"):
+                  if row.get(field) != new.get(field):
+                      raise SystemExit("RESCUE_TRANSPORT_P3_LOCK_CHANGED:" + row["key"])
+              pre = new.get("predeadline")
+              previous = row.get("predeadline")
+              if isinstance(previous, dict):
+                  if (not isinstance(pre, dict) or
+                      any(previous.get(field) != pre.get(field) for field in
+                          ("snapshot_sha256", "captured_at_jst", "practical_bets", "production_points"))):
+                      raise SystemExit("RESCUE_TRANSPORT_LIVE_LOCK_CHANGED:" + row["key"])
+                  continue
+              if not isinstance(pre, dict):
+                  continue
+              deadline = datetime.fromisoformat(row["deadline_jst"])
+              lock = proof.get("locked_at_jst")
+              if (proof.get("status") != "LOCKED" or pre.get("status") != "READY"
+                      or proof.get("p3_snapshot_sha256") != pre.get("snapshot_sha256")
+                      or not isinstance(lock, str) or datetime.fromisoformat(lock) >= deadline
+                      or datetime.fromisoformat(pre["captured_at_jst"]) >= deadline
+                      or datetime.fromisoformat(pre["odds_captured_at_jst"]) >= deadline
+                      or row.get("result_trifecta") is not None or row.get("research_eligible") is not False
+                      or set(pre) != set(accepted_pre)
+                      or set(pre["trifecta_confidence"]) != set(accepted_pre["trifecta_confidence"])):
+                  raise SystemExit("RESCUE_TRANSPORT_LIVE_PROOF_INVALID:" + row["key"])
+              row["predeadline"] = copy.deepcopy(pre)
+              for field in ("best_ev", "best_ev_bet", "value_bets", "odds_captured_at_jst"):
+                  row[field] = copy.deepcopy(pre[field])
+              row["odds_merit"] = pre["legacy_odds_merit"]
+              added.append(row["key"])
+              locked.append({"key": row["key"], "snapshot_sha256": pre["snapshot_sha256"], "locked_at_jst": lock})
+          if (set(out) != set(stored) or
+              any(set(row) != set(prior[row["key"]]) for row in out["races"])):
+              raise SystemExit("RESCUE_STORED_SCHEMA_KEYSET_CHANGED")
+          payload = json.dumps(out, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+          path.write_text(payload, encoding="utf-8")
+          print("G11_RESCUE_STORED_SCHEMA_TRANSPORT=" + json.dumps({
+              "day": day, "race_count": 144, "new_live_locks": added,
+              "locked_proof": locked, "today_rescue_published": 0,
+              "canonical_morning_promoted": False, "result_leakage": 0,
+              "raw_bytes": len(payload.encode("utf-8")),
+              "evidence_sha256": hashlib.sha256(json.dumps(
+                  [current[key]["today_rescue"] for key in sorted(current)],
+                  ensure_ascii=False, sort_keys=True, separators=(",", ":")
+              ).encode("utf-8")).hexdigest(),
+          }, ensure_ascii=False, sort_keys=True))
+          PY
+            elif jq -e '.SNAPSHOT_CLASS == "SAME_DAY_RESCUE_NONRESEARCH"' "${FEED}" >/dev/null; then
               echo "G11_SITE_SCHEMA_PROJECT=SKIP_RESCUE_NONRESEARCH"
               jq -c 'del(.SNAPSHOT_CLASS,.CANONICAL_MORNING_PROMOTED,.RESEARCH_ELIGIBLE_AS_MORNING,.MORNING_HISTORY_BACKFILL,.ACCOUNTING_CLASS)' "${FEED}" > .relay-output/feed-rescue-site.json
               mv .relay-output/feed-rescue-site.json "${FEED}"
