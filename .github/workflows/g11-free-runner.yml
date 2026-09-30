@@ -1507,12 +1507,15 @@ jobs:
               # Preserve only result-side FINAL display facts when the stored
               # Site schema already has the corresponding FINAL container.
               # Prediction locks and bet sets remain byte-for-byte untouched.
-              if isinstance(old.get("final_accounting"), dict) and isinstance(incoming.get("final_accounting"), dict):
-                  old_final = old["final_accounting"]
-                  new_final = incoming["final_accounting"]
-                  for key in ("status", "engines", "classifications", "source_counts", "by_race"):
-                      if key in old_final and key in new_final:
-                          old_final[key] = copy.deepcopy(new_final[key])
+              if isinstance(incoming.get("final_accounting"), dict):
+                  if isinstance(old.get("final_accounting"), dict):
+                      old_final = old["final_accounting"]
+                      new_final = incoming["final_accounting"]
+                      for key in ("status", "engines", "classifications", "source_counts", "by_race"):
+                          if key in old_final and key in new_final:
+                              old_final[key] = copy.deepcopy(new_final[key])
+                  elif "final_accounting" in out:
+                      raise SystemExit("NIGHT_STORED_SCHEMA_FINAL_ACCOUNTING_TYPE")
               old_shadow = old.get("original_display_shadow")
               new_shadow = new.get("original_display_shadow")
               if isinstance(old_shadow, dict) and isinstance(new_shadow, dict):
