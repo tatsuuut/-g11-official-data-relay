@@ -14,7 +14,7 @@ permissions:
 jobs:
   inventory:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -22,105 +22,32 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Prepare read-only audit workspace
+        run: mkdir -p .audit/states .relay-cache
 
       - name: Restore 2026-09-20 encrypted state
         id: cache0
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          path: .cache/2026-09-20/state.tgz.gpg
+          path: .relay-cache/state.tgz.gpg
           key: g11-state-v2-2026-09-20-35518938053
           fail-on-cache-miss: false
 
-      - name: Restore 2026-09-21 encrypted state
-        id: cache1
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-21/state.tgz.gpg
-          key: g11-state-v2-2026-09-21-35610408491
-          fail-on-cache-miss: false
-
-      - name: Restore 2026-09-22 encrypted state
-        id: cache2
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-22/state.tgz.gpg
-          key: g11-state-v2-2026-09-22-35812512914
-          fail-on-cache-miss: false
-
-      - name: Restore 2026-09-23 encrypted state
-        id: cache3
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-23/state.tgz.gpg
-          key: g11-state-v2-2026-09-23-35865334059
-          fail-on-cache-miss: false
-
-      - name: Restore 2026-09-24 encrypted state
-        id: cache4
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-24/state.tgz.gpg
-          key: g11-state-v2-2026-09-24-36010403940
-          fail-on-cache-miss: false
-
-      - name: Restore 2026-09-25 encrypted state
-        id: cache5
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-25/state.tgz.gpg
-          key: g11-state-v2-2026-09-25-36144427920
-          fail-on-cache-miss: false
-
-      - name: Restore 2026-09-26 encrypted state
-        id: cache6
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-26/state.tgz.gpg
-          key: g11-state-v2-2026-09-26-36296643571
-          fail-on-cache-miss: false
-
-      - name: Restore 2026-09-27 encrypted state
-        id: cache7
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-27/state.tgz.gpg
-          key: g11-state-v2-2026-09-27-36306161358
-          fail-on-cache-miss: false
-
-      - name: Restore 2026-09-28 encrypted state
-        id: cache8
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-28/state.tgz.gpg
-          key: g11-state-v2-2026-09-28-36437392793
-          fail-on-cache-miss: false
-
-      - name: Restore 2026-09-29 encrypted state
-        id: cache9
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .cache/2026-09-29/state.tgz.gpg
-          key: g11-state-v2-2026-09-29-36576576405
-          fail-on-cache-miss: false
-
-      - name: Decrypt restored historical states read-only
+      - name: Extract 2026-09-20 state if present
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "${G11_PRIVATE_REPO_TOKEN}"
-          mkdir -p .audit/states
-          for daydir in .cache/2026-*; do
-            [ -d "${daydir}" ] || continue
-            day="$(basename "${daydir}")"
-            source="${daydir}/state.tgz.gpg"
-            [ -s "${source}" ] || continue
-            mkdir -p ".audit/states/${day}"
-            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-              --decrypt --output "${RUNNER_TEMP}/${day}.tgz" "${source}"
-            exec 3<&-
-            python3 - "${RUNNER_TEMP}/${day}.tgz" ".audit/states/${day}" <<'PY'
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-20"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-20"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-20.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-20.tgz" ".audit/states/2026-09-20" <<'PY'
           import pathlib,sys,tarfile
           root=pathlib.Path(sys.argv[2])
           with tarfile.open(sys.argv[1],"r:gz") as a:
@@ -129,7 +56,304 @@ jobs:
                   raise SystemExit("UNSAFE_ARCHIVE")
               a.extractall(root,filter="data")
           PY
-          done
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-21 encrypted state
+        id: cache1
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-21-35610408491
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-21 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-21"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-21"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-21.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-21.tgz" ".audit/states/2026-09-21" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-22 encrypted state
+        id: cache2
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-22-35812512914
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-22 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-22"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-22"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-22.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-22.tgz" ".audit/states/2026-09-22" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-23 encrypted state
+        id: cache3
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-23-35865334059
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-23 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-23"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-23"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-23.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-23.tgz" ".audit/states/2026-09-23" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-24 encrypted state
+        id: cache4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-24-36010403940
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-24 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-24"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-24"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-24.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-24.tgz" ".audit/states/2026-09-24" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-25 encrypted state
+        id: cache5
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-25-36144427920
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-25 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-25"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-25"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-25.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-25.tgz" ".audit/states/2026-09-25" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-26 encrypted state
+        id: cache6
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-26-36296643571
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-26 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-26"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-26"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-26.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-26.tgz" ".audit/states/2026-09-26" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-27 encrypted state
+        id: cache7
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-27-36306161358
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-27 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-27"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-27"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-27.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-27.tgz" ".audit/states/2026-09-27" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-28 encrypted state
+        id: cache8
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-28-36437392793
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-28 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-28"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-28"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-28.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-28.tgz" ".audit/states/2026-09-28" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
+
+      - name: Restore 2026-09-29 encrypted state
+        id: cache9
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-09-29-36576576405
+          fail-on-cache-miss: false
+
+      - name: Extract 2026-09-29 state if present
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .relay-cache/state.tgz.gpg ]; then
+            echo "CACHE_MISS:2026-09-29"
+            exit 0
+          fi
+          mkdir -p ".audit/states/2026-09-29"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/2026-09-29.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${RUNNER_TEMP}/2026-09-29.tgz" ".audit/states/2026-09-29" <<'PY'
+          import pathlib,sys,tarfile
+          root=pathlib.Path(sys.argv[2])
+          with tarfile.open(sys.argv[1],"r:gz") as a:
+              ms=a.getmembers()
+              if not ms or any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts or m.issym() or m.islnk() for m in ms):
+                  raise SystemExit("UNSAFE_ARCHIVE")
+              a.extractall(root,filter="data")
+          PY
+          rm -f .relay-cache/state.tgz.gpg
 
       - name: Inventory CURRENT P3 immutable historical snapshots
         run: |
@@ -139,75 +363,46 @@ jobs:
           from collections import Counter
           from datetime import datetime,timezone
           from pathlib import Path
-
           race_re=re.compile(r"\d{8}-\d{2}-(?:0[1-9]|1[0-2])")
-          days={}
-          totals=Counter()
+          days={}; totals=Counter()
           for dayroot in sorted(Path(".audit/states").glob("2026-*")):
-              day=dayroot.name
-              roots=list(dayroot.rglob("snapshots"))
-              if not roots:
-                  days[day]={"status":"NO_SNAPSHOT_ROOT"}; continue
+              day=dayroot.name; roots=list(dayroot.rglob("snapshots"))
+              if not roots: days[day]={"status":"NO_SNAPSHOT_ROOT"}; continue
               root=max(roots,key=lambda p:sum(1 for _ in p.rglob("*.json")))
-              counts=Counter()
-              p3rows=[]
-              sidecars=0
+              counts=Counter(); p3rows=[]; sidecars=0
               for stage in ("morning","predeadline"):
                   d=root/stage
                   if not d.is_dir(): continue
                   for path in sorted(d.glob("*.json")):
-                      try:
-                          raw=path.read_bytes(); env=json.loads(raw)
-                      except Exception:
-                          counts["MALFORMED"]+=1; continue
+                      try: raw=path.read_bytes(); env=json.loads(raw)
+                      except Exception: counts["MALFORMED"]+=1; continue
                       payload=env.get("PAYLOAD") if isinstance(env,dict) else None
                       if not isinstance(payload,dict): continue
-                      if payload.get("SCHEMA")=="G11_P3_TRIFECTA_CONFIDENCE_PROSPECTIVE_EVIDENCE_V1":
-                          sidecars+=1
+                      if payload.get("SCHEMA")=="G11_P3_TRIFECTA_CONFIDENCE_PROSPECTIVE_EVIDENCE_V1": sidecars+=1
                       status=payload.get("STATUS")
-                      if not (payload.get("LOGIC_ID")=="CURRENT_GROWTH_P3" or
-                              (isinstance(status,str) and status.startswith("CURRENT_GROWTH_P3"))):
-                          continue
-                      race=payload.get("RACE_ID")
-                      snap=payload.get("SNAPSHOT")
+                      if not (payload.get("LOGIC_ID")=="CURRENT_GROWTH_P3" or (isinstance(status,str) and status.startswith("CURRENT_GROWTH_P3"))): continue
+                      race=payload.get("RACE_ID"); snap=payload.get("SNAPSHOT")
                       if not isinstance(race,str) or not race_re.fullmatch(race): continue
-                      if race[:8] != day.replace("-",""):
-                          counts["CROSS_DAY_P3"]+=1
-                      points=payload.get("PRODUCTION_POINTS")
-                      conf=payload.get("TRIFECTA_CONFIDENCE")
-                      embedded=isinstance(conf,dict)
-                      rawp=conf.get("RAW_SET_PROBABILITY") if embedded else None
-                      key=f"{snap}_{points}_{'RAW' if rawp is not None else 'NO_RAW'}"
-                      counts[key]+=1; totals[key]+=1
-                      p3rows.append({
-                        "race":race,"snapshot":snap,"points":points,
-                        "prediction_at":payload.get("PREDICTION_AT"),
-                        "bet_sha":payload.get("BET_ARTIFACT_SHA"),
-                        "snapshot_sha256":hashlib.sha256(raw).hexdigest(),
-                        "raw":rawp,
+                      points=payload.get("PRODUCTION_POINTS"); conf=payload.get("TRIFECTA_CONFIDENCE")
+                      embedded=isinstance(conf,dict); rawp=conf.get("RAW_SET_PROBABILITY") if embedded else None
+                      key=f"{snap}_{points}_{'RAW' if rawp is not None else 'NO_RAW'}"; counts[key]+=1; totals[key]+=1
+                      p3rows.append({"race":race,"snapshot":snap,"points":points,
+                        "prediction_at":payload.get("PREDICTION_AT"),"bet_sha":payload.get("BET_ARTIFACT_SHA"),
+                        "snapshot_sha256":hashlib.sha256(raw).hexdigest(),"raw":rawp,
                         "confidence_status":conf.get("CONFIDENCE_STATUS") if embedded else None,
                         "confidence_rule_version":conf.get("CONFIDENCE_RULE_VERSION") if embedded else None,
                         "p3_version":conf.get("P3_VERSION") if embedded else payload.get("LOGIC_VERSION"),
                         "pl120_version":conf.get("PL120_VERSION") if embedded else None,
-                        "result_input_used":(payload.get("RESEARCH_PACKET") or {}).get("RESULT_INPUT_USED")
-                          if isinstance(payload.get("RESEARCH_PACKET"),dict) else None,
-                        "bets":payload.get("PRODUCTION_BETS"),
-                      })
-              days[day]={
-                "status":"PASS","snapshot_root":str(root),
-                "counts":dict(counts),"sidecars":sidecars,
-                "p3_record_count":len(p3rows),
-                "records":p3rows,
-              }
-          report={
-            "schema":"G11_P3_CONFIDENCE_HISTORICAL_IMMUTABLE_INVENTORY_V2",
+                        "result_input_used":(payload.get("RESEARCH_PACKET") or {}).get("RESULT_INPUT_USED") if isinstance(payload.get("RESEARCH_PACKET"),dict) else None,
+                        "scores_present":isinstance(payload.get("SCORES"),list) and len(payload.get("SCORES"))==6,
+                        "bets":payload.get("PRODUCTION_BETS")})
+              days[day]={"status":"PASS","snapshot_root":str(root),"counts":dict(counts),
+                "sidecars":sidecars,"p3_record_count":len(p3rows),"records":p3rows}
+          report={"schema":"G11_P3_CONFIDENCE_HISTORICAL_IMMUTABLE_INVENTORY_V2",
             "observed_at_utc":datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-            "days":days,"totals":dict(totals),
-            "restored_days":[d for d,v in days.items() if v.get("status")=="PASS"],
-            "production_mutated":False,"cache_saved":False,
-          }
+            "days":days,"totals":dict(totals),"restored_days":sorted(days),
+            "production_mutated":False,"cache_saved":False}
           Path(".audit/history.json").write_text(json.dumps(report,ensure_ascii=False,sort_keys=True,indent=2)+"\n",encoding="utf-8")
-          print(json.dumps({k:v for k,v in report.items() if k!="days"},ensure_ascii=False,sort_keys=True))
           print(json.dumps({d:{k:v for k,v in x.items() if k!="records"} for d,x in days.items()},ensure_ascii=False,sort_keys=True))
           PY
 
