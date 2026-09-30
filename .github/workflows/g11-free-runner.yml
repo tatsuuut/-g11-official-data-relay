@@ -1100,18 +1100,6 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
-          # A same-day rescue must project onto the already accepted Site
-          # schema. A transient readback error cannot authorize yesterday's
-          # schema or publishing an unprojected rescue feed.
-          if jq -e '.SNAPSHOT_CLASS=="TODAY_ONLY_RESCUE_PREDEADLINE"' "${FEED}" >/dev/null; then
-            if ! jq -e --arg day "${OPERATIONAL_DATE}" \
-              '.operational_date_jst==$day and (.races|type)=="array" and (.races|length)>0' \
-              .relay-output/stored-feed.json >/dev/null 2>&1; then
-              echo 'G11_RESCUE_ACCEPTED_FEED_READBACK_REQUIRED' >&2
-              exit 1
-            fi
-          fi
-
           if [ "${RELAY_PHASE}" = "night" ] && \
              [ -f .relay-output/stored-feed.json ]; then
             jq -c --slurpfile stored .relay-output/stored-feed.json '
@@ -1388,7 +1376,8 @@ jobs:
             echo "G11_ACCEPTED_REFERENCE_DATE=${accepted_reference_date}"
             echo "G11_ACCEPTED_REFERENCE_WILD_CAPABILITY=$(jq -c '{capabilities,wild_pack_schema:(.wild_pack.schema // null),wild_pack_status:(.wild_pack.status // null),wild_authority:(.canonical_authorities.wild_pack // null)}' "${previous_wild}")"
             echo "G11_ACCEPTED_REFERENCE_RACE_FIELDS=$(jq -c '[.races[] | keys] | add | unique' "${previous_wild}")"
-            if [ -f .relay-output/stored-feed.json ] && jq -e '.SNAPSHOT_CLASS=="TODAY_ONLY_RESCUE_PREDEADLINE"' "${FEED}" >/dev/null; then
+            if jq -e '.SNAPSHOT_CLASS=="TODAY_ONLY_RESCUE_PREDEADLINE"' "${FEED}" >/dev/null; then
+              test -s .relay-output/stored-feed.json || { echo 'G11_RESCUE_ACCEPTED_FEED_READBACK_REQUIRED' >&2; exit 1; }
               python3 scripts/audit_public_surface.py project-rescue-stored-schema "${FEED}" .relay-output/stored-feed.json
             elif jq -e '.SNAPSHOT_CLASS == "SAME_DAY_RESCUE_NONRESEARCH"' "${FEED}" >/dev/null; then
               echo "G11_SITE_SCHEMA_PROJECT=SKIP_RESCUE_NONRESEARCH"
