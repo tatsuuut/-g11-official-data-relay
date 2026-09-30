@@ -1110,11 +1110,6 @@ jobs:
             mv .relay-output/feed-reconciled.json "${FEED}"
           fi
 
-          # A rescue NIGHT may only add official result/score fields.
-          # Preserve prediction-side immutable data exactly as it was already
-          # accepted by the app, including ABEKEN.  Also keep the stored schema
-          # for this legacy rescue day; WILD CURRENT becomes visible on the next
-          # fresh operational day instead of rewriting 2026-09-20.
           if [ "${RELAY_PHASE}" = "night" ] && \
              [ -f .relay-output/stored-feed.json ]; then
             jq -c --slurpfile stored .relay-output/stored-feed.json '
@@ -1401,6 +1396,7 @@ jobs:
           fi
 
           echo "G11_TRANSPORT_RESCUE_PROOF=$(jq -c '{tagged:([.races[] | select((.today_rescue | type) == "object")] | length),first:(.races[0] | {key,today_rescue}),class:.SNAPSHOT_CLASS}' "${FEED}")"
+          jq -e 'if .SNAPSHOT_CLASS=="TODAY_ONLY_RESCUE_PREDEADLINE" then all(.races[];(.today_rescue|type)=="object") else true end' "${FEED}" >/dev/null
           echo "G11_TRANSPORT_THREE_ENGINE=$(jq -c '{capability:.capabilities.three_engine_comparison,summary:(.three_engine_comparison|type),first:(.races[0] | {key,three_engine_classification,three_engine_score}),missing:([.races[] | select((.three_engine_score|type)!="object" or .three_engine_classification==null)]|length)}' "${FEED}")"
           if [ "${RELAY_PHASE}" = "night" ]; then
             python3 - "${FEED}" <<'PY'
