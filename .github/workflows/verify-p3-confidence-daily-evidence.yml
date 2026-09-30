@@ -22,7 +22,7 @@ jobs:
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: private-src
           persist-credentials: false
-      - name: Compile
+      # rerun 2\n      - name: Compile
         run: |
           cd private-src
           python3 -m py_compile g11/canonical/official_pipeline.py
