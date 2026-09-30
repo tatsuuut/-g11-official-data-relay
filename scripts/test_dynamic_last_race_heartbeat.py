@@ -35,6 +35,25 @@ class HeartbeatPolicyTests(unittest.TestCase):
         self.assertEqual(decision({"STATUS": "NIGHT_WAITING_OFFICIAL_RESULTS"}, DAY, now), "STOP_NIGHT")
         self.assertEqual(decision({"STATUS": "NIGHT_RESULTS_COMPLETE"}, DAY, now), "STOP_NIGHT")
 
+    def test_rescue_day_stays_alive_until_its_verified_last_deadline(self):
+        rescue_day = date(2026, 9, 30)
+        rescue = {
+            "STATUS": "SAME_DAY_RESCUE_COMPLETE",
+            "PHASE": "PREDEADLINE_RESCUE",
+            "OPERATIONAL_DATE_JST": rescue_day.isoformat(),
+            "LAST_RACE_DEADLINE_JST": "2026-09-30T22:41:00+09:00",
+            "CANONICAL_MORNING_PROMOTED": False,
+            "NIGHT_RESEARCH_CONNECTED": False,
+        }
+        self.assertEqual(
+            decision(rescue, rescue_day, datetime.fromisoformat("2026-09-30T22:40:59+09:00")),
+            "CONTINUE",
+        )
+        self.assertEqual(
+            decision(rescue, rescue_day, datetime.fromisoformat("2026-09-30T22:41:00+09:00")),
+            "RESCUE_HANDOFF",
+        )
+
     def test_rollover_hard_stop(self):
         for minute in ("01:59:59", "02:00:00"):
             expected = "CHECK_HANDOFF" if minute < "02:00:00" else "STOP_ROLLOVER"
