@@ -1,4 +1,5 @@
 name: Mashiro type definition V2 research CI
+# rerun schema fix
 
 on:
   push:
