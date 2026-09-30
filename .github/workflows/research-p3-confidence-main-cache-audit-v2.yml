@@ -425,6 +425,6 @@ jobs:
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}?ref=research/p3-confidence-history-audit-v2" --jq .sha 2>/dev/null || true)"
           args=(--method PUT -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28"
             -f "message=Record historical immutable P3 confidence inventory"
-            -f "content=${content}" -f "branch=${GITHUB_REF_NAME}")
+            -f "content=${content}" -f "branch=research/p3-confidence-history-audit-v2")
           if [ -n "${existing_sha}" ]; then args+=( -f "sha=${existing_sha}" ); fi
           gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}" "${args[@]}" >/dev/null
