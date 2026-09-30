@@ -1,0 +1,102 @@
+{
+  "BUCKETS": {
+    "LIVE_3": {
+      "HIT": 1,
+      "MISS": 19,
+      "N": 20,
+      "RAW_MAX": 0.09956052693240525,
+      "RAW_MEAN": 0.06741232812509212,
+      "RAW_MIN": 0.04027973736398284,
+      "UNDETERMINED": 0,
+      "VOID": 0
+    },
+    "LIVE_5": {
+      "HIT": 11,
+      "MISS": 43,
+      "N": 54,
+      "RAW_MAX": 0.13732917605940054,
+      "RAW_MEAN": 0.09445579642020352,
+      "RAW_MIN": 0.05816238606432983,
+      "UNDETERMINED": 0,
+      "VOID": 0
+    },
+    "LIVE_7": {
+      "HIT": 4,
+      "MISS": 20,
+      "N": 24,
+      "RAW_MAX": 0.17522472733672823,
+      "RAW_MEAN": 0.11975810478382709,
+      "RAW_MIN": 0.07620534483053945,
+      "UNDETERMINED": 0,
+      "VOID": 0
+    },
+    "MORNING_3": {
+      "HIT": 3,
+      "MISS": 24,
+      "N": 27,
+      "RAW_MAX": 0.09865287233965017,
+      "RAW_MEAN": 0.06567248586171545,
+      "RAW_MIN": 0.04245029652636936,
+      "UNDETERMINED": 0,
+      "VOID": 0
+    },
+    "MORNING_5": {
+      "HIT": 14,
+      "MISS": 65,
+      "N": 79,
+      "RAW_MAX": 0.1768039096957359,
+      "RAW_MEAN": 0.09546833806074216,
+      "RAW_MIN": 0.055144804706433,
+      "UNDETERMINED": 0,
+      "VOID": 0
+    },
+    "MORNING_7": {
+      "HIT": 2,
+      "MISS": 32,
+      "N": 34,
+      "RAW_MAX": 0.17678970489278978,
+      "RAW_MEAN": 0.11777449609846853,
+      "RAW_MIN": 0.07691191796728106,
+      "UNDETERMINED": 0,
+      "VOID": 0
+    }
+  },
+  "CALIBRATION_DEV_HISTORICAL_RECONSTRUCTABLE_N": 0,
+  "CALIBRATION_DEV_PROSPECTIVE_REUSABLE_N": 238,
+  "CALIBRATION_DEV_TOTAL_USABLE_N": 238,
+  "FAIL_OR_EXCLUSION_REASONS": {
+    "SPECIAL_FIXED_8": 7
+  },
+  "FORMAL_CERTIFICATION_PROSPECTIVE_REUSABLE_N": 0,
+  "FORMAL_CERTIFICATION_REASON": "NO_PRE_RESULT_APPROVED_CALIBRATION_AND_EVIDENCE_PLAN",
+  "LOCK_MUTATED": false,
+  "PAYOUT_INPUT_USED_COUNT": 0,
+  "PRODUCTION_MUTATED": false,
+  "RESULT_INPUT_USED_COUNT": 0,
+  "TIME_LEAK_COUNT": 0,
+  "date": "2026-09-29",
+  "final_feed_counts": {
+    "excluded": 0,
+    "formal": 144,
+    "odds_enriched": 101,
+    "odds_waiting": 43,
+    "pending": 0,
+    "practical_hits": 19,
+    "races": 144,
+    "research_samples": 144,
+    "results": 144,
+    "validation_hits": 49,
+    "value_alert_count": 9,
+    "win_candidates": 64,
+    "win_candidates_basis": "FORMAL_READY_PRE_RACE_ODDS_MERIT"
+  },
+  "final_feed_source": {
+    "github_sha": "8398743224ce0ad99b551e46e334026ba2a16fd8",
+    "projection_sha256": "c5b1d2da0a66e31d079be5975236adbde711763cfe77c1aefc631d41e44affef",
+    "run_id": 36647275733
+  },
+  "normal_records_seen": 238,
+  "schema": "G11_P3_CONFIDENCE_20260929_IMMUTABLE_JOIN_AUDIT_V2",
+  "source_cache": "g11-state-v2-2026-09-29-36656547307",
+  "special_fixed_8_excluded": 7
+}
