@@ -1,0 +1,64 @@
+name: P3 confidence temporal calibration research CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/p3-confidence-temporal-research-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout public relay history evidence
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: research/p3-confidence-history-audit-v2
+          path: .history
+          persist-credentials: false
+      - name: Checkout private research branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: research/p3-confidence-temporal-calibration-v1
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Compile and run focused tests
+        working-directory: .g11-private
+        run: |
+          set -euo pipefail
+          python3 -m py_compile g11/growth_p3/v1_1/confidence_calibration_research_v1.py
+          python3 -m py_compile g11/growth_p3/v1_1/test_confidence_calibration_research_v1.py
+          python3 -m unittest g11.growth_p3.v1_1.test_confidence_calibration_research_v1 -v
+      - name: Prove 9/29 seed waits for a temporal holdout
+        working-directory: .g11-private
+        run: |
+          set -euo pipefail
+          python3 -m g11.growth_p3.v1_1.confidence_calibration_research_v1 \
+            --legacy-ledger ../.history/research-evidence/p3-confidence-20260929-MORNING_3.json \
+            --legacy-ledger ../.history/research-evidence/p3-confidence-20260929-MORNING_5.json \
+            --legacy-ledger ../.history/research-evidence/p3-confidence-20260929-MORNING_7.json \
+            --legacy-ledger ../.history/research-evidence/p3-confidence-20260929-LIVE_3.json \
+            --legacy-ledger ../.history/research-evidence/p3-confidence-20260929-LIVE_5.json \
+            --legacy-ledger ../.history/research-evidence/p3-confidence-20260929-LIVE_7.json \
+            --output /tmp/p3-confidence-929.json
+          python3 - <<'PY'
+          import json
+          v=json.load(open("/tmp/p3-confidence-929.json"))
+          assert v["STATUS"]=="WAITING_TEMPORAL_HOLDOUT"
+          assert v["DAY_COUNT"]==1
+          assert v["TOTAL_RECORDS"]==238
+          assert v["HOLDOUT_DAYS"]==[]
+          assert v["CALIBRATION_SCOPE"]["P3_ENGINE_FINGERPRINT"]=="1e41ca00d5988bd4bf2a991b43d40c79e3f2401b6e9cc8e31e3aa970319c5d3b"
+          assert all(x["SHADOW_CANDIDATE"] is None for x in v["UNITS"].values())
+          assert v["CALIBRATION_VERSION_WRITTEN"] is False
+          assert v["GRADE_BOUNDARIES_WRITTEN"] is False
+          assert v["FORMAL_CERTIFICATION_ISSUED"] is False
+          print("P3_CONFIDENCE_20260929_TEMPORAL_BASELINE=PASS")
+          PY
