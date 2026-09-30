@@ -1393,6 +1393,8 @@ jobs:
             echo "G11_ACCEPTED_REFERENCE_RACE_FIELDS=$(jq -c '[.races[] | keys] | add | unique' "${previous_wild}")"
             if jq -e '.SNAPSHOT_CLASS == "SAME_DAY_RESCUE_NONRESEARCH"' "${FEED}" >/dev/null; then
               echo "G11_SITE_SCHEMA_PROJECT=SKIP_RESCUE_NONRESEARCH"
+              jq -c 'del(.SNAPSHOT_CLASS,.CANONICAL_MORNING_PROMOTED,.RESEARCH_ELIGIBLE_AS_MORNING,.MORNING_HISTORY_BACKFILL,.ACCOUNTING_CLASS)' "${FEED}" > .relay-output/feed-rescue-site.json
+              mv .relay-output/feed-rescue-site.json "${FEED}"
             else
               python3 scripts/audit_public_surface.py project-feed-schema "${FEED}" "${previous_wild}"
             fi
