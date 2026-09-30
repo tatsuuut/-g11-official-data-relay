@@ -1074,8 +1074,14 @@ jobs:
                     .production_mean_ev
                   )
                 )
-              | .true_ai = $stored[0].true_ai
-              | .abeken = $stored[0].abeken
+              | if ($stored[0] | has("true_ai"))
+                then .true_ai = $stored[0].true_ai
+                else del(.true_ai)
+                end
+              | if ($stored[0] | has("abeken"))
+                then .abeken = $stored[0].abeken
+                else del(.abeken)
+                end
               | .races |= map(
                   . as $incoming
                   | ($prior[.key] // null) as $old
