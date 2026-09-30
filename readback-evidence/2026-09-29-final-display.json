@@ -1,0 +1,3697 @@
+{
+  "by_race": {
+    "20260929-02-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "6-5-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-6-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-1-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-2-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-02-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-4-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-1-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-3-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-1-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-03-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-5-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-3-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-6-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "6-1-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-6-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-1-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-5-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-1-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-04-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-6-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-6-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-3-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-6-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-05-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-4-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-1-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-1-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-2-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "6-1-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-07-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-1-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-6-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-6-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-13-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-5-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-1-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-3-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-3-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-6-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-4-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-1-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-14-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "6-2-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-5-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-3-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-1-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-15-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-1-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-1-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-5-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-3-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-1-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-16-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-6-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-4-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "5-4-1",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-1-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-19-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-4-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-6-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-5-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-6",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-21-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-01": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-02": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-6-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-03": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "4-6-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-04": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "3-1-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-05": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-5-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-06": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-07": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-5",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-08": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-2-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-09": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-2",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-10": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-3-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-11": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "1-4-3",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    },
+    "20260929-24-12": {
+      "result_status": "ESTABLISHED",
+      "result_trifecta": "2-1-4",
+      "three_engine_classification": "PENDING",
+      "three_engine_outcomes": {
+        "abeken": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "p3": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        },
+        "true_ai": {
+          "head_hit": null,
+          "payout": null,
+          "status": "PENDING",
+          "trifecta_hit": null
+        }
+      }
+    }
+  },
+  "counts": {
+    "excluded": 0,
+    "formal": 144,
+    "odds_enriched": 101,
+    "odds_waiting": 43,
+    "pending": 0,
+    "practical_hits": 19,
+    "races": 144,
+    "research_samples": 144,
+    "results": 144,
+    "validation_hits": 49,
+    "value_alert_count": 9,
+    "win_candidates": 64,
+    "win_candidates_basis": "FORMAL_READY_PRE_RACE_ODDS_MERIT"
+  },
+  "final_accounting": null,
+  "observed_at_utc": "2026-09-30T01:46:40+00:00",
+  "operational_date_jst": "2026-09-29",
+  "pending_result_count": 0,
+  "race_count": 144,
+  "schema": "G11_SITE_FINAL_DISPLAY_READBACK_EVIDENCE_V1",
+  "settled_result_count": 144,
+  "source_trigger_sha": "9a8ed8a1d3166a1349fb7d1a74815137f9146134",
+  "stage": "NIGHT",
+  "status": "PASS",
+  "three_engine_comparison": {
+    "abeken_result_feedback_to_model": false,
+    "all_predictions_locked_before_result": true,
+    "classifications": {
+      "ABEKEN_ONLY": 0,
+      "ALL_MISS": 0,
+      "ALL_THREE": 0,
+      "P3_ONLY": 0,
+      "PENDING": 144,
+      "TRUE_AI_ONLY": 0,
+      "TWO_ENGINES": 0
+    },
+    "engines": {
+      "abeken": {
+        "average_points": 13.36111111111111,
+        "financial_races": 0,
+        "head_hit_rate": null,
+        "head_hits": 0,
+        "investment": 0,
+        "payout": 0,
+        "prediction_races": 144,
+        "profit": 0,
+        "roi": null,
+        "second_evaluation_hits": 0,
+        "settled_races": 0,
+        "third_evaluation_hits": 0,
+        "total_points": 1924,
+        "trifecta_hit_rate": null,
+        "trifecta_hits": 0
+      },
+      "p3": {
+        "average_points": 5.138888888888889,
+        "financial_races": 0,
+        "head_hit_rate": null,
+        "head_hits": 0,
+        "investment": 0,
+        "payout": 0,
+        "prediction_races": 144,
+        "profit": 0,
+        "roi": null,
+        "second_evaluation_hits": 0,
+        "settled_races": 0,
+        "third_evaluation_hits": 0,
+        "total_points": 740,
+        "trifecta_hit_rate": null,
+        "trifecta_hits": 0
+      },
+      "true_ai": {
+        "average_points": 10,
+        "financial_races": 0,
+        "head_hit_rate": null,
+        "head_hits": 0,
+        "investment": 0,
+        "payout": 0,
+        "prediction_races": 144,
+        "profit": 0,
+        "roi": null,
+        "second_evaluation_hits": 0,
+        "settled_races": 0,
+        "third_evaluation_hits": 0,
+        "total_points": 1440,
+        "trifecta_hit_rate": null,
+        "trifecta_hits": 0
+      }
+    },
+    "schema": "G11_THREE_ENGINE_COMPARISON_V1",
+    "status": "PREDICTIONS_ONLY"
+  }
+}
