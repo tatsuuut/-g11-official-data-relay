@@ -525,6 +525,90 @@ jobs:
           if [ -n "${existing_sha}" ]; then args+=( -f "sha=${existing_sha}" ); fi
           gh api "repos/${GITHUB_REPOSITORY}/contents/research-evidence/p3-confidence-20260929-immutable-join-v2.json" "${args[@]}" >/dev/null
 
+      - name: Persist compact 9/29 calibration-development ledger
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,json,math
+          from collections import defaultdict
+          from datetime import datetime
+          from pathlib import Path
+          feed=json.loads(Path(".audit/feed-2026-09-29.json").read_text())
+          by={r["key"]:r for r in feed["races"]}
+          root=max(Path(".audit/states/2026-09-29").rglob("snapshots"),
+                   key=lambda p:sum(1 for _ in p.rglob("*.json")))
+          units=defaultdict(list)
+          for stage_dir,stage in (("morning","MORNING"),("predeadline","LIVE")):
+              d=root/stage_dir
+              if not d.is_dir(): continue
+              for path in sorted(d.glob("*.json")):
+                  raw_bytes=path.read_bytes()
+                  try: env=json.loads(raw_bytes)
+                  except Exception: continue
+                  p=env.get("PAYLOAD") if isinstance(env,dict) else None
+                  if not isinstance(p,dict) or p.get("SNAPSHOT")!=stage: continue
+                  status=p.get("STATUS")
+                  if not (p.get("LOGIC_ID")=="CURRENT_GROWTH_P3" or (isinstance(status,str) and status.startswith("CURRENT_GROWTH_P3"))): continue
+                  points=p.get("PRODUCTION_POINTS")
+                  if points not in (3,5,7): continue
+                  race=p.get("RACE_ID"); row=by.get(race); conf=p.get("TRIFECTA_CONFIDENCE")
+                  if not isinstance(row,dict) or not isinstance(conf,dict): continue
+                  deadline=row.get("deadline_jst"); locked=p.get("PREDICTION_AT")
+                  if not isinstance(deadline,str) or not isinstance(locked,str): continue
+                  if not datetime.fromisoformat(locked)<datetime.fromisoformat(deadline): continue
+                  if conf.get("PRODUCTION_BET_ORDER")!=p.get("PRODUCTION_BETS"): continue
+                  if conf.get("BET_ARTIFACT_SHA")!=p.get("BET_ARTIFACT_SHA"): continue
+                  if conf.get("CONFIDENCE_TO_BET_BACKFLOW")!=0 or conf.get("CONFIDENCE_TO_P3_BACKFLOW")!=0: continue
+                  raw=conf.get("RAW_SET_PROBABILITY")
+                  if type(raw) not in (int,float) or not math.isfinite(raw): continue
+                  meta=row.get("result_meta") if isinstance(row.get("result_meta"),dict) else {}
+                  result_status=meta.get("result_status"); settlements=meta.get("trifecta_settlements")
+                  if result_status not in ("ESTABLISHED","TRIFECTA_NOT_ESTABLISHED") or not isinstance(settlements,list): continue
+                  winners=sorted({x["trifecta"] for x in settlements})
+                  disposition="VOID" if result_status=="TRIFECTA_NOT_ESTABLISHED" else (
+                      "HIT" if set(p["PRODUCTION_BETS"]) & set(winners) else "MISS")
+                  units[f"{stage}_{points}"].append({
+                    "RACE_ID":race,"STAGE":stage,"POINTS":points,
+                    "PREDICTION_LOCKED_AT":locked,"RACE_DEADLINE_AT":deadline,
+                    "SOURCE_SNAPSHOT_SHA256":hashlib.sha256(raw_bytes).hexdigest(),
+                    "BET_ARTIFACT_SHA":p.get("BET_ARTIFACT_SHA"),
+                    "RAW_SET_PROBABILITY":raw,
+                    "DISPOSITION":disposition,
+                    "OFFICIAL_WINNING_TRIFECTA_SET":winners,
+                    "RESULT_STATUS":result_status,
+                    "RESULT_FEED_PROJECTION_SHA256":(feed.get("source") or {}).get("projection_sha256"),
+                    "RESULT_FEED_RUN_ID":(feed.get("source") or {}).get("run_id"),
+                    "RESULT_INPUT_USED_AT_RAW_CREATION":False,
+                    "PAYOUT_INPUT_USED_AT_RAW_CREATION":False,
+                  })
+          out=Path(".audit/ledgers"); out.mkdir(exist_ok=True)
+          expected={"MORNING_3":27,"MORNING_5":79,"MORNING_7":34,"LIVE_3":20,"LIVE_5":54,"LIVE_7":24}
+          if {k:len(v) for k,v in units.items()}!=expected:
+              raise SystemExit("LEDGER_COUNT_MISMATCH:"+repr({k:len(v) for k,v in units.items()}))
+          for unit,rows in units.items():
+              value={"SCHEMA":"G11_P3_CONFIDENCE_CALIBRATION_DEV_LEDGER_V2","DATE":"2026-09-29",
+                     "UNIT":unit,"N":len(rows),"RECORDS":rows,
+                     "FORMAL_CERTIFICATION_ELIGIBLE":False,
+                     "PRODUCTION_MUTATED":False,"LOCK_MUTATED":False}
+              (out/f"{unit}.json").write_text(json.dumps(value,ensure_ascii=False,sort_keys=True,indent=2)+"\n")
+          PY
+          for path in .audit/ledgers/*.json; do
+            unit="$(basename "${path}" .json)"
+            dest="research-evidence/p3-confidence-20260929-${unit}.json"
+            existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${dest}?ref=research/p3-confidence-history-audit-v2" --jq .sha 2>/dev/null || true)"
+            python3 - "${path}" "${dest}" "${existing_sha}" <<'PY'
+          import base64,json,sys
+          from pathlib import Path
+          path,dest,sha=sys.argv[1:]
+          req={"message":"Record 9/29 confidence calibration-development ledger "+Path(path).stem,
+               "content":base64.b64encode(Path(path).read_bytes()).decode(),
+               "branch":"research/p3-confidence-history-audit-v2"}
+          if sha: req["sha"]=sha
+          Path("/tmp/put.json").write_text(json.dumps(req))
+          PY
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${dest}" --input /tmp/put.json >/dev/null
+          done
+
       - name: Inventory CURRENT P3 immutable historical snapshots
         run: |
           set -euo pipefail
@@ -581,10 +665,15 @@ jobs:
           EVIDENCE_PATH: research-evidence/p3-confidence-historical-immutable-inventory-v2.json
         run: |
           set -euo pipefail
-          content="$(base64 -w0 .audit/history.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}?ref=research/p3-confidence-history-audit-v2" --jq .sha 2>/dev/null || true)"
-          args=(--method PUT -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28"
-            -f "message=Record historical immutable P3 confidence inventory"
-            -f "content=${content}" -f "branch=research/p3-confidence-history-audit-v2")
-          if [ -n "${existing_sha}" ]; then args+=( -f "sha=${existing_sha}" ); fi
-          gh api "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}" "${args[@]}" >/dev/null
+          python3 - ".audit/history.json" "${existing_sha}" <<'PY'
+          import base64,json,sys
+          from pathlib import Path
+          path,sha=sys.argv[1:]
+          req={"message":"Record historical immutable P3 confidence inventory",
+               "content":base64.b64encode(Path(path).read_bytes()).decode(),
+               "branch":"research/p3-confidence-history-audit-v2"}
+          if sha: req["sha"]=sha
+          Path("/tmp/history-put.json").write_text(json.dumps(req))
+          PY
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${EVIDENCE_PATH}" --input /tmp/history-put.json >/dev/null
