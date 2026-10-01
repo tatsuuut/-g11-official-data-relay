@@ -25,13 +25,15 @@ on:
         description: YYYY-MM-DD; dry-run may inspect a non-current date
         required: false
         type: string
+      delivery_only:
+        description: Read-only Site delivery from the encrypted critical checkpoint
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "15-55/5 17 * * *"
     - cron: "*/5 18-21 * * *"
     - cron: "0-5/5 22 * * *"
-    - cron: "*/5 23 * * *"
-    - cron: "*/5 0-11 * * *"
-    - cron: "0-10/5 12 * * *"
 
 permissions:
   actions: write
@@ -50,6 +52,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       inputs.phase != 'repair-20260928' &&
       vars.G11_RELAY_ENABLED == 'true'
+      && (inputs.phase != 'predeadline' || inputs.delivery_only == true || github.event_name == 'push')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -224,9 +227,7 @@ jobs:
                           shutil.rmtree(target)
                       elif target.exists():
                           target.unlink()
-                  # A rescue snapshot is date-bound and non-promotable. Never
-                  # carry yesterday's complete rescue envelope into a new race
-                  # day where it could be mistaken for today's fallback.
+                  # Rescue is date-bound and cannot roll over.
                   rescue = state_root / "rescue"
                   if rescue.is_dir():
                       shutil.rmtree(rescue)
@@ -267,7 +268,7 @@ jobs:
           printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Capture and lock dependency-free PREDEADLINE critical lane
-        if: steps.due.outputs.phase == 'predeadline'
+        if: steps.due.outputs.phase == 'predeadline' && inputs.delivery_only != true
         id: critical
         working-directory: .g11-private
         env:
@@ -419,9 +420,7 @@ jobs:
           fi
           mkdir -p .relay-state/store/g11/wild-pack-oos
           if [ -d .g11-model/g11/wild-pack-oos ]; then
-            # Encrypted state is the live append-only authority.  Runtime
-            # branch OOS assets are a seed/fallback only and must never
-            # overwrite a newer historical bootstrap or same-day packets.
+            # Runtime branch OOS seeds never overwrite encrypted state.
             rsync -a --ignore-existing \
               .g11-model/g11/wild-pack-oos/ \
               .relay-state/store/g11/wild-pack-oos/
@@ -459,9 +458,7 @@ jobs:
               )
               target = model_root / str(registry["MODEL_FILE"])
               expected_sha = str(registry["MODEL_SHA256"])
-              # Restored encrypted state may still contain the previous direct
-              # file. When the immutable runtime branch now supplies a parts
-              # manifest, the verified chunk representation is authoritative.
+              # The verified parts manifest supersedes a direct model file.
               if chunks.manifest_path(target).is_file() and target.exists():
                   target.unlink()
               value = chunks.read_verified(target, expected_sha)
@@ -647,7 +644,11 @@ jobs:
           )
           runtime_stdout=../.relay-output/runtime.stdout
           if [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
-            python3 -m g11.relay.predeadline_nowait_v1 "${args[@]}" | tee "${runtime_stdout}"
+            if [ "${{ inputs.delivery_only }}" = "true" ]; then
+              python3 -m g11.relay.predeadline_delivery_v1 "${args[@]}" | tee "${runtime_stdout}"
+            else
+              python3 -m g11.relay.predeadline_nowait_v1 "${args[@]}" | tee "${runtime_stdout}"
+            fi
           else
             python3 -m g11.relay.v1 "${args[@]}" | tee "${runtime_stdout}"
           fi
@@ -813,6 +814,7 @@ jobs:
       - name: Save only encrypted runtime state
         if: >-
           always() && steps.encrypt-state.outputs.ready == 'true' &&
+          inputs.delivery_only != true &&
           (steps.due.outputs.phase != 'predeadline' || steps.runtime.outcome == 'success')
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
