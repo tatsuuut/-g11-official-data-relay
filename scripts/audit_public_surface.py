@@ -13,6 +13,7 @@ ALLOWED_FILES = {
     ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml",
     ".github/workflows/g11-three-phase-runtime-contract-gate.yml",
     ".github/workflows/g11-explicit-night-dispatcher.yml",
+    ".github/workflows/g11-predeadline-critical-watchdog.yml",
     ".github/workflows/g11-night-backfill-20260917-20260919.yml",
     ".github/workflows/g11-wild-position-bootstrap.yml",
     ".gitignore",
@@ -26,6 +27,8 @@ ALLOWED_FILES = {
     "scripts/audit_three_phase_runtime_contract.py",
     "scripts/dynamic_last_race_heartbeat.py",
     "scripts/test_dynamic_last_race_heartbeat.py",
+    "scripts/predeadline_watchdog_v1.py",
+    "scripts/test_predeadline_watchdog_v1.py",
 }
 IGNORED_PARTS = {".git", "__pycache__"}
 FORBIDDEN_SUFFIXES = {
@@ -878,6 +881,36 @@ def fail(message: str) -> None:
     raise SystemExit(f"PUBLIC_SURFACE_AUDIT_FAIL: {message}")
 
 
+def audit_predeadline_critical_order() -> None:
+    """Keep optional dependencies behind the official cutoff lane."""
+    workflow = (ROOT / ".github/workflows/g11-free-runner.yml").read_text(encoding="utf-8")
+    names = re.findall(r"^      - name: (.+)$", workflow, re.MULTILINE)
+    required = [
+        "Checkout private G11 runtime",
+        "Resolve immutable private source identity",
+        "Capture and lock dependency-free PREDEADLINE critical lane",
+        "Encrypt critical state before optional work",
+        "Save early encrypted critical checkpoint",
+        "Keep the predeadline relay alive between delayed cron starts",
+        "Checkout hash-locked research runtime",
+        "Install pinned private runtime dependencies",
+    ]
+    if any(names.count(name) != 1 for name in required):
+        fail("critical step set changed")
+    indices = [names.index(name) for name in required]
+    if indices != sorted(indices) or "cancel-in-progress: false" not in workflow:
+        fail("critical checkpoint must precede optional work without cancellation")
+    critical = workflow.split("      - name: Capture and lock dependency-free PREDEADLINE critical lane", 1)[1].split("      - name:", 1)[0]
+    if "python3 -S -m g11.relay.predeadline_critical_v1" not in critical:
+        fail("critical stdlib import contract missing")
+    before = workflow.split("      - name: Capture and lock dependency-free PREDEADLINE critical lane", 1)[0]
+    if "pip install" in before or ".g11-model" in before or "catboost" in before:
+        fail("optional dependency before official capture")
+    chain = workflow.split("      - name: Keep the predeadline relay alive between delayed cron starts", 1)[1].split("      - name:", 1)[0]
+    if "steps.runtime.outcome" in chain or "steps.critical-save.outcome == 'success'" not in chain:
+        fail("optional runtime controls critical self-chain")
+
+
 def main() -> int:
     discovered: set[str] = set()
     for path in ROOT.rglob("*"):
@@ -908,6 +941,7 @@ def main() -> int:
     missing = sorted(ALLOWED_FILES - discovered)
     if missing:
         fail(f"missing allowlisted files: {', '.join(missing)}")
+    audit_predeadline_critical_order()
     print("PUBLIC_SURFACE_AUDIT_PASS")
     return 0
 

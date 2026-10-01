@@ -45,8 +45,12 @@ def decision(result: dict, operational_date: date, now: datetime) -> str:
         return "STOP_LEGACY" if now.date() != operational_date or now.time() >= time(20, 50) else "CONTINUE"
     if now.date() not in {operational_date, operational_date + timedelta(days=1)}:
         return "STOP_WRONG_DAY"
-    if status != "RELAY_PHASE_COMPLETE" or result.get("PHASE") != "PREDEADLINE":
+    if status not in {"RELAY_PHASE_COMPLETE", "CRITICAL_CHECKPOINT_PASS"} or result.get("PHASE") != "PREDEADLINE":
         raise ValueError("HEARTBEAT_RUNTIME_NOT_READY")
+    if status == "CRITICAL_CHECKPOINT_PASS" and (
+        result.get("CRITICAL", {}).get("CRITICAL_CHECKPOINT_STATUS") != "PASS"
+    ):
+        raise ValueError("HEARTBEAT_CRITICAL_CHECKPOINT_REQUIRED")
     if result.get("OPERATIONAL_DATE_JST") != operational_date.isoformat():
         raise ValueError("HEARTBEAT_BINDING_DAY_MISMATCH")
     raw = result.get("LAST_RACE_DEADLINE_JST")
