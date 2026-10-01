@@ -121,6 +121,15 @@ def diff(old: object, new: object) -> object:
     return new
 
 
+def includes(actual: object, expected: object) -> bool:
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and includes(actual[key], value)
+            for key, value in expected.items()
+        )
+    return actual == expected
+
+
 def fetch(url: str) -> tuple[dict, dict[str, str], bytes]:
     body_path = Path(".relay-output/hot-get-body.json")
     header_path = Path(".relay-output/hot-get-headers.txt")
@@ -147,6 +156,13 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
     if day != accepted["operational_date_jst"] or incoming["stage"] not in ("PREDEADLINE", "NIGHT"):
         raise RuntimeError("HOT_DATE_OR_STAGE")
     old = {row["key"]: row for row in accepted["races"]}
+    if incoming["stage"] == "NIGHT":
+        counts = incoming.get("counts", {})
+        if (counts.get("results") != counts.get("races") or
+                counts.get("pending") != 0 or
+                counts.get("races") != len(incoming["races"]) or
+                {row["key"] for row in incoming["races"]} != set(old)):
+            raise RuntimeError("HOT_NIGHT_INCOMPLETE_SOURCE")
     changes = []
     allowed = NIGHT_FIELDS if incoming["stage"] == "NIGHT" else PRE_FIELDS
     for row in incoming["races"]:
@@ -228,15 +244,20 @@ def publish(feed_path: Path, origin: str) -> None:
     readback, next_headers, raw = fetch(url)
     if next_headers.get("x-g11-source-feed-sha256") != body.get("payload_sha256"):
         raise RuntimeError("HOT_DELTA_SOURCE_SHA")
+    for field, value in delta["TOP_LEVEL"].items():
+        if field not in readback or not includes(readback[field], value):
+            raise RuntimeError("HOT_DELTA_READBACK_TOP:" + field)
     rows = {row["key"]: row for row in readback["races"]}
     for change in delta["RACES"]:
         key = change["RACE_KEY"]
-        for field in change["CHANGED_FIELDS"]:
-            if field not in rows[key]:
+        for field, value in change["CHANGED_FIELDS"].items():
+            if field not in rows[key] or not includes(rows[key][field], value):
                 raise RuntimeError("HOT_DELTA_READBACK_FIELD:" + key + ":" + field)
     if incoming["stage"] == "NIGHT":
         counts = readback["counts"]
-        if readback["stage"] != "NIGHT" or counts["pending"] != 0 or counts["results"] != counts["races"]:
+        if (readback["stage"] != "NIGHT" or counts["pending"] != 0 or
+                counts["results"] != counts["races"] or
+                len(rows) != len(incoming["races"])):
             raise RuntimeError("HOT_NIGHT_COVERAGE")
     Path(".relay-output/hot-delta-accepted").write_text(body["payload_sha256"] + "\n")
     Path(".relay-output/hot-delta-readback.json").write_bytes(raw)
