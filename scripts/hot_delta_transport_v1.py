@@ -291,7 +291,10 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
             raise RuntimeError("HOT_UNKNOWN_RACE")
         fields = {}
         for field in allowed:
-            if field not in row or row[field] is None and incoming["stage"] != "NIGHT":
+            if field not in row or row[field] is None and not (
+                incoming["stage"] == "NIGHT" and
+                field in {"result_trifecta", "payout", "miss_classification"}
+            ):
                 continue
             output_field = "mashiro_hot" if field == "p3_verification" and "p3_verification" not in prior else field
             current = mashiro_hot(row[field]) if output_field == "mashiro_hot" else project(field, row[field])
