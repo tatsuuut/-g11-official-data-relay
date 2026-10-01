@@ -29,6 +29,8 @@ def _last_deadline(feed: dict, day: str) -> datetime:
     races = feed.get("races")
     if not isinstance(races, list) or not races:
         raise ValueError("WATCHDOG_ACCEPTED_RACES")
+    if feed.get("counts", {}).get("races") != len(races):
+        raise ValueError("WATCHDOG_ACCEPTED_RACE_COVERAGE")
     deadlines = [datetime.fromisoformat(row["deadline_jst"]) for row in races]
     if any(value.utcoffset() != timedelta(hours=9) or value.date().isoformat() != day
            for value in deadlines):
