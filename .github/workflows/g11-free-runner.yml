@@ -1995,8 +1995,6 @@ jobs:
         run: |
           set -euo pipefail
           now_hhmm="$(date +%H%M)"
-          # GitHub cron can be late after MORNING succeeds before 07:00.
-          # Start the verified self-chain from 06:00 for future races only.
           if [ "${now_hhmm}" -lt 0600 ] || [ "${now_hhmm}" -gt 2055 ]; then
             echo "G11_PUBLIC_PREDEADLINE_BOOTSTRAP=OUTSIDE_WINDOW"
             exit 0
