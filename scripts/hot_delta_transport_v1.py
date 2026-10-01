@@ -408,9 +408,9 @@ def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
         race_chunks.append(current)
     if not race_chunks:
         raise RuntimeError("NIGHT_NO_CHANGED_RACES")
-    transaction_id = hash_bytes(compact([date, delta["BASE_FEED_SHA"], source_sha, delta["PATCH_SHA256"]]))
     parts = [(part, []) for part in top_chunks] + [({}, rows) for rows in race_chunks]
     chunk_hashes = [site_hash({"TOP_LEVEL": part, "RACES": rows}) for part, rows in parts]
+    transaction_id = hash_bytes(compact([date, delta["BASE_FEED_SHA"], source_sha, chunk_hashes]))
     manifest = {
         "SCHEMA": NIGHT_TRANSACTION_SCHEMA, "ACTION": "MANIFEST",
         "OPERATIONAL_DATE": date, "NIGHT_TRANSACTION_ID": transaction_id,
