@@ -12,6 +12,9 @@ from collections import Counter
 
 SCHEMA = "G11_SITE_HOT_DELTA_V1"
 BUDGET = 900_000
+NIGHT_TARGET_CHUNK_BYTES = 300_000
+NIGHT_HARD_CHUNK_BYTES = 500_000
+NIGHT_TRANSACTION_SCHEMA = "G11_NIGHT_TRANSACTION_V1"
 BASE_BUDGET = 1_700_000
 BASE_TOP_FIELDS = {
     "schema", "status", "stage", "operational_date_jst", "generated_at_jst",
@@ -266,6 +269,12 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
     fingerprint = hash_bytes(compact({"stage": incoming["stage"], "day": day, "top": top, "races": changes}))
     changed = Counter(field for race in changes for field in race["CHANGED_FIELDS"])
     print("G11_HOT_DELTA_FIELD_COUNTS=" + json.dumps(changed, sort_keys=True))
+    if incoming["stage"] == "NIGHT":
+        sizes = Counter()
+        for race in changes:
+            for field, value in race["CHANGED_FIELDS"].items():
+                sizes[field] += len(compact(value))
+        print("G11_NIGHT_FIELD_BYTES=" + json.dumps(sizes.most_common(), ensure_ascii=False))
     return {
         "SCHEMA": SCHEMA, "OPERATIONAL_DATE": day, "BASE_FEED_SHA": base_sha,
         "PATCH_SEQUENCE": incoming["source"]["run_id"] * 1000 + 1,
@@ -273,6 +282,105 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
         "PATCH_SHA256": fingerprint, "STAGE": incoming["stage"],
         "TOP_LEVEL": top, "RACES": changes,
     }
+
+
+def post(origin: str, token: str, payload: dict, endpoint: str) -> dict:
+    data = compact(payload)
+    request_path = Path(".relay-output/night-transport-request.json")
+    response_path = Path(".relay-output/night-transport-response.json")
+    request_path.write_bytes(data)
+    result = subprocess.run([
+        "curl", "--silent", "--show-error", "--max-time", "45",
+        "-X", "POST", f"{origin}{endpoint}",
+        "-H", "Authorization: Bearer " + token,
+        "-H", "Content-Type: application/json",
+        "-H", "x-g11-feed-sha256: " + hash_bytes(data),
+        "--data-binary", "@" + str(request_path), "--output", str(response_path),
+        "--write-out", "%{http_code}",
+    ], check=True, capture_output=True, text=True)
+    status = int(result.stdout)
+    body = json.loads(response_path.read_text())
+    print("G11_NIGHT_TRANSACTION_HTTP=" + str(status) + " ACTION=" + payload["ACTION"])
+    if not 200 <= status < 300 or body.get("status") != "PASS":
+        raise RuntimeError("NIGHT_TRANSACTION_REJECTED:" + str(body.get("error")))
+    return body
+
+
+def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
+    source_sha = incoming["source"]["projection_sha256"]
+    if len(source_sha) != 64:
+        raise RuntimeError("NIGHT_SOURCE_SHA_REQUIRED")
+    top = delta["TOP_LEVEL"]
+    date = delta["OPERATIONAL_DATE"]
+    keys = sorted(row["key"] for row in incoming["races"])
+    race_chunks: list[list[dict]] = []
+    current: list[dict] = []
+    for row in delta["RACES"]:
+        candidate = current + [row]
+        if len(compact(candidate)) > NIGHT_TARGET_CHUNK_BYTES and current:
+            race_chunks.append(current)
+            current = [row]
+        else:
+            current = candidate
+        if len(compact(current)) > NIGHT_HARD_CHUNK_BYTES - 1500:
+            raise RuntimeError("NIGHT_RACE_EXCEEDS_CHUNK_BUDGET:" + row["RACE_KEY"])
+    if current:
+        race_chunks.append(current)
+    if not race_chunks:
+        raise RuntimeError("NIGHT_NO_CHANGED_RACES")
+    transaction_id = hash_bytes(compact([date, delta["BASE_FEED_SHA"], source_sha, delta["PATCH_SHA256"]]))
+    chunk_hashes = [hash_bytes(compact(rows)) for rows in race_chunks]
+    manifest = {
+        "SCHEMA": NIGHT_TRANSACTION_SCHEMA, "ACTION": "MANIFEST",
+        "OPERATIONAL_DATE": date, "NIGHT_TRANSACTION_ID": transaction_id,
+        "BASE_FEED_SHA": delta["BASE_FEED_SHA"], "SOURCE_NIGHT_SHA": source_sha,
+        "PATCH_SEQUENCE": delta["PATCH_SEQUENCE"],
+        "PATCH_CREATED_AT": delta["PATCH_CREATED_AT"], "PATCH_SHA256": delta["PATCH_SHA256"],
+        "CHUNK_COUNT": len(race_chunks), "CHUNK_SHA256": chunk_hashes,
+        "EXPECTED_RACES": incoming["counts"]["races"],
+        "EXPECTED_RESULTS": incoming["counts"]["results"],
+        "EXPECTED_PENDING": incoming["counts"]["pending"],
+        "EXPECTED_RACE_KEY_SET_SHA": hash_bytes(compact(keys)),
+        "EXPECTED_FINAL_ACCOUNTING_SHA": hash_bytes(compact(top["final_accounting"])),
+        "EXPECTED_FINANCE_SHA": hash_bytes(compact([
+            [row["RACE_KEY"], row["CHANGED_FIELDS"].get("research_finance")]
+            for row in delta["RACES"]
+        ])),
+        "TOP_LEVEL": top,
+    }
+    manifest["MANIFEST_SHA256"] = hash_bytes(compact(manifest))
+    if len(compact(manifest)) > NIGHT_HARD_CHUNK_BYTES:
+        raise RuntimeError("NIGHT_MANIFEST_EXCEEDS_HARD_BUDGET:" + str(len(compact(manifest))))
+    chunks = [{
+        "SCHEMA": NIGHT_TRANSACTION_SCHEMA, "ACTION": "CHUNK",
+        "OPERATIONAL_DATE": date, "NIGHT_TRANSACTION_ID": transaction_id,
+        "MANIFEST_SHA256": manifest["MANIFEST_SHA256"], "SOURCE_NIGHT_SHA": source_sha,
+        "CHUNK_INDEX": i, "CHUNK_COUNT": len(race_chunks),
+        "CHUNK_SHA256": chunk_hashes[i],
+        "RACE_KEYS": [row["RACE_KEY"] for row in rows], "RACES": rows,
+    } for i, rows in enumerate(race_chunks)]
+    if any(len(compact(chunk)) > NIGHT_HARD_CHUNK_BYTES for chunk in chunks):
+        raise RuntimeError("NIGHT_CHUNK_EXCEEDS_HARD_BUDGET")
+    print("G11_NIGHT_TRANSACTION_CHUNK_BYTES=" + json.dumps([len(compact(c)) for c in chunks]))
+    print("G11_NIGHT_TRANSACTION_MANIFEST_BYTES=" + str(len(compact(manifest))))
+    return manifest, chunks
+
+
+def publish_night_transaction(delta: dict, incoming: dict, origin: str, token: str) -> dict:
+    manifest, chunks = night_chunks(delta, incoming)
+    endpoint = "/api/g11-night-transaction"
+    post(origin, token, manifest, endpoint)
+    for chunk in chunks:
+        post(origin, token, chunk, endpoint)
+    result = post(origin, token, {
+        "SCHEMA": NIGHT_TRANSACTION_SCHEMA, "ACTION": "COMMIT",
+        "OPERATIONAL_DATE": manifest["OPERATIONAL_DATE"],
+        "NIGHT_TRANSACTION_ID": manifest["NIGHT_TRANSACTION_ID"],
+        "MANIFEST_SHA256": manifest["MANIFEST_SHA256"],
+        "SOURCE_NIGHT_SHA": manifest["SOURCE_NIGHT_SHA"],
+    }, endpoint)
+    print("G11_NIGHT_TRANSACTION_COMMITTED=" + manifest["NIGHT_TRANSACTION_ID"])
+    return result
 
 
 def publish(feed_path: Path, origin: str) -> None:
@@ -285,7 +393,7 @@ def publish(feed_path: Path, origin: str) -> None:
     data = compact(delta)
     print("G11_HOT_DELTA_BYTES=" + str(len(data)))
     print("G11_HOT_DELTA_RACES=" + str(len(delta["RACES"])))
-    if len(data) > BUDGET:
+    if len(data) > BUDGET and incoming["stage"] != "NIGHT":
         raise RuntimeError("HOT_DELTA_OVER_BUDGET:" + str(len(data)))
     if incoming["stage"] == "PREDEADLINE" and not delta["RACES"]:
         print("G11_HOT_DELTA_NO_CHANGE=PASS")
@@ -293,6 +401,29 @@ def publish(feed_path: Path, origin: str) -> None:
         Path(os.environ["GITHUB_OUTPUT"]).open("a").write("feed_sha=" + base_sha + "\n")
         return
     token = os.environ["G11_SYNC_OIDC"]
+    if incoming["stage"] == "NIGHT":
+        body = publish_night_transaction(delta, incoming, origin, token)
+        readback, next_headers, raw = fetch(url)
+        if next_headers.get("x-g11-source-feed-sha256") != body.get("payload_sha256"):
+            raise RuntimeError("NIGHT_TRANSACTION_READBACK_SHA")
+        if (readback.get("stage") != "NIGHT" or readback.get("status") != "PASS" or
+                readback["counts"]["results"] != len(incoming["races"]) or
+                readback["counts"]["pending"] != 0):
+            raise RuntimeError("NIGHT_TRANSACTION_READBACK_COVERAGE")
+        rows = {row["key"]: row for row in readback["races"]}
+        for change in delta["RACES"]:
+            if change["RACE_KEY"] not in rows or any(
+                    not includes(rows[change["RACE_KEY"]].get(field), value)
+                    for field, value in change["CHANGED_FIELDS"].items()):
+                raise RuntimeError("NIGHT_TRANSACTION_READBACK_RACE:" + change["RACE_KEY"])
+        for field, value in delta["TOP_LEVEL"].items():
+            if not includes(readback.get(field), value):
+                raise RuntimeError("NIGHT_TRANSACTION_READBACK_TOP:" + field)
+        Path(".relay-output/hot-delta-accepted").write_text(body["payload_sha256"] + "\n")
+        Path(".relay-output/hot-delta-readback.json").write_bytes(raw)
+        Path(os.environ["GITHUB_OUTPUT"]).open("a").write("feed_sha=" + body["payload_sha256"] + "\n")
+        print("G11_NIGHT_TRANSACTION_READBACK=PASS SOURCE_SHA=" + body["payload_sha256"])
+        return
     request_path = Path(".relay-output/hot-delta-request.json")
     response_path = Path(".relay-output/hot-delta-response.json")
     request_path.write_bytes(data)
