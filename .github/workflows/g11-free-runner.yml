@@ -257,7 +257,129 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Resolve immutable private source identity
+        id: source
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          source_sha="$(git -C .g11-private rev-parse HEAD)"
+          printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Capture and lock dependency-free PREDEADLINE critical lane
+        if: steps.due.outputs.phase == 'predeadline'
+        id: critical
+        working-directory: .g11-private
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          mkdir -p ../.relay-output
+          python3 -S -m g11.relay.predeadline_critical_v1 \
+            --state-root "${GITHUB_WORKSPACE}/.relay-state" \
+            --operational-date "${{ steps.due.outputs.operational_date }}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --result "${GITHUB_WORKSPACE}/.relay-output/result.json"
+
+      - name: Encrypt critical state before optional work
+        if: steps.due.outputs.phase == 'predeadline' && steps.critical.outcome == 'success'
+        id: critical-encrypt
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
+          mkdir -p .relay-cache
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . | \
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+              --symmetric --cipher-algo AES256 \
+              --output .relay-cache/state.tgz.gpg.tmp
+          exec 3<&-
+          mv .relay-cache/state.tgz.gpg.tmp .relay-cache/state.tgz.gpg
+          test -s .relay-cache/state.tgz.gpg
+          echo 'ready=true' >> "${GITHUB_OUTPUT}"
+
+      - name: Save early encrypted critical checkpoint
+        if: steps.critical-encrypt.outputs.ready == 'true'
+        id: critical-save
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-critical
+
+      - name: Keep the predeadline relay alive between delayed cron starts
+        if: always() && !cancelled() && steps.critical.outcome == 'success' && steps.critical-save.outcome == 'success' && steps.critical-encrypt.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
+            --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
+          if [ "${heartbeat}" = HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
+            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
+            exit 0
+          fi
+
+          sleep 45
+          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
+            --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
+          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
+            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
+            exit 0
+          fi
+          runs="$(curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 2 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=100")"
+          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_ID}" \
+            '.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
+          for active_id in ${active_ids}; do
+            active_title="$(printf '%s' "${runs}" | jq -r --argjson id "${active_id}" \
+              '.workflow_runs[] | select(.id == $id) | .display_title')"
+            jobs="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${active_id}/jobs?per_page=100")"
+            if printf '%s' "${jobs}" | jq -e --arg target "LIVE-predeadline-${OPERATIONAL_DATE}" \
+              'any(.jobs[]; .name == $target and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending"))' >/dev/null; then
+              echo "G11_PREDEADLINE_CHAIN=DEFER_ACTIVE_LIVE run=${active_id}"
+              exit 0
+            fi
+            if [ "$(printf '%s' "${jobs}" | jq '.jobs | length')" -eq 0 ] && \
+               [ "${active_title}" = "LIVE-predeadline-${OPERATIONAL_DATE}" ]; then
+              echo "G11_PREDEADLINE_CHAIN=DEFER_QUEUED_LIVE run=${active_id}"
+              exit 0
+            fi
+          done
+          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
+            '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+            -d "${payload}"
+
       - name: Checkout hash-locked research runtime
+        if: steps.due.outputs.phase != 'predeadline'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
@@ -273,16 +395,8 @@ jobs:
             g11/wild-pack-models
             g11/wild-pack-oos
 
-      - name: Resolve immutable private source identity
-        id: source
-        env:
-          G11_PRIVATE_REPO_TOKEN: ""
-        run: |
-          set -euo pipefail
-          source_sha="$(git -C .g11-private rev-parse HEAD)"
-          printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
-
       - name: Hydrate append-only research history and stage the model
+        if: steps.due.outputs.phase != 'predeadline'
         run: |
           set -euo pipefail
           mkdir -p .relay-state/store/g11/true-ai-history
@@ -296,10 +410,6 @@ jobs:
               .relay-state/store/g11/wild-pack-history/
           fi
           mkdir -p .relay-state/store/g11/wild-pack-models
-          # The encrypted state is the authoritative handoff for a newly
-          # trained FIRST CURRENT.  The read-only g11-runtime checkout may lag
-          # when its PAT cannot push, so never overwrite a verified CURRENT
-          # pack that already survived the encrypted checkpoint.
           if [ -s .relay-state/store/g11/wild-pack-models/acceptance-readback.json ]; then
             echo "WILD_CURRENT_SOURCE=ENCRYPTED_STATE"
           elif [ -d .g11-model/g11/wild-pack-models ]; then
@@ -328,6 +438,7 @@ jobs:
         working-directory: .g11-private
         env:
           WILD_MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning
+        if: steps.due.outputs.phase != 'predeadline'
         run: |
           python3 -m py_compile g11/relay/rescue_v1.py g11/relay/rescue_entry_v2.py
           python3 - "${WILD_MODEL_ROOT}" <<'PY'
@@ -373,6 +484,7 @@ jobs:
           PY
 
       - name: Install pinned private runtime dependencies
+        if: steps.due.outputs.phase != 'predeadline'
         run: |
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
@@ -387,68 +499,11 @@ jobs:
           PY
           fi
 
-      - name: Capture due PREDEADLINE official inputs before regression checks
-        if: steps.due.outputs.phase == 'predeadline'
-        working-directory: .g11-private
-        env:
-          STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          RESCUE_STORE: ${{ github.workspace }}/.relay-state/rescue/store
-        run: |
-          set -euo pipefail
-
-          capture_store=""
-          capture_mode=""
-          if [ -f "${STATE_STORE}/manifest.json" ] && \
-             [ -f "${STATE_STORE}/snapshots/morning/official-day-input.json" ]; then
-            capture_store="${STATE_STORE}"
-            capture_mode="CANONICAL"
-          elif [ -f "${RESCUE_STORE}/manifest.json" ] && \
-               [ -f "${RESCUE_STORE}/snapshots/morning/official-day-input.json" ]; then
-            # A missing canonical MORNING must not disable the time-sensitive
-            # T-7 official capture.  The isolated rescue store is already
-            # future-only/nonresearch and carries its own sealed PREDEADLINE
-            # plan, so it can safely protect the capture window here.
-            capture_store="${RESCUE_STORE}"
-            capture_mode="SAME_DAY_RESCUE"
-          else
-            echo "G11_EARLY_PREDEADLINE_CAPTURE=SKIP_NO_VERIFIED_MORNING_STORE"
-            exit 0
-          fi
-
-          python3 - "${capture_store}" "${capture_mode}" <<'PY'
-          import json
-          import pathlib
-          import sys
-
-          from g11.relay.predeadline_nowait_v1 import capture
-
-          store = pathlib.Path(sys.argv[1])
-          store_mode = sys.argv[2]
-          result = capture(store)
-          print(
-              "G11_EARLY_PREDEADLINE_CAPTURE="
-              + json.dumps(
-                  {
-                      "store_mode": store_mode,
-                      "status": result.get("STATUS"),
-                      "acquired_count": len(result.get("ACQUIRED", [])),
-                      "missed_count": len(result.get("MISSED", [])),
-                      "unavailable_count": len(result.get("UNAVAILABLE", [])),
-                      "rejected_count": len(result.get("REJECTED", [])),
-                      "retryable_count": len(result.get("RETRYABLE_FAILURES", [])),
-                      "task_deferred_count": len(result.get("TASK_DEFERRED", [])),
-                      "deferred": result.get("DEFERRED"),
-                  },
-                  ensure_ascii=False,
-                  sort_keys=True,
-              )
-          )
-          PY
-
       - name: Read back verified WILD BET bootstrap evidence
         working-directory: .g11-private
         env:
           WILD_OOS_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-oos/morning
+        if: steps.due.outputs.phase != 'predeadline'
         run: |
           python3 - "${WILD_OOS_ROOT}" <<'PY'
           import pathlib
@@ -483,6 +538,7 @@ jobs:
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        if: steps.due.outputs.phase != 'predeadline'
         run: |
           set -euo pipefail
           python3 - "${STATE_STORE}" "${{ steps.due.outputs.operational_date }}" <<'PY'
@@ -514,7 +570,7 @@ jobs:
           PY
 
       - name: Verify relay schedule and authority contracts
-        if: github.event_name != 'schedule'
+        if: steps.due.outputs.phase != 'predeadline' && github.event_name != 'schedule'
         working-directory: .g11-private
         env:
           G11_PRIVATE_REPO_TOKEN: ""
@@ -755,7 +811,9 @@ jobs:
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
 
       - name: Save only encrypted runtime state
-        if: always() && steps.encrypt-state.outputs.ready == 'true'
+        if: >-
+          always() && steps.encrypt-state.outputs.ready == 'true' &&
+          (steps.due.outputs.phase != 'predeadline' || steps.runtime.outcome == 'success')
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
@@ -1822,83 +1880,14 @@ jobs:
               --night-ready .relay-output/readback-existing-night.json --day "${{ steps.due.outputs.operational_date }}"
           fi
 
-      - name: Keep the predeadline relay alive between delayed cron starts
-        if: always() && !cancelled() && steps.runtime.outcome == 'success' && steps.encrypt-state.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
-        run: |
-          set -euo pipefail
-          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
-            --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
-          if [ "${heartbeat}" = HANDOFF ]; then
-            echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
-            exit 0
-          fi
-          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
-            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
-            exit 0
-          fi
-          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
-            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
-            exit 0
-          fi
-
-          sleep 45
-          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
-            --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
-          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
-            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
-            exit 0
-          fi
-          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
-            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
-            exit 0
-          fi
-          runs="$(curl --fail-with-body --silent --show-error \
-            --retry 3 --retry-delay 2 \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=100")"
-          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_ID}" \
-            '.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
-          for active_id in ${active_ids}; do
-            active_title="$(printf '%s' "${runs}" | jq -r --argjson id "${active_id}" \
-              '.workflow_runs[] | select(.id == $id) | .display_title')"
-            jobs="$(curl --fail-with-body --silent --show-error \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${active_id}/jobs?per_page=100")"
-            if printf '%s' "${jobs}" | jq -e --arg target "LIVE-predeadline-${OPERATIONAL_DATE}" \
-              'any(.jobs[]; .name == $target and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending"))' >/dev/null; then
-              echo "G11_PREDEADLINE_CHAIN=DEFER_ACTIVE_LIVE run=${active_id}"
-              exit 0
-            fi
-            # GitHub can queue a run under concurrency before materializing
-            # any jobs. Its phase/day run-name is authoritative until then.
-            if [ "$(printf '%s' "${jobs}" | jq '.jobs | length')" -eq 0 ] && \
-               [ "${active_title}" = "LIVE-predeadline-${OPERATIONAL_DATE}" ]; then
-              echo "G11_PREDEADLINE_CHAIN=DEFER_QUEUED_LIVE run=${active_id}"
-              exit 0
-            fi
-          done
-          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
-            '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
-            -d "${payload}"
-
       - name: Continue bounded NIGHT after official last-race handoff
         if: >-
           always() && !cancelled() &&
-          steps.runtime.outcome == 'success' &&
-          steps.encrypt-state.outputs.ready == 'true' &&
+          ((steps.due.outputs.phase == 'predeadline' &&
+            steps.critical-save.outcome == 'success') ||
+           (steps.due.outputs.phase == 'night' &&
+            steps.runtime.outcome == 'success' &&
+            steps.encrypt-state.outputs.ready == 'true')) &&
           (steps.due.outputs.phase == 'predeadline' || steps.due.outputs.phase == 'night')
         env:
           GH_TOKEN: ${{ github.token }}
@@ -2033,8 +2022,12 @@ jobs:
           echo "G11_PUBLIC_PREDEADLINE_BOOTSTRAP=DISPATCHED_ONCE"
 
       - name: Propagate private runtime failure after state checkpoint
-        if: always() && steps.runtime.outcome == 'failure'
+        if: always() && steps.runtime.outcome == 'failure' && steps.due.outputs.phase != 'predeadline'
         run: exit 1
+
+      - name: Classify optional PREDEADLINE relay failure
+        if: always() && steps.runtime.outcome == 'failure' && steps.due.outputs.phase == 'predeadline'
+        run: echo 'G11_PREDEADLINE_OPTIONAL_UNAVAILABLE=CRITICAL_CHECKPOINT_RETAINED'
 
 # operator-night-current-20260928
 
