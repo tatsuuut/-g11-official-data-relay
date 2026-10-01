@@ -14,6 +14,7 @@ ALLOWED_FILES = {
     ".github/workflows/g11-three-phase-runtime-contract-gate.yml",
     ".github/workflows/g11-explicit-night-dispatcher.yml",
     ".github/workflows/g11-predeadline-critical-watchdog.yml",
+    ".github/workflows/g11-predeadline-critical.yml",
     ".github/workflows/g11-night-backfill-20260917-20260919.yml",
     ".github/workflows/g11-wild-position-bootstrap.yml",
     ".gitignore",
