@@ -109,8 +109,15 @@ def project(field: str, value: object) -> object:
 
 def diff(old: object, new: object) -> object:
     if isinstance(old, dict) and isinstance(new, dict):
-        return {key: diff(old.get(key), value) for key, value in new.items()
-                if key not in old or old[key] != value}
+        changed = {}
+        for key, value in new.items():
+            if key not in old:
+                changed[key] = value
+            elif old[key] != value:
+                child = diff(old[key], value)
+                if child != {}:
+                    changed[key] = child
+        return changed
     return new
 
 
