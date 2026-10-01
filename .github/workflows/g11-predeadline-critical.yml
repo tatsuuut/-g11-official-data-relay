@@ -1,0 +1,402 @@
+name: G11 PREDEADLINE deadline-critical capture
+run-name: CRITICAL-predeadline-${{ inputs.operational_date || 'current' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operational_date:
+        description: Current JST date only
+        required: false
+        type: string
+  schedule:
+    - cron: "*/5 23 * * *"
+    - cron: "*/5 0-11 * * *"
+    - cron: "0-10/5 12 * * *"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: g11-predeadline-critical
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    name: PREDEADLINE critical capture
+    if: >-
+      github.repository_id == '1367703708' &&
+      github.ref == 'refs/heads/main' &&
+      vars.G11_RELAY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      G11_PRIVATE_REPOSITORY: ${{ secrets.PRIVATE_SOURCE_REPO }}
+      G11_PRIVATE_RUNTIME_REF: main
+      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
+      G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
+      TZ: Asia/Tokyo
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check runtime configuration
+        run: |
+          test -n "${G11_PRIVATE_REPOSITORY}" && echo 'PRIVATE_SOURCE_CONFIGURED=true'
+          test -n "${G11_APP_ORIGIN}" && echo 'APP_ENDPOINT_CONFIGURED=true'
+          test -n "${G11_OIDC_AUDIENCE}" && echo 'OIDC_CONFIGURED=true'
+
+      - name: Checkout public relay
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Audit public surface
+        run: python3 scripts/audit_public_surface.py
+
+      - name: Verify last-race heartbeat boundaries
+        if: github.event_name != 'schedule'
+        run: python3 -m unittest discover -s scripts -p test_dynamic_last_race_heartbeat.py
+
+      - name: Resolve the bounded phase and race day
+        id: due
+        env:
+          REQUESTED_PHASE: predeadline
+          REQUESTED_DATE: ${{ inputs.operational_date }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          now_hour="$(date +%H)"
+          now_minute="$(date +%M)"
+          if [ "${now_hour}" -lt 2 ]; then
+            operational_date="$(date --date='yesterday' +%F)"
+          else
+            operational_date="$(date +%F)"
+          fi
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            phase="predeadline"
+            if [ -n "${REQUESTED_DATE}" ]; then
+              operational_date="${REQUESTED_DATE}"
+            fi
+          elif [ "${EVENT_NAME}" = "schedule" ]; then
+            case "${SCHEDULE_EXPRESSION}" in
+              "15-55/5 17 * * *"|"*/5 18-21 * * *"|"0-5/5 22 * * *")
+                phase="morning"
+                ;;
+              "*/5 23 * * *"|"*/5 0-11 * * *"|"0-10/5 12 * * *")
+                phase="predeadline"
+                ;;
+              *)
+                phase="auto"
+                ;;
+            esac
+          elif [ "${EVENT_NAME}" = "push" ]; then
+            if [[ "${COMMIT_MESSAGE}" == *"[historical-final-repair]"* ]]; then
+              phase="dry-run"
+            elif [[ "${COMMIT_MESSAGE}" == *"[heartbeat-config-only]"* ]] && [[ "${operational_date}" < "2026-09-29" ]]; then
+              phase="dry-run"
+            elif [[ "${COMMIT_MESSAGE}" == *"[night-20260929]"* ]]; then
+              phase="night"
+              operational_date="2026-09-29"
+            elif [[ "${COMMIT_MESSAGE}" == *"[night-current]"* ]]; then
+              phase="night"
+            elif [[ "${COMMIT_MESSAGE}" == *"[morning-current]"* ]]; then
+              phase="morning"
+              operational_date="$(date +%F)"
+            elif [[ "${COMMIT_MESSAGE}" == *"[morning-20260923]"* ]]; then
+              phase="morning"
+              operational_date="2026-09-23"
+            else
+              phase="predeadline"
+            fi
+          elif [ "${now_hour}" -ge 2 ] && [ "${now_hour}" -le 7 ]; then
+            phase="morning"
+          elif [ "${now_hour}" -ge 8 ] && [ "${now_hour}" -le 20 ]; then
+            phase="predeadline"
+          elif [ "${now_minute}" = "30" ]; then
+            phase="night"
+          else
+            phase="auto"
+          fi
+          if [ "${SCHEDULE_EXPRESSION}" = "0-10/5 12 * * *" ] && [[ "${operational_date}" < "2026-09-29" ]]; then
+            phase="dry-run"
+          fi
+          python3 - "${operational_date}" "${phase}" <<'PY'
+          import datetime as dt
+          import re
+          import sys
+
+          if re.fullmatch(r"\d{4}-\d{2}-\d{2}", sys.argv[1]) is None:
+              raise SystemExit("G11_RELAY_OPERATIONAL_DATE_FORMAT")
+          dt.date.fromisoformat(sys.argv[1])
+          if sys.argv[2] not in {"auto", "morning", "predeadline", "night", "dry-run"}:
+              raise SystemExit("G11_RELAY_PHASE")
+          PY
+          printf 'operational_date=%s\nphase=%s\n' \
+            "${operational_date}" "${phase}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore only encrypted runtime state
+        id: restore-state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-${{ steps.due.outputs.operational_date }}-
+            g11-state-v2-
+
+      - name: Fail closed when the private credential is absent
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: test -n "${G11_PRIVATE_REPO_TOKEN}"
+
+      - name: Decrypt and validate restored state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p .relay-state
+          encrypted=".relay-cache/state.tgz.gpg"
+          if [ ! -f "${encrypted}" ]; then
+            exit 0
+          fi
+          archive="${RUNNER_TEMP}/g11-relay-state.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${archive}" "${encrypted}"
+          exec 3<&-
+          python3 - "${archive}" "${{ steps.due.outputs.operational_date }}" <<'PY'
+          import json
+          import pathlib
+          import shutil
+          import sys
+          import tarfile
+
+          archive = pathlib.Path(sys.argv[1])
+          operational_date = sys.argv[2]
+          state_root = pathlib.Path(".relay-state")
+          with tarfile.open(archive, "r:gz") as handle:
+              members = handle.getmembers()
+              if not members:
+                  raise SystemExit("G11_RELAY_EMPTY_STATE_ARCHIVE")
+              for member in members:
+                  path = pathlib.PurePosixPath(member.name)
+                  if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
+                      raise SystemExit("G11_RELAY_UNSAFE_STATE_ARCHIVE")
+              handle.extractall(state_root, filter="data")
+
+          metadata_path = state_root / "relay-state.json"
+          if metadata_path.is_file():
+              metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+              if metadata.get("OPERATIONAL_DATE_JST") != operational_date:
+                  store = state_root / "store"
+                  for name in (
+                      "manifest.json", "scope.json", "responses", "rejected-responses",
+                      "snapshots", "ledger",
+                  ):
+                      target = store / name
+                      if target.is_dir():
+                          shutil.rmtree(target)
+                      elif target.exists():
+                          target.unlink()
+                  # A rescue snapshot is date-bound and non-promotable. Never
+                  # carry yesterday's complete rescue envelope into a new race
+                  # day where it could be mistaken for today's fallback.
+                  rescue = state_root / "rescue"
+                  if rescue.is_dir():
+                      shutil.rmtree(rescue)
+                  elif rescue.exists():
+                      rescue.unlink()
+                  metadata = {
+                      "SCHEMA": "G11_PRIVATE_PUBLIC_RELAY_STATE_V1",
+                      "OPERATIONAL_DATE_JST": operational_date,
+                      "MORNING_COMPLETE": False,
+                      "LAST_PHASE": None,
+                      "LAST_STORE_SHA256": None,
+                      "LAST_PUBLISHED_FEED_SHA256": None,
+                  }
+                  metadata_path.write_text(
+                      json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n",
+                      encoding="utf-8",
+                  )
+          PY
+
+      - name: Checkout private G11 runtime
+        id: private-source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          ref: ${{ env.G11_PRIVATE_RUNTIME_REF }}
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve immutable private source identity
+        id: source
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          source_sha="$(git -C .g11-private rev-parse HEAD)"
+          printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Capture and lock dependency-free PREDEADLINE critical lane
+        if: steps.due.outputs.phase == 'predeadline'
+        id: critical
+        working-directory: .g11-private
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          mkdir -p ../.relay-output
+          python3 -S -m g11.relay.predeadline_critical_v1 \
+            --state-root "${GITHUB_WORKSPACE}/.relay-state" \
+            --operational-date "${{ steps.due.outputs.operational_date }}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --result "${GITHUB_WORKSPACE}/.relay-output/result.json"
+
+      - name: Encrypt critical state before optional work
+        if: steps.due.outputs.phase == 'predeadline' && steps.critical.outcome == 'success'
+        id: critical-encrypt
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
+          mkdir -p .relay-cache
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . | \
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+              --symmetric --cipher-algo AES256 \
+              --output .relay-cache/state.tgz.gpg.tmp
+          exec 3<&-
+          mv .relay-cache/state.tgz.gpg.tmp .relay-cache/state.tgz.gpg
+          test -s .relay-cache/state.tgz.gpg
+          echo 'ready=true' >> "${GITHUB_OUTPUT}"
+
+      - name: Save early encrypted critical checkpoint
+        if: steps.critical-encrypt.outputs.ready == 'true'
+        id: critical-save
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-critical
+
+      - name: Dispatch independent read-only Site delivery
+        if: steps.critical-save.outcome == 'success' && steps.critical.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! jq -e '.STATUS == "CRITICAL_CHECKPOINT_PASS"' .relay-output/result.json >/dev/null; then
+            echo 'G11_CRITICAL_SITE_DELIVERY=NIGHT_HANDOFF'
+            exit 0
+          fi
+          payload="$(jq -cn --arg day "${{ steps.due.outputs.operational_date }}" \
+            '{ref:"main",inputs:{phase:"predeadline",operational_date:$day,delivery_only:"true"}}')"
+          curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 20 -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+            -d "${payload}"
+          echo 'G11_CRITICAL_SITE_DELIVERY=DISPATCH_ACCEPTED'
+
+      - name: Keep the predeadline relay alive between delayed cron starts
+        if: always() && !cancelled() && steps.critical.outcome == 'success' && steps.critical-save.outcome == 'success' && steps.critical-encrypt.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
+            --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
+          if [ "${heartbeat}" = HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
+            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
+            exit 0
+          fi
+
+          sleep 45
+          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
+            --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
+          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
+            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
+            exit 0
+          fi
+          runs="$(curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 2 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-predeadline-critical.yml/runs?per_page=100")"
+          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_ID}" \
+            '.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
+          for active_id in ${active_ids}; do
+            active_title="$(printf '%s' "${runs}" | jq -r --argjson id "${active_id}" \
+              '.workflow_runs[] | select(.id == $id) | .display_title')"
+            jobs="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${active_id}/jobs?per_page=100")"
+            if printf '%s' "${jobs}" | jq -e --arg target "PREDEADLINE critical capture" \
+              'any(.jobs[]; .name == $target and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending"))' >/dev/null; then
+              echo "G11_PREDEADLINE_CHAIN=DEFER_ACTIVE_LIVE run=${active_id}"
+              exit 0
+            fi
+            if [ "$(printf '%s' "${jobs}" | jq '.jobs | length')" -eq 0 ] && \
+               [ "${active_title}" = "PREDEADLINE critical capture" ]; then
+              echo "G11_PREDEADLINE_CHAIN=DEFER_QUEUED_LIVE run=${active_id}"
+              exit 0
+            fi
+          done
+          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
+            '{ref:"main",inputs:{operational_date:$day}}')"
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-predeadline-critical.yml/dispatches" \
+            -d "${payload}"
+
+      - name: Hand off to unchanged NIGHT workflow after the verified last deadline
+        if: steps.critical-save.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! jq -e '.STATUS == "NIGHT_HANDOFF_READY" and .NIGHT_HANDOFF == true' .relay-output/result.json >/dev/null; then
+            exit 0
+          fi
+          deadline="$(jq -er '.LAST_RACE_DEADLINE_JST' .relay-output/result.json)"
+          test "$(date -d "${deadline}" +%s)" -le "$(date +%s)"
+          runs="$(curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 20 \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=50")"
+          if printf '%s' "${runs}" | jq -e 'any(.workflow_runs[]; .status == "queued" or .status == "in_progress" or .status == "waiting")' >/dev/null; then
+            echo 'G11_CRITICAL_NIGHT_HANDOFF=DEFER_ACTIVE_RUN'
+            exit 0
+          fi
+          payload="$(jq -cn --arg day "${{ steps.due.outputs.operational_date }}" \
+            '{ref:"main",inputs:{phase:"night",operational_date:$day}}')"
+          curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 20 -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" -d "${payload}"
+          echo 'G11_CRITICAL_NIGHT_HANDOFF=DISPATCH_ACCEPTED'
