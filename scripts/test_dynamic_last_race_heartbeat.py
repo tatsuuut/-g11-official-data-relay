@@ -76,6 +76,14 @@ class HeartbeatPolicyTests(unittest.TestCase):
         self.assertEqual(decision({}, old, datetime.fromisoformat("2026-09-28T20:50:00+09:00")), "STOP_LEGACY")
         self.assertEqual(decision({}, old, datetime.fromisoformat("2026-09-29T00:10:00+09:00")), "STOP_LEGACY")
 
+    def test_critical_checkpoint_continues_without_optional_runtime(self):
+        now = datetime.fromisoformat("2026-09-29T21:10:00+09:00")
+        critical = dict(runtime("22:41"), STATUS="CRITICAL_CHECKPOINT_PASS",
+                        CRITICAL={"CRITICAL_CHECKPOINT_STATUS": "PASS"})
+        self.assertEqual(decision(critical, DAY, now), "CONTINUE")
+        with self.assertRaisesRegex(ValueError, "CRITICAL_CHECKPOINT_REQUIRED"):
+            decision(dict(critical, CRITICAL={"CRITICAL_CHECKPOINT_STATUS": "FAIL"}), DAY, now)
+
 
 if __name__ == "__main__":
     unittest.main()
