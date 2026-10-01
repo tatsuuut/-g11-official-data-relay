@@ -360,7 +360,7 @@ jobs:
               exit 0
             fi
             if [ "$(printf '%s' "${jobs}" | jq '.jobs | length')" -eq 0 ] && \
-               [ "${active_title}" = "PREDEADLINE critical capture" ]; then
+               [[ "${active_title}" == CRITICAL-predeadline-* ]]; then
               echo "G11_PREDEADLINE_CHAIN=DEFER_QUEUED_LIVE run=${active_id}"
               exit 0
             fi
