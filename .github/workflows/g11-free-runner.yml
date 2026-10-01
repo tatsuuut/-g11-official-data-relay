@@ -1350,18 +1350,6 @@ jobs:
           echo "G11_TRANSPORT_RESCUE_PROOF=$(jq -c '{tagged:([.races[] | select((.today_rescue | type) == "object")] | length),first:(.races[0] | {key,today_rescue}),class:.SNAPSHOT_CLASS}' "${FEED}")"
           jq -e 'if .SNAPSHOT_CLASS=="TODAY_ONLY_RESCUE_PREDEADLINE" then all(.races[];(.today_rescue|type)=="object") else true end' "${FEED}" >/dev/null
           echo "G11_TRANSPORT_THREE_ENGINE=$(jq -c '{capability:.capabilities.three_engine_comparison,summary:(.three_engine_comparison|type),first:(.races[0] | {key,three_engine_classification,three_engine_score}),missing:([.races[] | select((.three_engine_score|type)!="object" or .three_engine_classification==null)]|length)}' "${FEED}")"
-          if [ "${RELAY_PHASE}" = "night" ] || [ "${RELAY_PHASE}" = "predeadline" ]; then
-            python3 - "${FEED}" <<'PY'
-          import collections, json, pathlib, sys
-          feed=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-          size=lambda value: len(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8"))
-          top=sorted(((key,size(value)) for key,value in feed.items()),key=lambda row:-row[1])
-          by_field=collections.Counter()
-          for race in feed.get("races",[]):
-              by_field.update({key:size(value) for key,value in race.items()})
-          print("G11_NIGHT_RAW_FIELD_BYTES="+json.dumps({"total":pathlib.Path(sys.argv[1]).stat().st_size,"top_level":top,"race_fields":by_field.most_common()},ensure_ascii=False,separators=(",",":")))
-          PY
-          fi
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
@@ -1369,6 +1357,10 @@ jobs:
             -H 'Accept: application/json' \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
           token="$(printf '%s' "${oidc}" | jq -er '.value')"
+          if [ "${RELAY_PHASE}" != "morning" ] && [ -s .relay-output/stored-feed.json ]; then
+            G11_SYNC_OIDC="${token}" python3 scripts/hot_delta_transport_v1.py "${FEED}" "${G11_APP_ORIGIN}"
+            exit 0
+          fi
           http_status="$(curl --silent --show-error \
             -X POST "${G11_APP_ORIGIN}/api/g11-sync" \
             -H "Authorization: Bearer ${token}" \
@@ -1603,6 +1595,12 @@ jobs:
             ' .relay-output/readback.headers
           }
 
+          if [ -f .relay-output/hot-delta-accepted ]; then
+            test "$(cat .relay-output/hot-delta-accepted)" = "$(header x-g11-source-feed-sha256)"
+            test "$(sha256sum .relay-output/readback.json | cut -d' ' -f1)" = "$(header x-g11-feed-sha256)"
+            echo G11_HOT_DELTA_SITE_READBACK=PASS
+            exit 0
+          fi
           source_sha="$(header x-g11-source-feed-sha256)"
           readback_sha="$(header x-g11-feed-sha256)"
           authority_source="$(header x-g11-authority-readback-source)"

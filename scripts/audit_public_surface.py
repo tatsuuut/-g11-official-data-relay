@@ -19,6 +19,7 @@ ALLOWED_FILES = {
     "README.md",
     "SECURITY.md",
     "scripts/audit_public_surface.py",
+    "scripts/hot_delta_transport_v1.py",
     "scripts/repair_20260928_final.py",
     "scripts/overlay_20260928_accepted_feed_final.py",
     "scripts/official_20260928_results.txt",
