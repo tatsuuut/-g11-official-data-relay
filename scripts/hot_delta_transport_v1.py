@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from collections import Counter
 
 SCHEMA = "G11_SITE_HOT_DELTA_V1"
 BUDGET = 900_000
@@ -169,6 +170,8 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
     if incoming["stage"] == "NIGHT":
         top.update({key: incoming[key] for key in NIGHT_TOP if key in incoming})
     fingerprint = hash_bytes(compact({"stage": incoming["stage"], "day": day, "top": top, "races": changes}))
+    changed = Counter(field for race in changes for field in race["CHANGED_FIELDS"])
+    print("G11_HOT_DELTA_FIELD_COUNTS=" + json.dumps(changed, sort_keys=True))
     return {
         "SCHEMA": SCHEMA, "OPERATIONAL_DATE": day, "BASE_FEED_SHA": base_sha,
         "PATCH_SEQUENCE": incoming["source"]["run_id"] * 1000 + 1,
