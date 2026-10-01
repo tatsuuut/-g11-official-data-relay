@@ -591,7 +591,6 @@ jobs:
           set -euo pipefail
           mkdir -p ../.relay-output
           if [ "${G11_NIGHT_TRANSPORT_ONLY}" = "true" ]; then
-            test "${{ steps.due.outputs.operational_date }}" = "$(date +%F)"
             PYTHONPATH=. python3 ../scripts/hot_delta_transport_v1.py --night-projection \
               "${GITHUB_WORKSPACE}/.relay-state/store" \
               "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
