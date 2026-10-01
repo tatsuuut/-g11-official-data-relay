@@ -1062,8 +1062,8 @@ jobs:
               | ([.races[] | select(.research_eligible == true and .odds_captured_at_jst != null)] | length) as $enriched
               | .counts.odds_enriched = $enriched
               | .counts.odds_waiting = (.counts.formal - $enriched)
-              | .counts.win_candidates_basis = "FORMAL_READY_PRE_RACE_ODDS_MERIT"
-              | .counts.win_candidates = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.odds_merit == "◎")] | length)
+              | .counts.win_candidates_basis = "FORMAL_READY_PRE_RACE_VALUE_ALERT"
+              | .counts.win_candidates = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.value_alert == true)] | length)
               | .counts.value_alert_count = ([.races[] | select(.formal_status == "FORMAL" and .research_eligible == true and .predeadline.status == "READY" and .predeadline.value_alert == true)] | length)
             ' "${FEED}" > .relay-output/feed-reconciled.json
             mv .relay-output/feed-reconciled.json "${FEED}"
