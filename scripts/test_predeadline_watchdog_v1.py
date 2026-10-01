@@ -11,6 +11,7 @@ NOW = datetime.fromisoformat("2026-10-01T18:20:00+09:00")
 
 def feed():
     return {"operational_date_jst": DAY, "stage": "PREDEADLINE", "status": "PASS",
+            "counts": {"races": 1},
             "canonical_authorities": {"growth_p3": {"status": "LOCKED"}},
             "races": [{"deadline_jst": "2026-10-01T22:41:00+09:00"}]}
 
