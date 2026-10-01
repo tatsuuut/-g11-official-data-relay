@@ -12,7 +12,7 @@ from collections import Counter
 
 SCHEMA = "G11_SITE_HOT_DELTA_V1"
 BUDGET = 900_000
-NIGHT_TARGET_CHUNK_BYTES = 300_000
+NIGHT_TARGET_CHUNK_BYTES = 295_000  # JSON envelope keeps wire chunks below 300 KB.
 NIGHT_HARD_CHUNK_BYTES = 500_000
 NIGHT_TRANSACTION_SCHEMA = "G11_NIGHT_TRANSACTION_V1"
 BASE_BUDGET = 1_700_000
@@ -348,6 +348,39 @@ def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
     top = delta["TOP_LEVEL"]
     date = delta["OPERATIONAL_DATE"]
     keys = sorted(row["key"] for row in incoming["races"])
+
+    def nested(path: tuple[str, ...], value: object) -> dict:
+        for key in reversed(path):
+            value = {key: value}
+        return value
+
+    def fragments(value: object, path: tuple[str, ...] = ()):
+        fragment = nested(path, value)
+        if len(compact(fragment)) < NIGHT_TARGET_CHUNK_BYTES - 1500:
+            yield fragment
+        elif isinstance(value, dict) and value:
+            for key, child in value.items():
+                yield from fragments(child, path + (key,))
+        else:
+            raise RuntimeError("NIGHT_TOP_FIELD_EXCEEDS_CHUNK_BUDGET:" + ".".join(path))
+
+    def merge(base: dict, patch: dict) -> dict:
+        result = base.copy()
+        for key, value in patch.items():
+            result[key] = merge(result[key], value) if isinstance(value, dict) and isinstance(result.get(key), dict) else value
+        return result
+
+    top_chunks: list[dict] = []
+    current_top: dict = {}
+    for fragment in fragments(top):
+        candidate = merge(current_top, fragment)
+        if len(compact(candidate)) > NIGHT_TARGET_CHUNK_BYTES - 1500 and current_top:
+            top_chunks.append(current_top)
+            current_top = fragment
+        else:
+            current_top = candidate
+    if current_top:
+        top_chunks.append(current_top)
     race_chunks: list[list[dict]] = []
     current: list[dict] = []
     for row in delta["RACES"]:
@@ -364,24 +397,25 @@ def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
     if not race_chunks:
         raise RuntimeError("NIGHT_NO_CHANGED_RACES")
     transaction_id = hash_bytes(compact([date, delta["BASE_FEED_SHA"], source_sha, delta["PATCH_SHA256"]]))
-    chunk_hashes = [hash_bytes(compact(rows)) for rows in race_chunks]
+    parts = [(part, []) for part in top_chunks] + [({}, rows) for rows in race_chunks]
+    chunk_hashes = [hash_bytes(compact({"TOP_LEVEL": part, "RACES": rows})) for part, rows in parts]
     manifest = {
         "SCHEMA": NIGHT_TRANSACTION_SCHEMA, "ACTION": "MANIFEST",
         "OPERATIONAL_DATE": date, "NIGHT_TRANSACTION_ID": transaction_id,
         "BASE_FEED_SHA": delta["BASE_FEED_SHA"], "SOURCE_NIGHT_SHA": source_sha,
         "PATCH_SEQUENCE": delta["PATCH_SEQUENCE"],
         "PATCH_CREATED_AT": delta["PATCH_CREATED_AT"], "PATCH_SHA256": delta["PATCH_SHA256"],
-        "CHUNK_COUNT": len(race_chunks), "CHUNK_SHA256": chunk_hashes,
+        "CHUNK_COUNT": len(parts), "CHUNK_SHA256": chunk_hashes,
         "EXPECTED_RACES": incoming["counts"]["races"],
         "EXPECTED_RESULTS": incoming["counts"]["results"],
         "EXPECTED_PENDING": incoming["counts"]["pending"],
         "EXPECTED_RACE_KEY_SET_SHA": hash_bytes(compact(keys)),
         "EXPECTED_FINAL_ACCOUNTING_SHA": hash_bytes(compact(top["final_accounting"])),
+        "EXPECTED_TOP_LEVEL_SHA": hash_bytes(compact(top)),
         "EXPECTED_FINANCE_SHA": hash_bytes(compact([
             [row["RACE_KEY"], row["CHANGED_FIELDS"].get("research_finance")]
             for row in delta["RACES"]
         ])),
-        "TOP_LEVEL": top,
     }
     manifest["MANIFEST_SHA256"] = hash_bytes(compact(manifest))
     if len(compact(manifest)) > NIGHT_HARD_CHUNK_BYTES:
@@ -390,10 +424,11 @@ def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
         "SCHEMA": NIGHT_TRANSACTION_SCHEMA, "ACTION": "CHUNK",
         "OPERATIONAL_DATE": date, "NIGHT_TRANSACTION_ID": transaction_id,
         "MANIFEST_SHA256": manifest["MANIFEST_SHA256"], "SOURCE_NIGHT_SHA": source_sha,
-        "CHUNK_INDEX": i, "CHUNK_COUNT": len(race_chunks),
+        "CHUNK_INDEX": i, "CHUNK_COUNT": len(parts),
         "CHUNK_SHA256": chunk_hashes[i],
-        "RACE_KEYS": [row["RACE_KEY"] for row in rows], "RACES": rows,
-    } for i, rows in enumerate(race_chunks)]
+        "RACE_KEYS": [row["RACE_KEY"] for row in rows], "TOP_LEVEL": part,
+        "RACES": rows,
+    } for i, (part, rows) in enumerate(parts)]
     if any(len(compact(chunk)) > NIGHT_HARD_CHUNK_BYTES for chunk in chunks):
         raise RuntimeError("NIGHT_CHUNK_EXCEEDS_HARD_BUDGET")
     print("G11_NIGHT_TRANSACTION_CHUNK_BYTES=" + json.dumps([len(compact(c)) for c in chunks]))
