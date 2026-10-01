@@ -6,9 +6,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
-import urllib.error
-import urllib.request
 
 SCHEMA = "G11_SITE_HOT_DELTA_V1"
 BUDGET = 900_000
@@ -115,9 +114,21 @@ def diff(old: object, new: object) -> object:
 
 
 def fetch(url: str) -> tuple[dict, dict[str, str], bytes]:
-    with urllib.request.urlopen(url, timeout=35) as response:
-        body = response.read()
-        headers = {key.lower(): value for key, value in response.headers.items()}
+    body_path = Path(".relay-output/hot-get-body.json")
+    header_path = Path(".relay-output/hot-get-headers.txt")
+    subprocess.run([
+        "curl", "--fail-with-body", "--silent", "--show-error", "--location",
+        "--max-time", "35", "--dump-header", str(header_path),
+        "--output", str(body_path), url,
+    ], check=True)
+    body = body_path.read_bytes()
+    headers = {}
+    for line in header_path.read_text().splitlines():
+        if line.startswith("HTTP/"):
+            headers = {}
+        elif ":" in line:
+            key, value = line.split(":", 1)
+            headers[key.lower()] = value.strip()
     if hash_bytes(body) != headers.get("x-g11-feed-sha256"):
         raise RuntimeError("HOT_READBACK_SHA")
     return json.loads(body), headers, body
@@ -185,20 +196,23 @@ def publish(feed_path: Path, origin: str) -> None:
         Path(os.environ["GITHUB_OUTPUT"]).open("a").write("feed_sha=" + base_sha + "\n")
         return
     token = os.environ["G11_SYNC_OIDC"]
-    req = urllib.request.Request(
-        f"{origin}/api/g11-hot-delta", data=data, method="POST",
-        headers={"authorization": "Bearer " + token, "content-type": "application/json",
-                 "x-g11-feed-sha256": hash_bytes(data)},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=35) as response:
-            body = json.loads(response.read())
-            status = response.status
-    except urllib.error.HTTPError as error:
-        print("G11_HOT_DELTA_HTTP=" + str(error.code))
-        print(error.read().decode("utf-8")[:500])
-        raise
+    request_path = Path(".relay-output/hot-delta-request.json")
+    response_path = Path(".relay-output/hot-delta-response.json")
+    request_path.write_bytes(data)
+    result = subprocess.run([
+        "curl", "--silent", "--show-error", "--location", "--max-time", "35",
+        "-X", "POST", f"{origin}/api/g11-hot-delta",
+        "-H", "Authorization: Bearer " + token,
+        "-H", "Content-Type: application/json",
+        "-H", "x-g11-feed-sha256: " + hash_bytes(data),
+        "--data-binary", "@" + str(request_path), "--output", str(response_path),
+        "--write-out", "%{http_code}",
+    ], check=True, capture_output=True, text=True)
+    status = int(result.stdout)
     print("G11_HOT_DELTA_HTTP=" + str(status))
+    body = json.loads(response_path.read_text())
+    if status < 200 or status >= 300:
+        raise RuntimeError("HOT_DELTA_REJECTED:" + str(body.get("error")))
     if body.get("status") != "PASS":
         raise RuntimeError("HOT_DELTA_REJECTED")
     readback, next_headers, raw = fetch(url)
