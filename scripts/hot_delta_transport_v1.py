@@ -113,6 +113,41 @@ def hash_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def reproject_completed_night(store: Path, output: Path, run_id: str,
+                              source_sha: str, checked_out_sha: str) -> None:
+    """Read the completed immutable NIGHT state without invoking acquisition or settlement."""
+    import re
+    if not run_id.isdecimal() or not re.fullmatch(r"[a-f0-9]{40}", source_sha):
+        raise RuntimeError("NIGHT_TRANSPORT_SOURCE_ID_REQUIRED")
+    if source_sha != checked_out_sha:
+        raise RuntimeError("NIGHT_TRANSPORT_PRIVATE_SOURCE_CHANGED")
+    from g11.relay import v1 as relay
+    from g11.growth_p3.v1_1 import relay_publish_v1 as current
+    night_path = store / "snapshots" / "night" / "workbook-ledger-projection.json"
+    if not night_path.is_file():
+        raise RuntimeError("NIGHT_TRANSPORT_CANONICAL_MISSING")
+    canonical = json.loads(night_path.read_text())
+    if canonical.get("PAYLOAD", {}).get("COUNTS", {}).get("PENDING_RACES") != 0:
+        raise RuntimeError("NIGHT_TRANSPORT_CANONICAL_INCOMPLETE")
+    before = relay._tree_sha(store)
+    publication = current.load_locked_publication(
+        store, relay._morning_projection(store), relay._now_jst())
+    feed = relay.build_feed(
+        store, run_id=int(run_id), github_sha=source_sha,
+        current_p3_publication=publication, relay_phase="night")
+    if (feed["stage"] != "NIGHT" or feed["status"] != "PASS" or
+            feed["counts"]["pending"] != 0 or
+            feed["counts"]["results"] != feed["counts"]["races"] or
+            relay._tree_sha(store) != before):
+        raise RuntimeError("NIGHT_TRANSPORT_CANONICAL_MUTATION_OR_COVERAGE")
+    relay._write_json(output, feed)
+    (output.parent / "night-canonical.sha").write_text(
+        relay._sha(night_path) + "  " + str(night_path) + "\n", encoding="utf-8")
+    print("G11_NIGHT_TRANSPORT_ONLY_CANONICAL_SHA=" + relay._sha(night_path))
+    print("G11_NIGHT_TRANSPORT_ONLY_STORE_SHA=" + before)
+    print("G11_NIGHT_TRANSPORT_ONLY_RESULTS=" + str(feed["counts"]["results"]))
+
+
 def mashiro_hot(value: dict) -> dict:
     state = value["MASHIRO_EVALUATION_STATUS"]
     return {
@@ -469,7 +504,10 @@ def publish(feed_path: Path, origin: str) -> None:
 
 if __name__ == "__main__":
     try:
-        if sys.argv[1] == "--morning-base":
+        if sys.argv[1] == "--night-projection":
+            reproject_completed_night(Path(sys.argv[2]), Path(sys.argv[3]),
+                                      sys.argv[4], sys.argv[5], sys.argv[6])
+        elif sys.argv[1] == "--morning-base":
             project_morning_base(Path(sys.argv[2]))
         else:
             publish(Path(sys.argv[1]), sys.argv[2].rstrip("/"))
