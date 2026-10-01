@@ -79,6 +79,13 @@ VERIFICATION_KEYS = {
     "SPECIAL_45_FIXED_8", "SPECIAL_45_PRODUCTION_POINTS",
     "SPECIAL_45_FIXED_BETS",
 }
+MASHIRO_HOT_TARGET_KEYS = {
+    "MASHIRO_BOAT", "MASHIRO_OPPORTUNITY", "MASHIRO_RACER_NAME",
+    "MASHIRO_EXHIBITION_COURSE", "MASHIRO_ACTUAL_COURSE", "MASHIRO_P3_RANK",
+    "MASHIRO_INCLUDED_BET_COUNT", "MASHIRO_VERIFICATION10_STATUS",
+    "MASHIRO_VERIFICATION10_BET_COUNT", "MASHIRO_FINISH", "MASHIRO_HIT",
+    "RESULT_JOIN_STATUS",
+}
 TARGET_KEYS = {
     "MASHIRO_BOAT", "MASHIRO_EVALUATION_STATUS", "MASHIRO_OPPORTUNITY",
     "MASHIRO_CANDIDATE", "MASHIRO_DISCOVERY54_MEMBER", "MASHIRO_ATTRIBUTE_STATUS",
@@ -101,6 +108,24 @@ def compact(value: object) -> bytes:
 
 def hash_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def mashiro_hot(value: dict) -> dict:
+    state = value["MASHIRO_EVALUATION_STATUS"]
+    return {
+        "SCHEMA": "G11_MASHIRO_HOT_SUMMARY_V1", "RACE_ID": value["RACE_ID"],
+        "MASHIRO_EVALUATION_STATUS": state,
+        "MASHIRO_OPPORTUNITY": value["MASHIRO_OPPORTUNITY"],
+        "P3_SNAPSHOT_SHA256": value.get("P3_SNAPSHOT_SHA256"),
+        "MASHIRO_TARGETS": [
+            {k: v for k, v in target.items() if k in MASHIRO_HOT_TARGET_KEYS}
+            for target in value.get("MASHIRO_TARGETS", []) if isinstance(target, dict)
+        ] if state == "PRESENT" else [],
+        "INNER_A1_COURSES": value.get("INNER_A1_COURSES"),
+        "SPECIAL_45_ACTIVE": value.get("SPECIAL_45_ACTIVE"),
+        "SPECIAL_45_STRENGTH": value.get("SPECIAL_45_STRENGTH"),
+        "RESEARCH_REF_SHA256": hash_bytes(compact(value)),
+    }
 
 
 def project(field: str, value: object) -> object:
@@ -218,11 +243,12 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
         for field in allowed:
             if field not in row or row[field] is None and incoming["stage"] != "NIGHT":
                 continue
-            current = project(field, row[field])
-            previous = prior.get(field)
+            output_field = "mashiro_hot" if field == "p3_verification" and "p3_verification" not in prior else field
+            current = mashiro_hot(row[field]) if output_field == "mashiro_hot" else project(field, row[field])
+            previous = prior.get(output_field)
             delta = diff(previous, current)
             if previous != current and delta != {}:
-                fields[field] = delta
+                fields[output_field] = delta
         if not fields:
             continue
         live = row.get("predeadline")
