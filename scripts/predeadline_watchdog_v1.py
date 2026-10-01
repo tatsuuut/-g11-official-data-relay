@@ -68,7 +68,7 @@ def main(now: datetime | None = None) -> None:
     if now >= _last_deadline(feed, day):
         print("G11_CRITICAL_WATCHDOG=NIGHT_HANDOFF")
         return
-    base = f"https://api.github.com/repos/{repository}/actions/workflows/g11-free-runner.yml"
+    base = f"https://api.github.com/repos/{repository}/actions/workflows/g11-predeadline-critical.yml"
     runs = _get(base + "/runs?per_page=30", token)["workflow_runs"]
     def jobs(run_id):
         return _get(f"https://api.github.com/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100", token)["jobs"]

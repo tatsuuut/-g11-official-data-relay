@@ -19,6 +19,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 FREE = ROOT / ".github" / "workflows" / "g11-free-runner.yml"
 NIGHT = ROOT / ".github" / "workflows" / "g11-explicit-night-dispatcher.yml"
+CRITICAL = ROOT / ".github" / "workflows" / "g11-predeadline-critical.yml"
 
 
 class ContractError(RuntimeError):
@@ -37,6 +38,7 @@ def require_text(text: str, needle: str, code: str) -> None:
 def audit_public() -> dict[str, object]:
     free = FREE.read_text(encoding="utf-8")
     night = NIGHT.read_text(encoding="utf-8")
+    critical = CRITICAL.read_text(encoding="utf-8")
 
     # MORNING scheduler and resolver must stay coupled exactly.
     morning_crons = (
@@ -60,13 +62,15 @@ def audit_public() -> dict[str, object]:
         'cron: "0-10/5 12 * * *"',
     )
     for cron in pre_crons:
-        require_text(free, cron, f"PREDEADLINE_CRON_MISSING:{cron}")
+        require_text(critical, cron, f"PREDEADLINE_CRON_MISSING:{cron}")
+        require(cron not in free[:free.index('permissions:')],
+                f"PREDEADLINE_OLD_SCHEDULE_PRESENT:{cron}")
     require_text(
-        free,
+        critical,
         '"*/5 23 * * *"|"*/5 0-11 * * *"|"0-10/5 12 * * *")',
         "PREDEADLINE_RESOLVER_SET",
     )
-    require_text(free, 'phase="predeadline"', "PREDEADLINE_RESOLVER_PHASE")
+    require_text(critical, 'phase="predeadline"', "PREDEADLINE_RESOLVER_PHASE")
 
     # NIGHT is handed off after the last race; 22:00 dispatch is recovery.
     require('cron: "*/5 13-16 * * *"' not in free, "NIGHT_CRON_LEAK_IN_FREE_RUNNER")
@@ -111,11 +115,11 @@ def audit_public() -> dict[str, object]:
     # PREDEADLINE reliability contract: cron delay must not suppress the
     # self-dispatch heartbeat.  Only another workflow_dispatch continuation
     # may block dispatch; TRUE-AI artifacts are not an availability gate.
-    continuation_start = free.index(
+    continuation_start = critical.index(
         "- name: Keep the predeadline relay alive between delayed cron starts"
     )
-    continuation_end = free.index("- name: Checkout hash-locked research runtime")
-    continuation = free[continuation_start:continuation_end]
+    continuation_end = critical.index("- name: Hand off to unchanged NIGHT workflow")
+    continuation = critical[continuation_start:continuation_end]
     require_text(continuation, "steps.critical-save.outcome == 'success'",
                  "PREDEADLINE_CRITICAL_CHECKPOINT_CHAIN_AUTHORITY")
     require("steps.runtime.outcome" not in continuation,
@@ -134,7 +138,7 @@ def audit_public() -> dict[str, object]:
     require("-ge 2110" not in continuation, "PREDEADLINE_FIXED_2110_CUTOFF")
     require_text(
         continuation,
-        'actions/workflows/g11-free-runner.yml/dispatches',
+        'actions/workflows/g11-predeadline-critical.yml/dispatches',
         "PREDEADLINE_CHAIN_DISPATCH_TARGET",
     )
     require(
@@ -145,6 +149,14 @@ def audit_public() -> dict[str, object]:
         '.event == "schedule"' not in continuation,
         "PREDEADLINE_CHAIN_CRON_MUST_NOT_BLOCK",
     )
+    pre_capture = critical[:critical.index("- name: Capture and lock dependency-free PREDEADLINE critical lane")]
+    for forbidden in ("pip install", "catboost", "WILD model", "Hydrate append-only", "Site delivery"):
+        require(forbidden not in pre_capture, f"CRITICAL_BEFORE_CAPTURE:{forbidden}")
+    require_text(critical, "python3 -S -m g11.relay.predeadline_critical_v1", "CRITICAL_STDLIB_ADAPTER")
+    require_text(critical, "Save early encrypted critical checkpoint", "CRITICAL_EARLY_CHECKPOINT")
+    require_text(critical, 'delivery_only:"true"', "INDEPENDENT_SITE_DELIVERY")
+    require_text(free, "g11.relay.predeadline_delivery_v1", "READ_ONLY_SITE_DELIVERY_ADAPTER")
+    require_text(free, "inputs.delivery_only != true", "DELIVERY_CRITICAL_CHECKPOINT_NOT_RESAVED")
 
     return {
         "MORNING": "PASS",
