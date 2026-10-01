@@ -1350,6 +1350,9 @@ jobs:
           echo "G11_TRANSPORT_RESCUE_PROOF=$(jq -c '{tagged:([.races[] | select((.today_rescue | type) == "object")] | length),first:(.races[0] | {key,today_rescue}),class:.SNAPSHOT_CLASS}' "${FEED}")"
           jq -e 'if .SNAPSHOT_CLASS=="TODAY_ONLY_RESCUE_PREDEADLINE" then all(.races[];(.today_rescue|type)=="object") else true end' "${FEED}" >/dev/null
           echo "G11_TRANSPORT_THREE_ENGINE=$(jq -c '{capability:.capabilities.three_engine_comparison,summary:(.three_engine_comparison|type),first:(.races[0] | {key,three_engine_classification,three_engine_score}),missing:([.races[] | select((.three_engine_score|type)!="object" or .three_engine_classification==null)]|length)}' "${FEED}")"
+          if [ "${RELAY_PHASE}" = "morning" ]; then
+            python3 scripts/hot_delta_transport_v1.py --morning-base "${FEED}"
+          fi
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \

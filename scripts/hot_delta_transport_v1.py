@@ -12,6 +12,30 @@ from collections import Counter
 
 SCHEMA = "G11_SITE_HOT_DELTA_V1"
 BUDGET = 900_000
+BASE_BUDGET = 1_700_000
+BASE_TOP_FIELDS = {
+    "schema", "status", "stage", "operational_date_jst", "generated_at_jst",
+    "source", "counts", "research", "research_db", "integrity", "capabilities",
+    "canonical_authorities", "wild_pack", "true_ai", "abeken",
+    "three_engine_comparison", "original_display_research",
+    "conditional_finish_research", "logic_candidate_research", "late_reference_summary",
+    "final_accounting", "races",
+}
+BASE_RACE_FIELDS = {
+    "key", "date_jst", "venue", "venue_code", "race", "deadline_jst",
+    "formal_status", "exclusion_reason", "research_eligible", "top_boat",
+    "second_boat", "axis", "quality", "turbulence", "practical_bets",
+    "production_points", "prediction", "caution", "p3_head", "p3_logic_id",
+    "p3_production_bets", "p3_published_at_jst", "p3_snapshot",
+    "p3_snapshot_sha256", "p3_status", "special_case_id", "special_strength",
+    "strong_mark", "trifecta_confidence", "predeadline", "pre_race_v2",
+    "predeadline_exclusion_reason", "odds_merit", "best_ev", "best_ev_bet",
+    "value_bets", "odds_captured_at_jst", "result_trifecta", "payout",
+    "practical_hit", "validation_hit", "miss_classification", "research_decision",
+    "result_meta", "research_finance", "actual_purchase", "abeken_shadow",
+    "wild_pack", "original_display_shadow", "three_engine_score",
+    "three_engine_classification", "late_reference",
+}
 PRE_FIELDS = (
     "predeadline", "pre_race_v2", "odds_merit", "best_ev", "best_ev_bet",
     "value_bets", "odds_captured_at_jst", "p3_verification", "abeken_shadow",
@@ -128,6 +152,27 @@ def includes(actual: object, expected: object) -> bool:
             for key, value in expected.items()
         )
     return actual == expected
+
+
+def project_morning_base(path: Path) -> None:
+    source = path.read_bytes()
+    feed = json.loads(source)
+    if feed.get("stage") != "MORNING" or not isinstance(feed.get("races"), list):
+        raise RuntimeError("HOT_BASE_STAGE")
+    base = {key: value for key, value in feed.items() if key in BASE_TOP_FIELDS}
+    base["races"] = [
+        {key: value for key, value in race.items() if key in BASE_RACE_FIELDS}
+        for race in feed["races"]
+    ]
+    # Full p3_verification and all unknown research fields remain in the
+    # encrypted canonical state; only an identity of the source is published.
+    base["hot_reference"] = {"schema": "G11_SITE_HOT_BASE_V1",
+        "source_feed_sha256": hash_bytes(source), "status": "COLD_RESEARCH_RETAINED"}
+    data = compact(base)
+    print("G11_HOT_BASE_BYTES=" + str(len(data)))
+    if len(data) > BASE_BUDGET:
+        raise RuntimeError("HOT_BASE_OVER_BUDGET:" + str(len(data)))
+    path.write_bytes(data + b"\n")
 
 
 def fetch(url: str) -> tuple[dict, dict[str, str], bytes]:
@@ -267,7 +312,10 @@ def publish(feed_path: Path, origin: str) -> None:
 
 if __name__ == "__main__":
     try:
-        publish(Path(sys.argv[1]), sys.argv[2].rstrip("/"))
+        if sys.argv[1] == "--morning-base":
+            project_morning_base(Path(sys.argv[2]))
+        else:
+            publish(Path(sys.argv[1]), sys.argv[2].rstrip("/"))
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
