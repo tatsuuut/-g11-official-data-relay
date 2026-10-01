@@ -1364,6 +1364,17 @@ jobs:
           PY
           fi
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
+          python3 - "${FEED}" <<'PY'
+          import collections, json, pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          feed = json.loads(path.read_text(encoding="utf-8"))
+          size = lambda x: len(json.dumps(x, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+          fields = collections.Counter()
+          for race in feed.get("races", []):
+              fields.update({key: size(value) for key, value in race.items()})
+          top = sorted(((key, size(value)) for key, value in feed.items()), key=lambda row: -row[1])
+          print("G11_TRANSPORT_BYTE_OWNERSHIP=" + json.dumps({"total": path.stat().st_size, "race_count": len(feed.get("races", [])), "top_level": top, "race_fields": fields.most_common()}, ensure_ascii=False, separators=(",", ":")))
+          PY
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
           oidc="$(curl --fail-with-body --silent --show-error \
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
