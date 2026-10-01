@@ -85,7 +85,8 @@ def audit_public() -> dict[str, object]:
     required_steps = (
         "Audit public surface",
         "Resolve the bounded phase and race day",
-        "Capture due PREDEADLINE official inputs before regression checks",
+        "Capture and lock dependency-free PREDEADLINE critical lane",
+        "Save early encrypted critical checkpoint",
         "Run the private fail-closed relay",
         "Audit WILD4 training-food capture",
         "Gate NIGHT publication on fully settled research",
@@ -113,10 +114,12 @@ def audit_public() -> dict[str, object]:
     continuation_start = free.index(
         "- name: Keep the predeadline relay alive between delayed cron starts"
     )
-    continuation_end = free.index(
-        "- name: Propagate private runtime failure after state checkpoint"
-    )
+    continuation_end = free.index("- name: Checkout hash-locked research runtime")
     continuation = free[continuation_start:continuation_end]
+    require_text(continuation, "steps.critical-save.outcome == 'success'",
+                 "PREDEADLINE_CRITICAL_CHECKPOINT_CHAIN_AUTHORITY")
+    require("steps.runtime.outcome" not in continuation,
+            "PREDEADLINE_OPTIONAL_RUNTIME_CHAIN_AUTHORITY")
     require_text(
         continuation,
         '.event == "workflow_dispatch"',
