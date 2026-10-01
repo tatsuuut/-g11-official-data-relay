@@ -113,6 +113,18 @@ def hash_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def site_hash(value: object) -> str:
+    """Hash the JSON value as the Site validates it after JavaScript JSON.parse."""
+    result = subprocess.run(
+        ["node", "-e", "const crypto=require('node:crypto');let data='';"
+         "process.stdin.on('data',chunk=>data+=chunk);"
+         "process.stdin.on('end',()=>process.stdout.write(crypto.createHash('sha256')"
+         ".update(JSON.stringify(JSON.parse(data))).digest('hex')))"],
+        input=compact(value), capture_output=True, check=True,
+    )
+    return result.stdout.decode("ascii")
+
+
 def reproject_completed_night(store: Path, output: Path, run_id: str,
                               source_sha: str, checked_out_sha: str) -> None:
     """Read the completed immutable NIGHT state without invoking acquisition or settlement."""
@@ -398,7 +410,7 @@ def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
         raise RuntimeError("NIGHT_NO_CHANGED_RACES")
     transaction_id = hash_bytes(compact([date, delta["BASE_FEED_SHA"], source_sha, delta["PATCH_SHA256"]]))
     parts = [(part, []) for part in top_chunks] + [({}, rows) for rows in race_chunks]
-    chunk_hashes = [hash_bytes(compact({"TOP_LEVEL": part, "RACES": rows})) for part, rows in parts]
+    chunk_hashes = [site_hash({"TOP_LEVEL": part, "RACES": rows}) for part, rows in parts]
     manifest = {
         "SCHEMA": NIGHT_TRANSACTION_SCHEMA, "ACTION": "MANIFEST",
         "OPERATIONAL_DATE": date, "NIGHT_TRANSACTION_ID": transaction_id,
@@ -409,13 +421,13 @@ def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
         "EXPECTED_RACES": incoming["counts"]["races"],
         "EXPECTED_RESULTS": incoming["counts"]["results"],
         "EXPECTED_PENDING": incoming["counts"]["pending"],
-        "EXPECTED_RACE_KEY_SET_SHA": hash_bytes(compact(keys)),
-        "EXPECTED_FINAL_ACCOUNTING_SHA": hash_bytes(compact(top["final_accounting"])),
-        "EXPECTED_TOP_LEVEL_SHA": hash_bytes(compact(top)),
-        "EXPECTED_FINANCE_SHA": hash_bytes(compact([
+        "EXPECTED_RACE_KEY_SET_SHA": site_hash(keys),
+        "EXPECTED_FINAL_ACCOUNTING_SHA": site_hash(top["final_accounting"]),
+        "EXPECTED_TOP_LEVEL_SHA": site_hash(top),
+        "EXPECTED_FINANCE_SHA": site_hash([
             [row["RACE_KEY"], row["CHANGED_FIELDS"].get("research_finance")]
             for row in delta["RACES"]
-        ])),
+        ]),
     }
     manifest["MANIFEST_SHA256"] = hash_bytes(compact(manifest))
     if len(compact(manifest)) > NIGHT_HARD_CHUNK_BYTES:
