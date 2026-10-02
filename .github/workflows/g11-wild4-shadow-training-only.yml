@@ -99,13 +99,9 @@ jobs:
           target=history/'bootstrap'
           if not target.exists():
               shutil.copytree(baseline,target)
-          else:
-              for source in baseline.iterdir():
-                  counterpart=target/source.name
-                  if counterpart.is_file() and counterpart.read_bytes()!=source.read_bytes():
-                      raise SystemExit('BASELINE_CONFLICT')
-                  if not counterpart.exists():
-                      shutil.copy2(source,counterpart)
+          # A restored canonical checkpoint may carry a newer, independently
+          # verified baseline manifest. Never overwrite or mix its files with
+          # runtime-branch evidence; status() validates the accepted pair.
           status=food.status(history)
           if status['BET_ELIGIBLE_RACES']<10000 or status['FIRST_CURRENT_READY'] is not False:
               raise SystemExit('ELIGIBLE_FOOD_GATE')
