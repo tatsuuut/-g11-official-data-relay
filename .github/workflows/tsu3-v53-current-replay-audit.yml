@@ -1,0 +1,108 @@
+name: Tsu3 V53 current replay audit
+
+on:
+  push:
+    branches:
+      - audit/tsu3-v53-current-replay-20261003
+    paths:
+      - .github/workflows/tsu3-v53-current-replay-audit.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      G11_PRIVATE_REPOSITORY: ${{ secrets.PRIVATE_SOURCE_REPO }}
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      TZ: Asia/Tokyo
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Restore encrypted 2026-10-01 runtime state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-2026-10-01-replay-${{ github.run_id }}
+          restore-keys: |
+            g11-state-v2-2026-10-01-
+
+      - name: Decrypt saved state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s .relay-cache/state.tgz.gpg
+          mkdir -p .relay-state
+          archive="${RUNNER_TEMP}/g11-relay-state.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${archive}" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          tar -xzf "${archive}" -C .relay-state
+          test -d .relay-state/store
+
+      - name: Checkout current private G11 runtime
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          ref: main
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-private
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Replay Tsu3 with current V53 without result input
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          PYTHONPATH=".g11-private" python3 - <<'PY'
+          import copy
+          import json
+          from pathlib import Path
+          from g11.abeken.v53 import abeken_shadow_v53_runtime as v53
+          from g11.canonical.official_pipeline import OfficialArtifactStore
+
+          RACE_KEY = "20261001-09-03"
+          root = Path(".relay-state/store").resolve(strict=True)
+          store = OfficialArtifactStore(root)
+          morning_snap = store.load_verified_snapshot("morning", f"abeken-v53-shadow-morning-{RACE_KEY.lower()}")
+          live_snap = store.load_verified_snapshot("predeadline", f"abeken-v53-shadow-live-{RACE_KEY.lower()}")
+          before_snap = store.load_verified_snapshot("predeadline", f"beforeinfo-{RACE_KEY.lower()}")
+          morning_payload = morning_snap["SNAPSHOT"]["PAYLOAD"]
+          live_payload = live_snap["SNAPSHOT"]["PAYLOAD"]
+          before_payload = before_snap["SNAPSHOT"]["PAYLOAD"]
+          old_result = live_payload["RESULT"]
+          morning = copy.deepcopy(morning_payload["RESULT"])
+          candidate = copy.deepcopy(old_result["PRE_RACE_CANDIDATE_INPUT"])
+          beforeinfo = (before_payload.get("OFFICIAL_BEFOREINFO") or before_payload.get("BEFOREINFO") or before_payload.get("RAW") or before_payload.get("DATA"))
+          if not isinstance(beforeinfo, dict) or "RACERS" not in beforeinfo:
+              print("BEFOREINFO_PAYLOAD_KEYS="+json.dumps(sorted(before_payload.keys())))
+              raise SystemExit("SAVED_BEFOREINFO_SCHEMA_UNRESOLVED")
+          replay_morning = copy.deepcopy(morning)
+          replay_morning["RACE_DATE"] = "2026-10-02"
+          decision, modes, audit = v53._derive_inferred_pre_race_graph(replay_morning, candidate, beforeinfo)
+          old_bets = list(old_result["DECISION"]["BUY_SET"])
+          new_bets = list(decision["BUY_SET"])
+          target = "6-1-2"
+          out = {
+              "STATUS": "PASS_RESULT_BLIND_COUNTERFACTUAL",
+              "RACE_KEY": RACE_KEY,
+              "SOURCE_CAPTURED_AT_JST": old_result["PRE_RACE_DATA_CAPTURED_AT"],
+              "CURRENT_RUNTIME_LOGIC_VERSION": v53.RUNTIME_LOGIC_VERSION,
+              "CURRENT_RIGHT_POLICY_VERSION": audit["RIGHT_TRANSITION_POLICY_VERSION"],
+              "INPUTS_USED": ["saved_morning_v53_snapshot","saved_11_21_pre_race_candidate","saved_11_21_beforeinfo"],
+              "RESULT_INPUT_USED": False,
+              "PAYOUT_INPUT_USED": False,
+              "OLD_V53": {"MAIN_HEAD": old_result["DECISION"]["MAIN_HEAD"],"SUB_HEAD_LIST": old_result["DECISION"]["SUB_HEAD_LIST"],"BUY_COUNT": len(old_bets),"TARGET_6_1_2": target in old_bets},
+              "CURRENT_V53_REPLAY": {"MAIN_HEAD": decision["MAIN_HEAD"],"SUB_HEAD_LIST": decision["SUB_HEAD_LIST"],"LIMITED_HEAD_LIST": decision.get("LIMITED_HEAD_LIST", []),"HEAD_POOL": decision["HEAD_POOL"],"BUY_COUNT": len(new_bets),"BUY_SET": new_bets,"TARGET_6_1_2": target in new_bets,"UPDATE_MODES": modes,"FULL_HEAD_LIST": audit.get("FULL_HEAD_LIST"),"FULL_TO_LIMITED_HEADS": audit.get("FULL_TO_LIMITED_HEADS"),"NONHEAD_TO_LIMITED_HEADS": audit.get("NONHEAD_TO_LIMITED_HEADS")},
+              "COUNT_DELTA": len(new_bets) - len(old_bets),
+          }
+          print("TSU3_CURRENT_V53_REPLAY="+json.dumps(out, ensure_ascii=False, sort_keys=True))
+          PY
