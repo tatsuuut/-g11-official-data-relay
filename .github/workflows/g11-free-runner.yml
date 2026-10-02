@@ -51,6 +51,8 @@ jobs:
     env:
       G11_PRIVATE_REPOSITORY: ${{ secrets.PRIVATE_SOURCE_REPO }}
       G11_PRIVATE_RUNTIME_REF: main
+      # 2026-10-02 bounded NIGHT rescue: keep the day's immutable V53 V1 authority despite later same-day V2/V3/V4 research promotions.
+      G11_RESCUE_PRIVATE_SOURCE_SHA: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[night-rescue-20261002-v53v1]') && '2614f8c585b88361974a0ad857a401191e14ba8b' || '' }}
       G11_RUNTIME_BRANCH: g11-runtime
       G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
       G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
@@ -235,7 +237,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
-          ref: ${{ env.G11_PRIVATE_RUNTIME_REF }}
+          ref: ${{ env.G11_RESCUE_PRIVATE_SOURCE_SHA != '' && env.G11_RESCUE_PRIVATE_SOURCE_SHA || env.G11_PRIVATE_RUNTIME_REF }}
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
