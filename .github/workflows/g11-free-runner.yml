@@ -573,9 +573,10 @@ jobs:
           do
             python3 -m unittest "${module}"
           done
-      - name: Pin rescue runtime
+      - name: Restore V53 V1 files for 10/2 rescue
         if: contains(github.event.head_commit.message, '[night-rescue-20261002-v53v1]')
-        run: git -C .g11-private checkout --detach 2614f8c585b88361974a0ad857a401191e14ba8b
+        run: |
+          for p in g11/abeken/v53/abeken_shadow_v53_runtime.py g11/abeken/v53/right_transition_support_v1.py g11/abeken/v53/peel_coverage_v1.py g11/abeken/v53/genuine_structure_match_v1.py; do git -C .g11-private show 2614f8c585b88361974a0ad857a401191e14ba8b:$p > .g11-private/$p; done
       - name: Run the private fail-closed relay
         id: runtime
         continue-on-error: true
