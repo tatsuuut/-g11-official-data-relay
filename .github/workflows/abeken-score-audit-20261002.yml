@@ -43,4 +43,9 @@ jobs:
               if p.exists():
                   names=[x.name for x in p.iterdir() if x.is_file() and ('abeken' in x.name or 'night' in x.name or 'result' in x.name)]
                   print('\n'.join(names[-300:]))
+          print('RESULT_CANDIDATES')
+          for p in root.rglob('*.json'):
+              low=str(p).lower()
+              if any(t in low for t in ('night','result','settlement','ledger')):
+                  print(p)
           PY
