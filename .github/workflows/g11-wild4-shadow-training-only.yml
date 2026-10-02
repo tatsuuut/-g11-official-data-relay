@@ -114,6 +114,19 @@ jobs:
         working-directory: .g11-private
         run: |
           set -euo pipefail
+          python3 - "${GITHUB_WORKSPACE}" <<'PY'
+          import pathlib,sys
+          from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as b
+          from g11.wild_pack.v1 import wild_bet_training_v1 as t
+          root=pathlib.Path(sys.argv[1])
+          manifest,baseline=t.verified_gzip(root/'.relay-state/store/g11/wild-pack-oos/morning/bootstrap/wild-bet-eligible-dataset.manifest.json',schema='G11_WILD_BET_ELIGIBLE_DATASET_MANIFEST_V1')
+          contract=b.load_json(pathlib.Path('g11/wild_pack/v1/BET_MODEL_CONTRACT_V1.json'))
+          print('WILD4_BASELINE_SCHEMA='+str(baseline.get('SCHEMA')))
+          print('WILD4_BASELINE_COUNT='+str(baseline.get('ELIGIBLE_RACES')))
+          print('WILD4_BASELINE_MANIFEST_COUNT='+str(manifest.get('ELIGIBLE_RACES')))
+          print('WILD4_BASELINE_CONTRACT_SHA='+str(baseline.get('CONTRACT_SHA256')))
+          print('WILD4_CURRENT_CONTRACT_SHA='+b.sha256_value(contract))
+          PY
           python3 -m g11.wild_pack.v1.wild_bet_training_v1 \
             --history-root "${GITHUB_WORKSPACE}/.relay-state/store/g11/wild-pack-oos/morning" \
             --contract g11/wild_pack/v1/BET_MODEL_CONTRACT_V1.json \
