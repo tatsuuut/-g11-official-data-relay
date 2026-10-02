@@ -48,4 +48,17 @@ jobs:
               low=str(p).lower()
               if any(t in low for t in ('night','result','settlement','ledger')):
                   print(p)
+          import json
+          for rel in [
+              'shadow/original-display/v2/night/20261002-04-07.json',
+              'snapshots/morning/abeken-shadow-morning-20261002-04-07.json',
+              'snapshots/predeadline/abeken-shadow-live-20261002-04-07.json',
+              'snapshots/morning/abeken-v53-shadow-morning-20261002-04-07.json',
+              'snapshots/predeadline/abeken-v53-shadow-live-20261002-04-07.json',
+          ]:
+              p=root/rel
+              print('SAMPLE_FILE',rel,p.exists())
+              if p.exists():
+                  x=json.loads(p.read_text())
+                  print(json.dumps(x,ensure_ascii=False)[:30000])
           PY
