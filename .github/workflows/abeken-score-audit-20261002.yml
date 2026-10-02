@@ -61,4 +61,17 @@ jobs:
               if p.exists():
                   x=json.loads(p.read_text())
                   print(json.dumps(x,ensure_ascii=False)[:30000])
+          print('KEY_FILES_0407')
+          for p in root.rglob('*20261002-04-07*'):
+              print(p)
+          night=json.loads((root/'shadow/original-display/v2/night/20261002-04-07.json').read_text())
+          def walk(v,path=''):
+              if isinstance(v,dict):
+                  for k,x in v.items():
+                      if any(t in str(k).upper() for t in ('TRIFECTA','3連単','SETTLEMENT','PAYOUT','WINNING')):
+                          print('KEYPATH',path+'/'+str(k),json.dumps(x,ensure_ascii=False)[:5000])
+                      walk(x,path+'/'+str(k))
+              elif isinstance(v,list):
+                  for i,x in enumerate(v): walk(x,path+'/'+str(i))
+          walk(night)
           PY
