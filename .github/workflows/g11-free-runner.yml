@@ -575,8 +575,9 @@ jobs:
           done
       - name: Restore V53 V1 runtime for 10/2 rescue
         if: contains(github.event.head_commit.message, '[night-rescue-20261002-v53v1]')
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/tatsuuut/boat-brain-lab/2614f8c585b88361974a0ad857a401191e14ba8b/g11/abeken/v53/abeken_shadow_v53_runtime.py -o .g11-private/g11/abeken/v53/abeken_shadow_v53_runtime.py
+        env:
+          GH_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: gh api repos/tatsuuut/boat-brain-lab/contents/g11/abeken/v53/abeken_shadow_v53_runtime.py?ref=2614f8c585b88361974a0ad857a401191e14ba8b --jq .content | base64 -d > .g11-private/g11/abeken/v53/abeken_shadow_v53_runtime.py
       - name: Run the private fail-closed relay
         id: runtime
         continue-on-error: true
