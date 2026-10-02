@@ -575,7 +575,7 @@ jobs:
           done
       - name: Pin rescue runtime
         if: contains(github.event.head_commit.message, '[night-rescue-20261002-v53v1]')
-        run: git -C .g11-private fetch --depth=1 origin 2614f8c585b88361974a0ad857a401191e14ba8b && git -C .g11-private checkout --detach FETCH_HEAD
+        run: git -C .g11-private checkout --detach 2614f8c585b88361974a0ad857a401191e14ba8b
       - name: Run the private fail-closed relay
         id: runtime
         continue-on-error: true
