@@ -74,4 +74,50 @@ jobs:
               elif isinstance(v,list):
                   for i,x in enumerate(v): walk(x,path+'/'+str(i))
           walk(night)
+          import re
+          def payload(path):
+              x=json.loads(path.read_text())
+              return x.get('PAYLOAD',x)
+          def baseline_bets(path):
+              try:
+                  r=payload(path)['RESULT']
+                  return set(r.get('PRACTICAL_BETS') or r.get('BUY_SET') or [])
+              except Exception:
+                  return set()
+          def v53_bets(path):
+              try:
+                  r=payload(path)['RESULT']
+                  return set(r['DECISION']['BUY_SET'])
+              except Exception:
+                  return set()
+          rows=[]
+          nightdir=root/'shadow/original-display/v2/night'
+          for np in sorted(nightdir.glob('20261002-??-??.json')):
+              key=np.stem
+              night=json.loads(np.read_text())
+              settlements=night.get('SETTLEMENTS') or []
+              if not settlements: continue
+              winners=[str(x.get('combination')) for x in settlements if x.get('combination')]
+              if not winners: continue
+              bm=root/'snapshots/morning'/f'abeken-shadow-morning-{key}.json'
+              bl=root/'snapshots/predeadline'/f'abeken-shadow-live-{key}.json'
+              vm=root/'snapshots/morning'/f'abeken-v53-shadow-morning-{key}.json'
+              vl=root/'snapshots/predeadline'/f'abeken-v53-shadow-live-{key}.json'
+              base=baseline_bets(bl) if bl.exists() else baseline_bets(bm) if bm.exists() else set()
+              base_m=baseline_bets(bm) if bm.exists() else set()
+              v53=v53_bets(vl) if vl.exists() else v53_bets(vm) if vm.exists() else set()
+              bh=any(w in base for w in winners)
+              bmh=any(w in base_m for w in winners)
+              vh=any(w in v53 for w in winners)
+              if bh != vh or bmh != vh or bh or vh:
+                  rows.append({
+                    'key':key,'winner':winners,'payout':[x.get('payout') for x in settlements],
+                    'baseline_current_hit':bh,'baseline_morning_hit':bmh,'v53_hit':vh,
+                    'baseline_current_count':len(base),'baseline_morning_count':len(base_m),'v53_count':len(v53),
+                    'v53_live':vl.exists(),
+                    'winning_in_baseline_current':[w for w in winners if w in base],
+                    'winning_in_baseline_morning':[w for w in winners if w in base_m],
+                    'winning_in_v53':[w for w in winners if w in v53],
+                  })
+          print('ABEKEN_1002_AUDIT='+json.dumps(rows,ensure_ascii=False,sort_keys=True))
           PY
