@@ -274,5 +274,5 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@2f1855fbe253e5554987eb5270cd605639b5d9ff
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@3b921b522a77a34e367cc941f8fda9024ffcb78d
     secrets: inherit
