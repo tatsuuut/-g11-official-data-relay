@@ -34,6 +34,7 @@ jobs:
         id: day
         env:
           UPSTREAM_RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+          REQUESTED_DAY: ${{ github.event.inputs.operational_date }}
         run: |
           python3 - <<'PY'
           import os, re
@@ -42,6 +43,10 @@ jobs:
           title=os.environ.get('UPSTREAM_RUN_TITLE','')
           if os.environ['GITHUB_EVENT_NAME'] in {'push','schedule'}:
               day=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()
+          elif os.environ['GITHUB_EVENT_NAME']=='workflow_dispatch':
+              day=os.environ.get('REQUESTED_DAY','')
+              if re.fullmatch(r'20[0-9]{2}-[0-9]{2}-[0-9]{2}',day) is None:
+                  raise SystemExit('REQUESTED_DAY_MISMATCH')
           else:
               match=re.fullmatch(r'LIVE-predeadline-(20[0-9]{2}-[0-9]{2}-[0-9]{2})',title)
               if match is not None:
@@ -483,7 +488,7 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Checkout pinned official settlement source
-        if: github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *'
+        if: (github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -492,7 +497,7 @@ jobs:
           path: .g11-settlement
           persist-credentials: false
       - name: Settle only immutable locks from verified final NIGHT
-        if: github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *'
+        if: (github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
