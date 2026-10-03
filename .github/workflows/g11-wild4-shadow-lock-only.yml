@@ -74,6 +74,7 @@ jobs:
           set -euo pipefail
           name="g11-wild4-${OPERATIONAL_DATE}-future-oos-locks-encrypted"
           id=''
+          selected_run=''
           url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-wild4-prospective-observer.yml/runs?status=completed&per_page=30"
           status="$(curl --silent --show-error --retry 3 \
             -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -91,7 +92,7 @@ jobs:
                 "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts?per_page=100")"
               id="$(printf '%s' "${response}" | jq -r --arg name "${name}" \
                 '[.artifacts[] | select(.name == $name and .expired == false)] | sort_by(.created_at) | last | .id // empty')"
-              if [ -n "${id}" ]; then break; fi
+              if [ -n "${id}" ]; then selected_run="${run_id}"; break; fi
             done
           elif [ "${status}" != '404' ]; then
             echo "WILD4_PRIOR_LEDGER_LOOKUP_HTTP=${status}" >&2
@@ -99,14 +100,17 @@ jobs:
           fi
           if [ -z "${id}" ] && [ "${OPERATIONAL_DATE}" = '2026-10-03' ]; then
             id='11258679601'
+            selected_run='37083260709'
           fi
           echo "id=${id}" >> "${GITHUB_OUTPUT}"
+          echo "run_id=${selected_run}" >> "${GITHUB_OUTPUT}"
           if [ -z "${id}" ]; then echo 'WILD4_PRIOR_LEDGER=NONE'; else echo 'WILD4_PRIOR_LEDGER=FOUND'; fi
       - name: Retrieve exact prior encrypted shadow ledger
         if: steps.prior.outputs.id != ''
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ steps.prior.outputs.id }}
+          run-id: ${{ steps.prior.outputs.run_id }}
           github-token: ${{ github.token }}
           path: .prior-encrypted
       - name: Checkout frozen shadow source
