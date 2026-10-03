@@ -109,7 +109,7 @@ jobs:
         if: steps.prior.outputs.id != ''
         uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ steps.prior.outputs.id }}
+          name: g11-wild4-${{ steps.day.outputs.day }}-future-oos-locks-encrypted
           run-id: ${{ steps.prior.outputs.run_id }}
           github-token: ${{ github.token }}
           path: .prior-encrypted
