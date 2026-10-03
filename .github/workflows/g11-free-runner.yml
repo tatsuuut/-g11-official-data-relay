@@ -478,7 +478,7 @@ jobs:
           PYTHONPATH: .g11-private:scripts
         run: |
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
-          python3 -m unittest g11.relay.test_daily_runtime_authority_v1 g11.relay.test_v53_final_authority_v1
+          python3 -m unittest g11.relay.test_daily_runtime_authority_v1 g11.relay.test_v53_final_authority_v1 g11.relay.test_final_bet_accounting_v1
           python3 -m unittest discover -s scripts -p test_daily_runtime_delivery_v1.py
           python3 scripts/daily_runtime_bootstrap_v1.py candidate-dry-run \
             --state-root .relay-state --source-root .g11-private \
