@@ -21,6 +21,9 @@ ALLOWED_FILES = {
     "SECURITY.md",
     "scripts/audit_public_surface.py",
     "scripts/hot_delta_transport_v1.py",
+    "scripts/daily_runtime_bootstrap_v1.py",
+    "scripts/daily_runtime_delivery_v1.py",
+    "scripts/test_daily_runtime_delivery_v1.py",
     "scripts/repair_20260928_final.py",
     "scripts/overlay_20260928_accepted_feed_final.py",
     "scripts/official_20260928_results.txt",
@@ -927,9 +930,9 @@ def main() -> int:
             fail(f"unexpected public file: {name}")
         if any(name.endswith(suffix) for suffix in FORBIDDEN_SUFFIXES):
             fail(f"forbidden artifact type: {name}")
-        # The one-off historical repair job is in the existing OIDC-authorized
-        # workflow; all other public files retain the original size limit.
-        cap = 110_000 if name == ".github/workflows/g11-free-runner.yml" else 100_000
+        # Existing OIDC workflow plus bounded authority/transport routing.
+        # No prediction code or model is admitted by this larger YAML budget.
+        cap = 120_000 if name == ".github/workflows/g11-free-runner.yml" else 100_000
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
         text = path.read_text(encoding="utf-8")

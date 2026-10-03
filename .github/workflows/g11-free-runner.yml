@@ -50,7 +50,7 @@ jobs:
     timeout-minutes: 30
     env:
       G11_PRIVATE_REPOSITORY: ${{ secrets.PRIVATE_SOURCE_REPO }}
-      G11_PRIVATE_RUNTIME_REF: main
+      G11_PRIVATE_RUNTIME_REF: g11-daily-runtime-approved
       G11_RUNTIME_BRANCH: g11-runtime
       G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
       G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
@@ -108,7 +108,9 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            if [[ "${COMMIT_MESSAGE}" == *"[historical-final-repair]"* ]]; then
+            if [[ "${COMMIT_MESSAGE}" == *"[daily-runtime-freeze]"* ]]; then
+              phase="dry-run"
+            elif [[ "${COMMIT_MESSAGE}" == *"[historical-final-repair]"* ]]; then
               phase="dry-run"
             elif [[ "${COMMIT_MESSAGE}" == *"[heartbeat-config-only]"* ]] && [[ "${operational_date}" < "2026-09-29" ]]; then
               phase="dry-run"
@@ -230,7 +232,15 @@ jobs:
                       encoding="utf-8",
                   )
           PY
+      - name: Restore the immutable daily source before any private imports
+        id: authority
+        run: |
+          python3 scripts/daily_runtime_bootstrap_v1.py prepare \
+            --state-root .relay-state \
+            --operational-date "${{ steps.due.outputs.operational_date }}" \
+            --phase "${{ steps.due.outputs.phase }}" --source-root .g11-private
       - name: Checkout private G11 runtime
+        if: steps.authority.outputs.checkout_candidate == 'true'
         id: private-source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -246,7 +256,11 @@ jobs:
           G11_PRIVATE_REPO_TOKEN: ""
         run: |
           set -euo pipefail
-          source_sha="$(git -C .g11-private rev-parse HEAD)"
+          if [ "${{ steps.authority.outputs.frozen }}" = "true" ]; then
+            source_sha="${{ steps.authority.outputs.source_sha }}"
+          else
+            source_sha="$(git -C .g11-private rev-parse HEAD)"
+          fi
           printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
       - name: Capture and lock dependency-free PREDEADLINE critical lane
         if: steps.due.outputs.phase == 'predeadline'
@@ -356,7 +370,7 @@ jobs:
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
             -d "${payload}"
       - name: Checkout hash-locked research runtime
-        if: steps.due.outputs.phase != 'predeadline' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: steps.due.outputs.phase != 'predeadline' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.authority.outputs.frozen != 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
@@ -372,7 +386,7 @@ jobs:
             g11/wild-pack-models
             g11/wild-pack-oos
       - name: Hydrate append-only research history and stage the model
-        if: steps.due.outputs.phase != 'predeadline' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: steps.due.outputs.phase != 'predeadline' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.authority.outputs.frozen != 'true'
         run: |
           set -euo pipefail
           mkdir -p .relay-state/store/g11/true-ai-history
@@ -410,7 +424,7 @@ jobs:
         working-directory: .g11-private
         env:
           WILD_MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning
-        if: steps.due.outputs.phase != 'predeadline' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: steps.due.outputs.phase != 'predeadline' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.authority.outputs.frozen != 'true'
         run: |
           python3 -m py_compile g11/relay/rescue_v1.py g11/relay/rescue_entry_v2.py
           python3 - "${WILD_MODEL_ROOT}" <<'PY'
@@ -449,6 +463,28 @@ jobs:
               if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha:
                   raise SystemExit(f"{wild_id}_MATERIALIZED_MODEL_HASH")
           PY
+      - name: Freeze and read back daily runtime authority before prediction
+        if: steps.due.outputs.phase != 'predeadline'
+        id: freeze
+        run: |
+          python3 scripts/daily_runtime_bootstrap_v1.py freeze \
+            --state-root .relay-state --source-root .g11-private \
+            --source-sha "${{ steps.source.outputs.source_sha }}" \
+            --operational-date "${{ steps.due.outputs.operational_date }}" \
+            --phase "${{ steps.due.outputs.phase }}"
+      - name: Verify daily freeze and transport-only negative tests
+        if: steps.due.outputs.phase == 'dry-run'
+        env:
+          PYTHONPATH: .g11-private:scripts
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+          python3 -m unittest g11.relay.test_daily_runtime_authority_v1
+          python3 -m unittest discover -s scripts -p test_daily_runtime_delivery_v1.py
+          python3 scripts/daily_runtime_bootstrap_v1.py candidate-dry-run \
+            --state-root .relay-state --source-root .g11-private \
+            --source-sha "${{ steps.source.outputs.source_sha }}" \
+            --operational-date "${{ steps.due.outputs.operational_date }}" \
+            --output .relay-output/next-morning-authority-dry-run.json
       - name: Install pinned private runtime dependencies
         if: steps.due.outputs.phase != 'predeadline' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
         run: |
@@ -529,7 +565,7 @@ jobs:
           })
           PY
       - name: Verify relay schedule and authority contracts
-        if: steps.due.outputs.phase != 'predeadline' && github.event_name != 'schedule' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: steps.due.outputs.phase == 'dry-run' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
         working-directory: .g11-private
         env:
           G11_PRIVATE_REPO_TOKEN: ""
@@ -589,7 +625,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../.relay-output
-          if [ "${G11_NIGHT_TRANSPORT_ONLY}" = "true" ]; then
+          if [ "${G11_NIGHT_TRANSPORT_ONLY}" = "true" ] && [[ "${{ steps.due.outputs.operational_date }}" < "2026-10-04" ]]; then
             PYTHONPATH=. python3 ../scripts/hot_delta_transport_v1.py --night-projection \
               "${GITHUB_WORKSPACE}/.relay-state/store" \
               "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
@@ -739,13 +775,13 @@ jobs:
           }, sort_keys=True))
           PY
       - name: Encrypt changed state before persistence
-        if: always() && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: always() && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'dry-run'
         id: encrypt-state
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
           set -euo pipefail
-          if [ ! -f .relay-state/relay-state.json ] && [ ! -f .relay-state/store/manifest.json ]; then
+          if [ ! -f .relay-state/relay-state.json ] && [ ! -f .relay-state/store/manifest.json ] && [ ! -f ".relay-state/daily-runtime/${{ steps.due.outputs.operational_date }}/authority.json" ]; then
             echo 'ready=false' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -842,6 +878,16 @@ jobs:
           RELAY_PHASE: ${{ steps.due.outputs.phase }}
         run: |
           set -euo pipefail
+          if [[ "${OPERATIONAL_DATE}" > "2026-10-03" ]]; then
+            oidc="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              -H 'Accept: application/json' \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
+            token="$(printf '%s' "${oidc}" | jq -er '.value')"
+            G11_SYNC_OIDC="${token}" python3 scripts/daily_runtime_delivery_v1.py \
+              --state-root .relay-state --feed "${FEED}" --origin "${G11_APP_ORIGIN}"
+            exit 0
+          fi
           if curl --fail-with-body --silent --show-error --location \
             --retry 3 --retry-delay 2 \
             "${G11_APP_ORIGIN}/api/g11-feed?date=${OPERATIONAL_DATE}" \
@@ -1562,6 +1608,32 @@ jobs:
             exit 1
           fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+      - name: Persist authority checkpoint and delivery receipts
+        if: always() && !cancelled() && steps.due.outputs.phase != 'dry-run'
+        id: delivery-state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -f ".relay-state/daily-runtime/${{ steps.due.outputs.operational_date }}/authority.json" ]; then
+            echo 'ready=false' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          mkdir -p .relay-cache
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          tar -czf - -C .relay-state . | \
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+              --symmetric --cipher-algo AES256 --output .relay-cache/state-delivery.tgz.gpg.tmp
+          exec 3<&-
+          mv .relay-cache/state-delivery.tgz.gpg.tmp .relay-cache/state-delivery.tgz.gpg
+          cp .relay-cache/state-delivery.tgz.gpg .relay-cache/state.tgz.gpg
+          echo 'ready=true' >> "${GITHUB_OUTPUT}"
+      - name: Save encrypted daily completion and transport retry state
+        if: always() && steps.delivery-state.outputs.ready == 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-delivery
       - name: Verify source identity and projected app readback
         id: readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true'
@@ -2016,3 +2088,4 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
+

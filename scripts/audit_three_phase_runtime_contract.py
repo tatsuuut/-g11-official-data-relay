@@ -236,6 +236,16 @@ def night_feed_ready(feed, operational_date):
         return no("FEED_DATE_MISMATCH")
     if feed.get("stage") != "NIGHT" or feed.get("status") != "PASS":
         return no("NIGHT_NOT_PUBLISHED")
+    if operational_date >= "2026-10-04":
+        binding, transport = feed.get("daily_runtime", {}), feed.get("transport", {})
+        if (binding.get("schema") != "G11_DAILY_RUNTIME_AUTHORITY_V1"
+                or binding.get("operational_date_jst") != operational_date or binding.get("phase") != "NIGHT"
+                or binding.get("immutable") is not True
+                or re.fullmatch(r"[a-f0-9]{64}", str(binding.get("authority_sha256"))) is None
+                or transport.get("daily_authority_sha256") != binding["authority_sha256"]
+                or any(re.fullmatch(r"[a-f0-9]{64}", str(transport.get(k))) is None for k in
+                       ("canonical_feed_sha256", "night_checkpoint_sha256", "night_transaction_id", "night_manifest_sha256"))):
+            return no("DAILY_AUTHORITY_CHECKPOINT_TRANSACTION_MISSING")
     rows, counts, db = feed.get("races"), feed.get("counts"), feed.get("research_db")
     if type(rows) is not list or not rows or type(counts) is not dict or type(db) is not dict:
         return no("FEED_SHAPE")
@@ -485,3 +495,4 @@ if __name__ == "__main__":
     except ContractError as exc:
         print(f"G11_THREE_PHASE_RUNTIME_CONTRACT_FAIL:{exc}", file=sys.stderr)
         raise SystemExit(1)
+

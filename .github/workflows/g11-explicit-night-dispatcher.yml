@@ -343,6 +343,7 @@ jobs:
           fi
           current_feed="$(mktemp)"
           trap 'rm -f "${current_feed}"' EXIT
+          site_night_ready=false
           if [[ "${COMMIT_MESSAGE}" != *"[wild-night-settle]"* ]]; then
             if curl --fail-with-body --silent --show-error --location \
               --connect-timeout 10 --max-time 20 \
@@ -351,8 +352,14 @@ jobs:
               # Result coverage and research eligibility have different
               # denominators. Money must describe the displayed locked bets.
               if python3 "${policy}" --night-ready "${current_feed}" --day "${operational_date}"; then
-                echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
-                exit 0
+                if [[ "${operational_date}" < "2026-10-04" ]]; then
+                  echo "NIGHT_ALREADY_COMPLETE=${operational_date}"
+                  exit 0
+                fi
+                # A COMMIT can succeed while its ACK/GET is lost. The new
+                # route must also persist the verified completion receipt;
+                # otherwise dispatch checkpoint transport-only recovery.
+                site_night_ready=true
               fi
               # Public preflight; the private runtime independently checks
               # the immutable, verified full-day morning B schedule.
@@ -381,6 +388,14 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "${api}/runs?per_page=100")"
+          if [ "${site_night_ready}" = true ] && printf '%s' "${runs}" | jq -e \
+            --arg target "LIVE-night-${operational_date}" \
+            'any(.workflow_runs[]; .event == "workflow_dispatch" and
+              .display_title == $target and .status == "completed" and
+              .conclusion == "success")' >/dev/null; then
+            echo "NIGHT_ALREADY_COMPLETE_WITH_VERIFIED_RECEIPT=${operational_date}"
+            exit 0
+          fi
           active_ids="$(printf '%s' "${runs}" | jq -r '
             .workflow_runs[] | select(.event == "workflow_dispatch" and
               (.status == "queued" or .status == "in_progress" or

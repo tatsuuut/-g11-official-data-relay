@@ -22,7 +22,7 @@ BASE_TOP_FIELDS = {
     "canonical_authorities", "wild_pack", "true_ai", "abeken",
     "three_engine_comparison", "original_display_research",
     "conditional_finish_research", "logic_candidate_research", "late_reference_summary",
-    "final_accounting", "races",
+    "final_accounting", "races", "daily_runtime",
 }
 BASE_RACE_FIELDS = {
     "key", "date_jst", "venue", "venue_code", "race", "deadline_jst",
@@ -314,6 +314,8 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
         version = (prior.get("predeadline") or {}).get("snapshot_sha256") or prior.get("p3_snapshot_sha256")
         changes.append({"RACE_KEY": row["key"], "EXPECTED_RACE_VERSION": version, "CHANGED_FIELDS": fields})
     top = {"source": incoming["source"], "generated_at_jst": incoming["generated_at_jst"]}
+    if "daily_runtime" in incoming:
+        top["daily_runtime"] = incoming["daily_runtime"]
     if incoming["stage"] == "NIGHT":
         top.update({key: incoming[key] for key in NIGHT_TOP if key in incoming})
     fingerprint = hash_bytes(compact({"stage": incoming["stage"], "day": day, "top": top, "races": changes}))
@@ -356,7 +358,7 @@ def post(origin: str, token: str, payload: dict, endpoint: str) -> dict:
     return body
 
 
-def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
+def night_chunks(delta: dict, incoming: dict, checkpoint: dict | None = None) -> tuple[dict, list[dict]]:
     source_sha = incoming["source"]["projection_sha256"]
     if len(source_sha) != 64:
         raise RuntimeError("NIGHT_SOURCE_SHA_REQUIRED")
@@ -432,6 +434,13 @@ def night_chunks(delta: dict, incoming: dict) -> tuple[dict, list[dict]]:
             for row in delta["RACES"]
         ]),
     }
+    if checkpoint is not None:
+        if (checkpoint["operational_date_jst"] != date or checkpoint["pending"] != 0
+                or checkpoint["authority_sha256"] != incoming["daily_runtime"]["authority_sha256"]):
+            raise RuntimeError("NIGHT_CHECKPOINT_TRANSPORT_IDENTITY")
+        manifest.update({"DAILY_AUTHORITY_SHA256": checkpoint["authority_sha256"],
+                         "CANONICAL_FEED_SHA256": checkpoint["feed_sha256"],
+                         "CHECKPOINT_SHA256": checkpoint["checkpoint_sha256"]})
     manifest["MANIFEST_SHA256"] = hash_bytes(compact(manifest))
     if len(compact(manifest)) > NIGHT_HARD_CHUNK_BYTES:
         raise RuntimeError("NIGHT_MANIFEST_EXCEEDS_HARD_BUDGET:" + str(len(compact(manifest))))
