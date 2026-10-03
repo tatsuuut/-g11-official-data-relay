@@ -1,6 +1,9 @@
 name: runtime observation
 
 on:
+  workflow_run:
+    workflows: [runtime sync]
+    types: [completed]
   workflow_dispatch:
     inputs:
       mode:
@@ -25,6 +28,7 @@ on:
     - cron: "20,35,50 13 * * *"
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -36,7 +40,8 @@ jobs:
     name: observation
     if: >-
       github.repository_id == '1367703708' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'workflow_run'
     runs-on: ubuntu-24.04
     timeout-minutes: 9
     env:
@@ -258,3 +263,16 @@ jobs:
           git fetch origin g11-runtime
           git rebase origin/g11-runtime
           git push origin HEAD:g11-runtime
+
+  wild4-prospective:
+    name: WILD4 prospective SHADOW observation
+    if: >-
+      github.repository_id == '1367703708' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@2f1855fbe253e5554987eb5270cd605639b5d9ff
+    secrets: inherit
