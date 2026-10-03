@@ -1,5 +1,4 @@
 name: runtime sync
-# Recovery audit readback for the existing predeadline runner.
 run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
 on:
   push:
@@ -1936,7 +1935,12 @@ jobs:
       - name: Classify optional PREDEADLINE relay failure
         if: always() && steps.runtime.outcome == 'failure' && steps.due.outputs.phase == 'predeadline'
         run: echo 'G11_PREDEADLINE_OPTIONAL_UNAVAILABLE=CRITICAL_CHECKPOINT_RETAINED'
-# operator-night-current-20260928
+      - name: WILD4 shadow
+        if: steps.runtime.outcome == 'success' && contains('predeadline,night', steps.due.outputs.phase)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run 364923281 -f mode=${{ steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4' }} -f operational_date=${{ steps.due.outputs.operational_date }}
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
     if: >-
@@ -2012,4 +2016,3 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
-# r2
