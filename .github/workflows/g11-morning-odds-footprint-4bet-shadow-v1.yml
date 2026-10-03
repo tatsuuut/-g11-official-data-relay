@@ -24,6 +24,8 @@ on:
   schedule:
     # Independent prospective research polling, 09:01-21:56 JST.
     - cron: "1-56/5 0-12 * * *"
+    # Final official NIGHT retry, separate from the legacy footprint lane.
+    - cron: "25,40,55 13 * * *"
     # Dedicated MORNING research lane. Start after production morning ends at
     # 07:05 JST, but keep bounded retries through 08:55 so a delayed app feed
     # cannot erase the entire day's market-footprint sample.
@@ -37,7 +39,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'schedule' && github.event.schedule == '1-56/5 0-12 * * *')) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
+  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
   cancel-in-progress: false
 
 jobs:
@@ -48,7 +50,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.event_name != 'workflow_run' &&
       github.event_name != 'push' &&
-      !(github.event_name == 'schedule' && github.event.schedule == '1-56/5 0-12 * * *')
+      !(github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))
     runs-on: ubuntu-24.04
     timeout-minutes: 9
     env:
@@ -278,7 +280,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       (
         github.event_name == 'push' ||
-        (github.event_name == 'schedule' && github.event.schedule == '1-56/5 0-12 * * *') ||
+        (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *')) ||
         (
           github.event_name == 'workflow_run' &&
           github.event.workflow_run.conclusion == 'success' &&
@@ -288,5 +290,5 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@82f120ff55b0861e7fa4666e86c8a6a9c951dc84
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@442a553aa94eaef9659083054cfc5f5ebbf642e3
     secrets: inherit
