@@ -482,8 +482,52 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_READBACK=PASS')
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
+      - name: Checkout pinned official settlement source
+        if: github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: bcd9f86613a78e29b20e62e2b83b76ec286a3e30
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-settlement
+          persist-credentials: false
+      - name: Settle only immutable locks from verified final NIGHT
+        if: github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *'
+        id: settlement
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="${GITHUB_WORKSPACE}/.g11-private"
+          python3 - "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}" "${OPERATIONAL_DATE}" <<'PY'
+          import importlib.util, os, pathlib, sys
+          from g11.canonical.official_pipeline import OfficialArtifactStore
+          workspace, temp = map(pathlib.Path, sys.argv[1:3])
+          day = sys.argv[3]
+          module_path = workspace/'.g11-settlement/g11/wild_pack/v1/wild4_official_settlement_v1.py'
+          spec = importlib.util.spec_from_file_location('wild4_pinned_settlement', module_path)
+          module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+          ledger = temp/'g11-wild4-future-locks'
+          previous = module.verify_prior(ledger)
+          source = workspace/'.relay-state/store/snapshots/night/workbook-ledger-projection.json'
+          if not source.is_file():
+              print('WILD4_OFFICIAL_NIGHT=AWAITING_VERIFIED_PROJECTION')
+              print('WILD4_PRIOR_SETTLED='+str(len(previous)))
+              new = 0
+          else:
+              verified = OfficialArtifactStore(workspace/'.relay-state/store').load_verified_snapshot(
+                  'night', 'workbook-ledger-projection')
+              summary = module.settle_day(ledger, verified, day)
+              new = summary['new']
+              print('WILD4_OFFICIAL_SETTLEMENT_NEW='+str(new))
+              print('WILD4_OFFICIAL_SETTLEMENT_TOTAL='+str(summary['total']))
+              print('WILD4_OFFICIAL_SETTLEMENT_EXCLUDED='+str(summary['excluded']))
+              print('WILD4_OFFICIAL_SOURCE_SHA256='+verified['SNAPSHOT_SHA256'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('new='+str(new)+'\n')
+          PY
       - name: Encrypt immutable future locks
-        if: steps.availability.outputs.due == 'true'
+        if: steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != ''
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -495,7 +539,7 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks
-        if: steps.availability.outputs.due == 'true'
+        if: steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
