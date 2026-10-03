@@ -32,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ github.event_name }}-${{ startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') }}
+  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
   cancel-in-progress: false
 
 jobs:
