@@ -235,7 +235,35 @@ jobs:
               records=odds['RECORDS']
           else:
               records=[]
+          from g11.wild_pack.v1 import bet_oos_collection_v1 as bet
+          from g11.canonical.official_pipeline import OfficialArtifactStore
+          source_store=workspace/'.relay-state/store'
+          upstream_path=history/'bet-upstream.manifest.json'
+          if upstream_path.is_file():
+              upstream_manifest,upstream=train.verified_gzip(upstream_path,
+                  schema='G11_WILD_BET_OOS_COLLECTION_MANIFEST_V1',kind='UPSTREAM')
+              official=OfficialArtifactStore(source_store)
+              snapshots={}
+              for item in upstream['RECORDS']:
+                  key=item['PAYLOAD']['STANDARD_RACE_KEY']
+                  name='odds3t-'+key.lower()
+                  if (source_store/'snapshots/predeadline'/(name+'.json')).is_file():
+                      snapshots[key]=official.load_verified_snapshot('predeadline',name)
+              direct=bet.attach_prediction_time_odds(upstream,snapshots)
+              common={r['STANDARD_RACE_KEY']:r for r in records}
+              for item in direct['RECORDS']:
+                  key=item['STANDARD_RACE_KEY']
+                  if key in common and item['BET_PACKET_HASH']!=common[key]['BET_PACKET_HASH']:
+                      raise SystemExit('DIRECT_AND_PERSISTED_ODDS_CONFLICT')
+              direct_records=direct['RECORDS']
+          else:
+              direct_records=[]
+          print('WILD4_VERIFIED_DIRECT_SNAPSHOT_COUNT='+str(len(direct_records)))
           now=datetime.now(timezone.utc)
+          direct_due=[r for r in direct_records
+              if datetime.fromisoformat(r['UPSTREAM_PACKET']['RACE_DEADLINE_AT'])>now
+              and r['UPSTREAM_PACKET']['EVALUATION_CONTEXT_PACK_ID']==binding['EVALUATION_CONTEXT_PACK_ID']]
+          print('WILD4_VERIFIED_DIRECT_UNEXPIRED='+str(len(direct_due)))
           if records:
               latest=max(records,key=lambda r:r['ODDS_CAPTURED_AT'])
               captured=datetime.fromisoformat(latest['ODDS_CAPTURED_AT'])
