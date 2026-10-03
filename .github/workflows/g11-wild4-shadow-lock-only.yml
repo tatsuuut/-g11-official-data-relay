@@ -129,6 +129,8 @@ jobs:
               raise SystemExit('LOCK_COVERAGE')
           summary={'SCHEMA':'G11_WILD_BET_FUTURE_OOS_SHADOW_BATCH_V1',
               'DATE':'2026-10-03','SOURCE_ODDS_SHA256':manifest['CONTENT_SHA256'],
+              'STATUS':'LOCKED_BEFORE_DEADLINE' if locked else 'NO_ELIGIBLE_FUTURE_RACE_LOCKED',
+              'FUTURE_OOS_PASS':False,
               'CANDIDATE_MODEL_SHA256':binding['MODEL_SHA256'],
               'CANDIDATE_INPUT_SHA256':binding['TRAINING_INPUT_SHA256'],
               'CONSIDERED':considered,'EXPIRED_BEFORE_THIS_RUN':expired,
@@ -142,6 +144,87 @@ jobs:
           print('WILD4_FUTURE_OOS_EXPIRED='+str(expired))
           print('WILD4_FUTURE_OOS_PACK_MISMATCH='+str(pack_mismatch))
           print('WILD4_PRODUCTION_MUTATED=false')
+          PY
+      - name: Read back frozen holdout evidence without retraining
+        working-directory: .g11-private
+        run: |
+          set -euo pipefail
+          python3 - "${RUNNER_TEMP}" <<'PY'
+          import json, math, pathlib, sys
+          from collections import Counter
+          from catboost import CatBoostClassifier
+          from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as b
+          from g11.wild_pack.v1 import wild_bet_training_v1 as train
+          from g11.wild_pack.v1 import wild_bet_future_oos_v1 as future
+          root=pathlib.Path(sys.argv[1]); candidate=root/'g11-wild4-candidate'
+          binding,registry,model_path=future.verified_candidate(candidate)
+          manifest,dataset=train.verified_gzip(candidate/'wild-bet-shadow-training-input.manifest.json',
+              schema='G11_WILD_BET_SHADOW_TRAINING_INPUT_MANIFEST_V1')
+          if dataset['CONTENT_SHA256']!=binding['TRAINING_INPUT_SHA256']:
+              raise SystemExit('READBACK_INPUT_SHA_MISMATCH')
+          contract=b.load_json(pathlib.Path('g11/wild_pack/v1/BET_MODEL_CONTRACT_V1.json'))
+          if registry['CONTRACT_SHA256']!=b.sha256_value(contract):
+              raise SystemExit('READBACK_CONTRACT_SHA_MISMATCH')
+          records={row['STANDARD_RACE_KEY']:row for row in dataset['RECORDS']}
+          splits=dataset['SPLIT_RACE_IDS']
+          all_keys=[key for name in ('TRAIN','VALIDATION','FINAL_HOLDOUT') for key in splits[name]]
+          if len(records)!=10126 or len(all_keys)!=len(set(all_keys)) or set(all_keys)!=set(records):
+              raise SystemExit('READBACK_SPLIT_COVERAGE')
+          for name,field in (('TRAIN','TRAIN_RACES'),('VALIDATION','VALIDATION_RACES'),
+                             ('FINAL_HOLDOUT','FINAL_HOLDOUT_RACES')):
+              if len(splits[name])!=registry[field]:
+                  raise SystemExit('READBACK_SPLIT_COUNT')
+          dates={name:{records[key]['RACE_DATE'] for key in splits[name]} for name in splits}
+          if not (max(dates['TRAIN'])<min(dates['VALIDATION'])
+                  and max(dates['VALIDATION'])<min(dates['FINAL_HOLDOUT'])
+                  and max(dates['FINAL_HOLDOUT'])<=binding['TRAINING_CUTOFF_DATE']
+                  and binding['TRAINING_CUTOFF_DATE']=='2026-10-02'):
+              raise SystemExit('READBACK_CHRONOLOGICAL_CUTOFF')
+          model=CatBoostClassifier(); model.load_model(str(model_path))
+          holdout=[records[key] for key in splits['FINAL_HOLDOUT']]
+          features,labels,identities=b._feature_rows(holdout)
+          raw=[float(row[1]) for row in model.predict_proba(features)]
+          logloss=-sum(label*math.log(max(p,1e-15))+(1-label)*math.log(max(1-p,1e-15))
+                       for p,label in zip(raw,labels,strict=True))/len(labels)
+          by_race={}
+          for (key,combo),p,label in zip(identities,raw,labels,strict=True):
+              by_race.setdefault(key,[]).append((combo,p,label))
+          selected=hits=payout=top1_hits=0; counts=[]
+          for key,values in by_race.items():
+              total=sum(max(p,1e-15) for combo,p,label in values)
+              source=records[key]; odds={cell['COMBINATION']:cell['PREDICTION_TIME_ODDS'] for cell in source['CELLS']}
+              chosen=[(combo,label) for combo,p,label in values
+                      if p/total*odds[combo]>contract['SELECTION']['BREAK_EVEN_EV']]
+              count=len(chosen); hit=any(label==1 for combo,label in chosen)
+              counts.append(count); selected+=count; hits+=int(hit)
+              if hit: payout+=source['LABEL']['OFFICIAL_PAYOUT_PER_100_YEN']
+              top1_hits+=max(values,key=lambda value:value[1])[2]
+          if not (math.isclose(logloss,registry['FINAL_HOLDOUT_CELL_LOGLOSS'],rel_tol=1e-12,abs_tol=1e-12)
+                  and selected==registry['FINAL_HOLDOUT_SELECTION_COUNT']
+                  and hits==registry['FINAL_HOLDOUT_SELECTION_HITS']
+                  and b.audit_bet_count_policy(counts,contract['SELECTION'])==registry['FINAL_HOLDOUT_BET_COUNT_AUDIT']):
+              raise SystemExit('READBACK_HOLDOUT_METRICS')
+          investment=selected*100
+          report={'SCHEMA':'G11_WILD4_FROZEN_CANDIDATE_READBACK_V1','STATUS':'PASS',
+              'MODEL_SHA256':binding['MODEL_SHA256'],'TRAINING_INPUT_SHA256':binding['TRAINING_INPUT_SHA256'],
+              'TRAINING_CUTOFF_DATE':binding['TRAINING_CUTOFF_DATE'],
+              'FUTURE_OOS_START_DATE':binding['FUTURE_OOS_START_DATE'],
+              'ELIGIBLE_RACES':len(records),'TRAIN_RACES':registry['TRAIN_RACES'],
+              'VALIDATION_RACES':registry['VALIDATION_RACES'],'FINAL_HOLDOUT_RACES':len(holdout),
+              'HOLDOUT_CELL_LOGLOSS':logloss,'HOLDOUT_SELECTED_BETS':selected,
+              'HOLDOUT_HIT_RACES':hits,'HOLDOUT_TOP1_COMBINATION_HITS':top1_hits,
+              'HOLDOUT_SELECTION_COUNT_DISTRIBUTION':dict(sorted(Counter(counts).items())),
+              'HOLDOUT_BET_COUNT_AUDIT':registry['FINAL_HOLDOUT_BET_COUNT_AUDIT'],
+              'HYPOTHETICAL_UNIT_100YEN_INVESTMENT':investment,
+              'HYPOTHETICAL_UNIT_100YEN_PAYOUT':payout,
+              'HYPOTHETICAL_RECOVERY_PERCENT':100*payout/investment if investment else None,
+              'HYPOTHETICAL_NET_YEN':payout-investment,'HISTORICAL_HOLDOUT_IS_FUTURE_OOS':False,
+              'MODEL_RETRAINED':False,'PRODUCTION_MUTATED':False,'ACTUAL_PURCHASE':False,
+              'PRODUCTION_PROMOTION_ELIGIBLE':False}
+          report['CONTENT_SHA256']=b.sha256_value(report)
+          b._write_json_atomic(root/'g11-wild4-future-locks'/'candidate-readback.json',report)
+          print('WILD4_CANDIDATE_HOLDOUT_READBACK=PASS')
+          print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Encrypt immutable future locks
         env:
