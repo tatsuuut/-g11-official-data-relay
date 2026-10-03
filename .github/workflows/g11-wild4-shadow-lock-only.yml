@@ -236,6 +236,14 @@ jobs:
           else:
               records=[]
           now=datetime.now(timezone.utc)
+          if records:
+              latest=max(records,key=lambda r:r['ODDS_CAPTURED_AT'])
+              captured=datetime.fromisoformat(latest['ODDS_CAPTURED_AT'])
+              deadline=datetime.fromisoformat(latest['UPSTREAM_PACKET']['RACE_DEADLINE_AT'])
+              print('WILD4_LATEST_CAPTURE_AT='+captured.isoformat())
+              print('WILD4_LATEST_CAPTURE_DEADLINE_AT='+deadline.isoformat())
+              print('WILD4_LATEST_CAPTURE_MARGIN_SECONDS='+str(int((deadline-captured).total_seconds())))
+              print('WILD4_LATEST_CAPTURE_AGE_SECONDS='+str(int((now-captured).total_seconds())))
           due=[r for r in records if datetime.fromisoformat(r['UPSTREAM_PACKET']['RACE_DEADLINE_AT'])>now
                and r['UPSTREAM_PACKET']['EVALUATION_CONTEXT_PACK_ID']==binding['EVALUATION_CONTEXT_PACK_ID']]
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
