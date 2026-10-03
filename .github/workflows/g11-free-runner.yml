@@ -667,8 +667,10 @@ jobs:
                   isinstance(value, dict)
                   and isinstance(value.get("STATUS"), str)
                   and isinstance(value.get("OPERATIONAL_DATE_JST"), str)
-                  and isinstance(value.get("PHASE"), str)
+                  and (isinstance(value.get("PHASE"), str) or value["STATUS"] == "DRY_RUN_PASS")
               ):
+                  if value["STATUS"] == "DRY_RUN_PASS":
+                      value["PHASE"] = "DRY-RUN"
                   result = value
           if result is None:
               raise SystemExit("G11_RELAY_RESULT_JSON_NOT_FOUND")
@@ -2088,4 +2090,3 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
-
