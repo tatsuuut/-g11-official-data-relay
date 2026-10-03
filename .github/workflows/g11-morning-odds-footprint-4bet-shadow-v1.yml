@@ -10,13 +10,15 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: capture MORNING odds or settle research results
+        description: capture/settle footprint or observe/settle WILD4 research
         required: true
         default: capture
         type: choice
         options:
           - capture
           - settle
+          - wild4
+          - wild4-settle
       operational_date:
         description: YYYY-MM-DD; defaults to current JST date
         required: false
@@ -39,7 +41,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
+  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
   cancel-in-progress: false
 
 jobs:
@@ -50,6 +52,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.event_name != 'workflow_run' &&
       github.event_name != 'push' &&
+      !(github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle')) &&
       !(github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))
     runs-on: ubuntu-24.04
     timeout-minutes: 9
@@ -280,6 +283,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       (
         github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle')) ||
         (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *')) ||
         (
           github.event_name == 'workflow_run' &&
@@ -290,5 +294,5 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@935e658f1969986f6099e716da87849128450c25
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@32cebf2716476d294e180f5a7332322e15eee4d5
     secrets: inherit
