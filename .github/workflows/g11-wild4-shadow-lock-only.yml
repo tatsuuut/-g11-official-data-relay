@@ -28,6 +28,7 @@ jobs:
       - name: Checkout isolated research branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: codex/wild4-shadow-training-20261003
           persist-credentials: false
       - name: Bind the current operational date
         id: day
@@ -80,14 +81,14 @@ jobs:
           name="g11-wild4-${OPERATIONAL_DATE//-/}-future-oos-locks-encrypted"
           id=''
           selected_run=''
-          url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs?branch=codex/wild4-shadow-training-20261003&status=completed&per_page=30"
+          url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs?status=completed&per_page=100"
           status="$(curl --silent --show-error --retry 3 \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -o "${RUNNER_TEMP}/observer-runs.json" -w '%{http_code}' "${url}")"
           if [ "${status}" = '200' ]; then
-            run_ids="$(jq -r '.workflow_runs[] | select(.conclusion == "success" and .path == ".github/workflows/g11-wild4-shadow-lock-only.yml") | .id' \
+            run_ids="$(jq -r '.workflow_runs[] | select(.conclusion == "success" and (.path == ".github/workflows/g11-wild4-shadow-lock-only.yml" or (.path == ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml" and .event == "workflow_run"))) | .id' \
               "${RUNNER_TEMP}/observer-runs.json")"
             for run_id in ${run_ids}; do
               response="$(curl --fail-with-body --silent --show-error --retry 3 \
