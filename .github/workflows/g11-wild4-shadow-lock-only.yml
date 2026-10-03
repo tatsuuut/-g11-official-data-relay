@@ -43,8 +43,12 @@ jobs:
               day='2026-10-03'
           else:
               match=re.fullmatch(r'LIVE-predeadline-(20[0-9]{2}-[0-9]{2}-[0-9]{2})',title)
-              if match is None: raise SystemExit('UPSTREAM_RUN_TITLE_MISMATCH')
-              day=match.group(1)
+              if match is not None:
+                  day=match.group(1)
+              elif title=='LIVE-predeadline-':
+                  day=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()
+              else:
+                  raise SystemExit('UPSTREAM_RUN_TITLE_MISMATCH')
           if day!=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat():
               raise SystemExit('NON_CURRENT_OPERATIONAL_DATE')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
