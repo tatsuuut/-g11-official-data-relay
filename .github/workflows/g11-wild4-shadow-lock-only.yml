@@ -487,7 +487,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: bcd9f86613a78e29b20e62e2b83b76ec286a3e30
+          ref: efd476cac11dc3ee8753b5a5001c42271be41974
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-settlement
           persist-credentials: false
@@ -515,9 +515,10 @@ jobs:
               print('WILD4_PRIOR_SETTLED='+str(len(previous)))
               new = 0
           else:
-              verified = OfficialArtifactStore(workspace/'.relay-state/store').load_verified_snapshot(
-                  'night', 'workbook-ledger-projection')
-              summary = module.settle_day(ledger, verified, day)
+              store = OfficialArtifactStore(workspace/'.relay-state/store')
+              verified = store.load_verified_snapshot('night', 'workbook-ledger-projection')
+              direct = store.load_verified_snapshot('night', 'official-day-results')
+              summary = module.settle_day(ledger, verified, day, direct)
               new = summary['new']
               print('WILD4_OFFICIAL_SETTLEMENT_NEW='+str(new))
               print('WILD4_OFFICIAL_SETTLEMENT_TOTAL='+str(summary['total']))
