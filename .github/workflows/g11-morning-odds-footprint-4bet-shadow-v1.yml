@@ -1,9 +1,6 @@
 name: runtime observation
 
 on:
-  push:
-    branches: [codex/wild4-observer-allowed-workflow-review-20261003]
-    paths: [.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml]
   workflow_run:
     workflows: [runtime sync]
     types: [completed]
@@ -271,11 +268,11 @@ jobs:
     name: WILD4 prospective SHADOW observation
     if: >-
       github.repository_id == '1367703708' &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/codex/wild4-observer-allowed-workflow-review-20261003') ||
-       (github.ref == 'refs/heads/main' && github.event_name == 'workflow_run' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_branch == 'main' &&
-        github.event.workflow_run.head_repository.full_name == github.repository &&
-        startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')))
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
     uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@2f1855fbe253e5554987eb5270cd605639b5d9ff
     secrets: inherit
