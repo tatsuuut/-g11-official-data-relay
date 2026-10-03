@@ -290,5 +290,5 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@442a553aa94eaef9659083054cfc5f5ebbf642e3
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@935e658f1969986f6099e716da87849128450c25
     secrets: inherit
