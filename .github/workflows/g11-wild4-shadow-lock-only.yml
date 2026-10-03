@@ -112,7 +112,7 @@ jobs:
                 (.path == ".github/workflows/g11-wild4-shadow-lock-only.yml"
                   and .head_branch == "codex/wild4-shadow-training-20261003")
                 or (.path == ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml"
-                  and (.event == "workflow_run" or .event == "schedule" or .event == "push") and .head_branch == "main")
+                  and (.event == "workflow_run" or .event == "schedule" or .event == "push" or .event == "workflow_dispatch") and .head_branch == "main")
               )' "${RUNNER_TEMP}/observer-ledger-run.json" >/dev/null; then
               id="${artifact_id}"
               selected_run="${run_id}"
