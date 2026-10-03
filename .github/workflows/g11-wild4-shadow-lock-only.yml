@@ -49,6 +49,7 @@ jobs:
               raise SystemExit('NON_CURRENT_OPERATIONAL_DATE')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
+              output.write('artifact_name=g11-wild4-'+day.replace('-','')+'-future-oos-locks-encrypted\n')
           print('WILD4_SHADOW_OPERATIONAL_DATE='+day)
           PY
       - name: Restore current encrypted canonical state
@@ -72,7 +73,7 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         run: |
           set -euo pipefail
-          name="g11-wild4-${OPERATIONAL_DATE}-future-oos-locks-encrypted"
+          name="g11-wild4-${OPERATIONAL_DATE//-/}-future-oos-locks-encrypted"
           id=''
           selected_run=''
           url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-wild4-prospective-observer.yml/runs?status=completed&per_page=30"
@@ -109,7 +110,7 @@ jobs:
         if: steps.prior.outputs.id != ''
         uses: actions/download-artifact@v4
         with:
-          name: g11-wild4-${{ steps.day.outputs.day }}-future-oos-locks-encrypted
+          name: ${{ steps.day.outputs.artifact_name }}
           run-id: ${{ steps.prior.outputs.run_id }}
           github-token: ${{ github.token }}
           path: .prior-encrypted
@@ -414,7 +415,7 @@ jobs:
         if: steps.availability.outputs.due == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: g11-wild4-${{ steps.day.outputs.day }}-future-oos-locks-encrypted
+          name: ${{ steps.day.outputs.artifact_name }}
           path: ${{ runner.temp }}/future-locks.tgz.gpg
           if-no-files-found: error
           retention-days: 30
