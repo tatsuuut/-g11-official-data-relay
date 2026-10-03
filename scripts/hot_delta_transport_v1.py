@@ -37,7 +37,7 @@ BASE_RACE_FIELDS = {
     "practical_hit", "validation_hit", "miss_classification", "research_decision",
     "result_meta", "research_finance", "actual_purchase", "abeken_shadow",
     "wild_pack", "original_display_shadow", "three_engine_score",
-    "three_engine_classification", "late_reference",
+    "three_engine_classification", "late_reference", "abeken_score_breakdown",
 }
 PRE_FIELDS = (
     "predeadline", "pre_race_v2", "odds_merit", "best_ev", "best_ev_bet",
@@ -48,7 +48,7 @@ NIGHT_FIELDS = PRE_FIELDS + (
     "result_trifecta", "payout", "practical_hit", "validation_hit",
     "miss_classification", "research_decision", "result_meta",
     "research_finance", "actual_purchase", "three_engine_score",
-    "three_engine_classification",
+    "three_engine_classification", "abeken_score_breakdown",
 )
 NIGHT_TOP = (
     "research", "research_db", "three_engine_comparison", "final_accounting",

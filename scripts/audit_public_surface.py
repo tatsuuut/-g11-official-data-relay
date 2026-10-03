@@ -561,7 +561,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     current_race_fields = (
         "three_engine_score", "three_engine_classification",
         "trifecta_confidence", "special_case_id", "special_strength",
-        "strong_mark", "wild_pack", "abeken_shadow", "p3_verification",
+        "strong_mark", "wild_pack", "abeken_shadow", "p3_verification", "abeken_score_breakdown",
     )
     current_live_fields = (
         "trifecta_confidence", "special_case_id",
@@ -728,7 +728,7 @@ def project_feed_schema(feed_path: pathlib.Path, reference_path: pathlib.Path) -
     )
     print("G11_SITE_REFERENCE_RACE_KEYSETS=" + json.dumps(_keyset_variants(reference_races), ensure_ascii=False, sort_keys=True))
     print("G11_SITE_INCOMING_RACE_KEYSETS=" + json.dumps(_keyset_variants(incoming_races), ensure_ascii=False, sort_keys=True))
-    for field in ("original_display_shadow", "wild_pack", "abeken_shadow", "p3_snapshot", "result_meta", "research_finance", "actual_purchase", "predeadline", "three_engine_score", "late_reference"):
+    for field in ("original_display_shadow", "wild_pack", "abeken_shadow", "p3_snapshot", "result_meta", "research_finance", "actual_purchase", "predeadline", "three_engine_score", "late_reference", "abeken_score_breakdown"):
         print("G11_SITE_REFERENCE_NESTED_" + field.upper() + "=" + json.dumps(_nested_keyset_variants(reference_races, field), ensure_ascii=False, sort_keys=True))
         print("G11_SITE_INCOMING_NESTED_" + field.upper() + "=" + json.dumps(_nested_keyset_variants(incoming_races, field), ensure_ascii=False, sort_keys=True))
     print("G11_SITE_SCHEMA_PROJECT=PASS")
