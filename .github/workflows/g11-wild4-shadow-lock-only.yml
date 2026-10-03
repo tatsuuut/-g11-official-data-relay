@@ -213,6 +213,11 @@ jobs:
                   or datetime.fromisoformat(lock['LOCKED_AT'])>=datetime.fromisoformat(lock['RACE_DEADLINE_AT'])):
                   raise SystemExit('PRIOR_LOCK_READBACK')
           print('WILD4_PRIOR_LOCKS='+str(len(files)))
+          print('WILD4_PRIOR_RACES='+json.dumps([
+              {'race_key':p.stem,'buy_count':json.loads(p.read_text())['BUY_COUNT'],
+               'locked_at':json.loads(p.read_text())['LOCKED_AT'],
+               'deadline':json.loads(p.read_text())['RACE_DEADLINE_AT']}
+              for p in files],sort_keys=True))
           PY
       - name: Check for a matching unexpired official odds packet
         id: availability
