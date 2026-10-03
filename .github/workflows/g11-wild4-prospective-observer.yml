@@ -23,5 +23,5 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.event == 'workflow_dispatch' &&
       startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@05872d658b666993ce4f17a337ca100c5f703b38
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@7c3dce4355f1b79e4d870c9850c1ee9f9194bb77
     secrets: inherit
