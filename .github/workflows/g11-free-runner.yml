@@ -264,7 +264,9 @@ jobs:
           printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
       - name: Verify scoped PREDEADLINE authority recovery regression
         if: steps.due.outputs.phase == 'predeadline'
-        run: python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py
+        run: |
+          python3 -m py_compile scripts/daily_predeadline_authority_recovery_v1.py
+          python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py
       - name: Capture and lock dependency-free PREDEADLINE critical lane
         if: steps.due.outputs.phase == 'predeadline'
         id: critical
