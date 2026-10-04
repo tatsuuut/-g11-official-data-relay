@@ -892,6 +892,7 @@ jobs:
               -H 'Accept: application/json' \
               "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
             token="$(printf '%s' "${oidc}" | jq -er '.value')"
+            # Site v196 derives the ABEKEN count from admitted immutable race LOCKs.
             G11_SYNC_OIDC="${token}" python3 scripts/daily_runtime_delivery_v1.py \
               --state-root .relay-state --feed "${FEED}" --origin "${G11_APP_ORIGIN}"
             exit 0
