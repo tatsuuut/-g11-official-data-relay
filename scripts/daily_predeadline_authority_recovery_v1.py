@@ -183,6 +183,28 @@ def apply(implementation, day):
     return implementation
 
 
+def allow_optional_shadow(store_root, race_id, snapshot_name, *, now=None):
+    path = store_root / "snapshots/predeadline" / (snapshot_name + ".json")
+    if path.is_file():
+        return
+    deadlines = _plan(store_root)
+    _require(race_id in deadlines
+             and (now or datetime.now(timezone.utc)) < deadlines[race_id],
+             "MASHIRO_RESEARCH_SHADOW_AFTER_DEADLINE:" + race_id)
+
+
+def guard_optional_mashiro_shadow():
+    """Keep optional research from first writing a PRE_RACE sidecar after cutoff."""
+    from g11.growth_p3.v1_1 import mashiro_v4_runtime_adapter_v1 as mashiro
+    original = mashiro.publish_shadow
+
+    def before_deadline(store, race_id, *, is_sg):
+        allow_optional_shadow(store.root, race_id, mashiro.shadow_name(race_id))
+        return original(store, race_id, is_sg=is_sg)
+
+    mashiro.publish_shadow = before_deadline
+
+
 def main():
     mode = sys.argv[1]
     sys.argv = [sys.argv[0], *sys.argv[2:]]
@@ -197,6 +219,7 @@ def main():
         from g11.relay import predeadline_critical_v1
         predeadline_critical_v1.main()
     elif mode == "predeadline":
+        guard_optional_mashiro_shadow()
         from g11.relay import predeadline_nowait_v1
         return predeadline_nowait_v1.main(sys.argv[1:])
     elif mode == "night":
