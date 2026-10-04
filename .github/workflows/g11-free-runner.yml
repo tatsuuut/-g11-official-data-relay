@@ -159,10 +159,12 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v3-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
           restore-keys: |
-            g11-state-v2-${{ steps.due.outputs.operational_date }}-
-            g11-state-v2-
+            g11-state-v3-${{ steps.due.outputs.operational_date }}-
+            g11-state-v3-
+            ${{ steps.due.outputs.operational_date == '2026-10-04' && 'g11-state-v2-2026-10-04-37164943826-critical' || format('g11-state-v2-{0}-', steps.due.outputs.operational_date) }}
+            ${{ steps.due.outputs.operational_date != '2026-10-04' && 'g11-state-v2-' || '' }}
       - name: Fail closed when the private credential is absent
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
@@ -305,7 +307,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-critical
+          key: g11-state-v3-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-critical
       - name: Keep the predeadline relay alive between delayed cron starts
         if: always() && !cancelled() && steps.critical.outcome == 'success' && steps.critical-save.outcome == 'success' && steps.critical-encrypt.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'
         env:
@@ -810,7 +812,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v3-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
       - name: Gate NIGHT publication on fully settled research
         id: night-ready
         if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != ''
@@ -1615,7 +1617,9 @@ jobs:
           fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
       - name: Persist authority checkpoint and delivery receipts
-        if: always() && !cancelled() && steps.due.outputs.phase != 'dry-run'
+        if: >-
+          always() && !cancelled() && steps.due.outputs.phase != 'dry-run' &&
+          (steps.due.outputs.phase != 'predeadline' || steps.runtime.outcome == 'success')
         id: delivery-state
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
@@ -1639,7 +1643,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-delivery
+          key: g11-state-v3-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-delivery
       - name: Verify source identity and projected app readback
         id: readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true'
