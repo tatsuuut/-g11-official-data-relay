@@ -153,6 +153,12 @@ def apply(implementation, day):
                          "DAILY_LOCK_BINDING_CONFLICT:" + name)
                 known[name] = sha
         store = state / "store"
+        raw = original_inventory(store, target, phase)
+        previous_mismatches = sorted(name for name, sha in known.items()
+                                     if raw.get(name) != sha)
+        if previous_mismatches:
+            print("G11_FROZEN_PREDEADLINE_LEGACY_MISMATCH_PATHS",
+                  json.dumps(previous_mismatches), file=sys.stderr)
         observed = inventory(store, target, phase)
         for name, sha in known.items():
             if name not in RESEARCH_NAMES:
