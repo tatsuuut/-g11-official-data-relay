@@ -262,6 +262,9 @@ jobs:
             source_sha="$(git -C .g11-private rev-parse HEAD)"
           fi
           printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
+      - name: Verify scoped PREDEADLINE authority recovery regression
+        if: steps.due.outputs.phase == 'predeadline'
+        run: python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py
       - name: Capture and lock dependency-free PREDEADLINE critical lane
         if: steps.due.outputs.phase == 'predeadline'
         id: critical
@@ -271,7 +274,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../.relay-output
-          python3 -S -m g11.relay.predeadline_critical_v1 \
+          python3 -S ../scripts/daily_predeadline_authority_recovery_v1.py critical \
             --state-root "${GITHUB_WORKSPACE}/.relay-state" \
             --operational-date "${{ steps.due.outputs.operational_date }}" \
             --run-id "${GITHUB_RUN_ID}" \
@@ -642,9 +645,13 @@ jobs:
           )
           runtime_stdout=../.relay-output/runtime.stdout
           if [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
-            python3 -m g11.relay.predeadline_nowait_v1 "${args[@]}" | tee "${runtime_stdout}"
+            python3 ../scripts/daily_predeadline_authority_recovery_v1.py predeadline "${args[@]}" | tee "${runtime_stdout}"
           else
-            python3 -m g11.relay.v1 "${args[@]}" | tee "${runtime_stdout}"
+            if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-04" ]; then
+              python3 ../scripts/daily_predeadline_authority_recovery_v1.py night "${args[@]}" | tee "${runtime_stdout}"
+            else
+              python3 -m g11.relay.v1 "${args[@]}" | tee "${runtime_stdout}"
+            fi
           fi
           python3 - "${runtime_stdout}" ../.relay-output/result.json <<'PY'
           import json
