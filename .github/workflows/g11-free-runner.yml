@@ -162,7 +162,7 @@ jobs:
           key: g11-state-v4-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
           restore-keys: |
             g11-state-v4-published-${{ steps.due.outputs.operational_date }}-
-            ${{ steps.due.outputs.operational_date == '2026-10-04' && 'g11-state-v3-2026-10-04-37165427375-delivery' || format('g11-state-v3-{0}-', steps.due.outputs.operational_date) }}
+            ${{ steps.due.outputs.operational_date != '2026-10-04' && format('g11-state-v3-{0}-', steps.due.outputs.operational_date) || '' }}
             g11-state-v4-published-
             ${{ steps.due.outputs.operational_date != '2026-10-04' && 'g11-state-v3-' || '' }}
       - name: Fail closed when the private credential is absent
