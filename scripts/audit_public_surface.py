@@ -24,6 +24,8 @@ ALLOWED_FILES = {
     "scripts/daily_runtime_bootstrap_v1.py",
     "scripts/daily_runtime_delivery_v1.py",
     "scripts/test_daily_runtime_delivery_v1.py",
+    "scripts/daily_predeadline_authority_recovery_v1.py",
+    "scripts/test_daily_predeadline_authority_recovery_v1.py",
     "scripts/repair_20260928_final.py",
     "scripts/overlay_20260928_accepted_feed_final.py",
     "scripts/official_20260928_results.txt",
@@ -904,7 +906,7 @@ def audit_predeadline_critical_order() -> None:
     if indices != sorted(indices) or "cancel-in-progress: false" not in workflow:
         fail("critical checkpoint must precede optional work without cancellation")
     critical = workflow.split("      - name: Capture and lock dependency-free PREDEADLINE critical lane", 1)[1].split("      - name:", 1)[0]
-    if "python3 -S -m g11.relay.predeadline_critical_v1" not in critical:
+    if "python3 -S ../scripts/daily_predeadline_authority_recovery_v1.py critical" not in critical:
         fail("critical stdlib import contract missing")
     before = workflow.split("      - name: Capture and lock dependency-free PREDEADLINE critical lane", 1)[0]
     if "pip install" in before or ".g11-model" in before or "catboost" in before:
