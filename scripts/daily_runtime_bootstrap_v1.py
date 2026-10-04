@@ -59,6 +59,9 @@ def retained_module(state, day):
         implementation = Path(temporary) / "authority.py"
         implementation.write_bytes(data)
         result = module(implementation)
+    if day == "2026-10-04":
+        from daily_predeadline_authority_recovery_v1 import apply
+        apply(result, day)
     return result
 
 
