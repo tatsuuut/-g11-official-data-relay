@@ -121,6 +121,17 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "RESULT_BACKFLOW"):
             self.module.verify_locks(self.state, recovery.DAY, "PREDEADLINE")
 
+    def test_J_expired_optional_research_cannot_create_shadow(self):
+        with self.assertRaisesRegex(RuntimeError, "SHADOW_AFTER_DEADLINE"):
+            recovery.allow_optional_shadow(self.store, self.key,
+                "mashiro-v4-shadow-" + self.key,
+                now=datetime.fromisoformat("2026-10-04T12:01:00+09:00"))
+
+    def test_K_future_optional_research_can_create_shadow(self):
+        recovery.allow_optional_shadow(self.store, self.key,
+            "mashiro-v4-shadow-" + self.key,
+            now=datetime.fromisoformat(self.early))
+
 
 if __name__ == "__main__":
     unittest.main()
