@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
+import sys
 
 from daily_runtime_bootstrap_v1 import retained_module
 import hot_delta_transport_v1 as hot
@@ -140,6 +141,8 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     require(origin == ORIGIN and 1 <= attempts <= MAX_ATTEMPTS, "DAILY_DELIVERY_CONFIGURATION")
     Path(".relay-output").mkdir(exist_ok=True)
     day = json.loads(feed_path.read_bytes())["operational_date_jst"]
+    if json.loads(feed_path.read_bytes()).get("SNAPSHOT_CLASS") == "SAME_DAY_RESCUE_BOUNDARY":
+        return deliver_rescue(state, feed_path, origin, attempts, pause)
     implementation = retained_module(state, day)
     authority = implementation.load(state, day)
     feed = implementation.json_file(feed_path)
@@ -218,6 +221,71 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
             output.write("feed_sha=" + ack["payload_sha256"] + "\n")
     print(json.dumps(receipt, sort_keys=True))
     return receipt
+
+
+def deliver_rescue(state, feed_path, origin, attempts, pause):
+    """Transport one explicitly nonresearch boundary; no canonical fallback."""
+    sys.path.insert(0, str(Path('.g11-private').resolve()))
+    from g11.relay import same_day_boundary_20261006 as boundary
+    cert = boundary.verify(state.resolve() / 'rescue/store')
+    feed = json.loads(feed_path.read_bytes())
+    require(feed['operational_date_jst'] == '2026-10-06' and feed['stage'] == 'MORNING'
+            and feed['same_day_rescue']['authority_sha256'] == cert['authority_sha256']
+            and feed.get('daily_runtime') is None and feed['counts']['formal'] == 0
+            and feed['counts']['research_samples'] == 0, 'RESCUE_TRANSPORT_IDENTITY')
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / 'rescue.json'
+        path.write_bytes(feed_path.read_bytes())
+        hot.project_morning_base(path)
+        projected = json.loads(path.read_bytes())
+        for field in ('SNAPSHOT_CLASS', 'CANONICAL_MORNING_PROMOTED', 'RESEARCH_ELIGIBLE_AS_MORNING',
+                      'MORNING_HISTORY_BACKFILL', 'ACCOUNTING_CLASS', 'same_day_rescue'):
+            projected[field] = feed[field]
+        proofs = {r['key']: r.get('same_day_rescue_lock') for r in feed['races']}
+        for row in projected['races']:
+            if proofs[row['key']]:
+                row['same_day_rescue_lock'] = proofs[row['key']]
+        data = hot.compact(projected)
+        path.write_bytes(data)
+        response = Path(directory) / 'response.json'
+        token = os.environ['G11_SYNC_OIDC']
+        for attempt in range(attempts):
+            result = subprocess.run(['curl', '--silent', '--show-error', '--max-time', '45',
+                '-X', 'POST', origin + '/api/g11-sync', '-H', 'Authorization: Bearer ' + token,
+                '-H', 'Content-Type: application/json', '-H', 'x-g11-feed-sha256: ' + hot.hash_bytes(data),
+                '--data-binary', '@' + str(path), '--output', str(response), '--write-out', '%{http_code}'],
+                capture_output=True, text=True)
+            require(result.returncode == 0, 'RESCUE_TRANSPORT_PROCESS')
+            ack = json.loads(response.read_bytes())
+            code = int(result.stdout)
+            if 200 <= code < 300 and ack.get('status') == 'PASS':
+                break
+            if code < 500 or attempt + 1 == attempts:
+                raise RuntimeError('RESCUE_SITE_REJECTED:' + str(ack.get('error')))
+            pause((2, 5)[attempt])
+        readback, headers, raw = hot.fetch(origin + '/api/g11-feed?date=2026-10-06')
+        require(readback.get('same_day_rescue') == projected['same_day_rescue']
+                and readback.get('SNAPSHOT_CLASS') == 'SAME_DAY_RESCUE_BOUNDARY'
+                and headers.get('x-g11-source-feed-sha256') == hot.hash_bytes(data) == ack.get('payload_sha256'),
+                'RESCUE_SITE_READBACK_IDENTITY')
+        expected = {r['key']: r for r in projected['races']}
+        for row in readback['races']:
+            before = expected[row['key']]
+            for field in ('same_day_rescue_lock', 'practical_bets', 'p3_snapshot_sha256', 'abeken_shadow'):
+                require(before.get(field) == row.get(field), 'RESCUE_SITE_LOCK_READBACK:' + row['key'] + ':' + field)
+        Path('.relay-output/hot-delta-accepted').write_text(ack['payload_sha256'] + '\n')
+        Path('.relay-output/hot-delta-readback.json').write_bytes(raw)
+        receipt = {'schema': 'G11_SAME_DAY_RESCUE_DELIVERY_V1', 'status': 'PASS',
+            'operational_date_jst': '2026-10-06', 'site_get_readback': 'PASS',
+            'rescued_race_count': feed['same_day_rescue']['rescued_race_count'],
+            'excluded_past_deadline_race_count': feed['same_day_rescue']['excluded_past_deadline_race_count'],
+            'authority_sha256': cert['authority_sha256'], 'site_payload_sha256': ack['payload_sha256']}
+        (state / 'rescue/delivery.json').write_bytes(hot.compact(receipt))
+        if os.environ.get('GITHUB_OUTPUT'):
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                output.write('feed_sha=' + ack['payload_sha256'] + '\n')
+        print(json.dumps(receipt, sort_keys=True))
+        return receipt
 
 
 if __name__ == "__main__":

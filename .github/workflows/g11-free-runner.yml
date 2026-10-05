@@ -19,6 +19,7 @@ on:
           - morning
           - predeadline
           - night
+          - same-day-rescue
           - repair-20260928
       operational_date:
         description: YYYY-MM-DD; dry-run may inspect a non-current date
@@ -108,7 +109,10 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            if [[ "${COMMIT_MESSAGE}" == *"[daily-runtime-freeze]"* ]]; then
+            if [[ "${COMMIT_MESSAGE}" == *"[rescue-20261006]"* ]]; then
+              phase="same-day-rescue"
+              operational_date="2026-10-06"
+            elif [[ "${COMMIT_MESSAGE}" == *"[daily-runtime-freeze]"* ]]; then
               phase="dry-run"
             elif [[ "${COMMIT_MESSAGE}" == *"[historical-final-repair]"* ]]; then
               phase="dry-run"
@@ -149,7 +153,7 @@ jobs:
           if re.fullmatch(r"\d{4}-\d{2}-\d{2}", sys.argv[1]) is None:
               raise SystemExit("G11_RELAY_OPERATIONAL_DATE_FORMAT")
           dt.date.fromisoformat(sys.argv[1])
-          if sys.argv[2] not in {"auto", "morning", "predeadline", "night", "dry-run"}:
+          if sys.argv[2] not in {"auto", "morning", "predeadline", "night", "dry-run", "same-day-rescue"}:
               raise SystemExit("G11_RELAY_PHASE")
           PY
           printf 'operational_date=%s\nphase=%s\n' \
@@ -237,6 +241,13 @@ jobs:
       - name: Restore the immutable daily source before any private imports
         id: authority
         run: |
+          if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ]; then
+            test "${{ steps.due.outputs.operational_date }}" = "2026-10-06"
+            test "$(date +%F)" = "2026-10-06"
+            echo 'checkout_candidate=true' >> "${GITHUB_OUTPUT}"
+            echo 'frozen=false' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
           python3 scripts/daily_runtime_bootstrap_v1.py prepare \
             --state-root .relay-state \
             --operational-date "${{ steps.due.outputs.operational_date }}" \
@@ -247,7 +258,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
-          ref: ${{ env.G11_PRIVATE_RUNTIME_REF }}
+          ref: ${{ steps.due.outputs.phase == 'same-day-rescue' && 'cd7fdb3133e2d57c7443973eb6bd5f67cc8e4344' || env.G11_PRIVATE_RUNTIME_REF }}
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -474,6 +485,11 @@ jobs:
         if: steps.due.outputs.phase != 'predeadline'
         id: freeze
         run: |
+          if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ]; then
+            python3 .g11-private/g11/relay/same_day_boundary_20261006.py freeze \
+              --state .relay-state --source-sha "${{ steps.source.outputs.source_sha }}"
+            exit 0
+          fi
           python3 scripts/daily_runtime_bootstrap_v1.py freeze \
             --state-root .relay-state --source-root .g11-private \
             --source-sha "${{ steps.source.outputs.source_sha }}" \
@@ -648,7 +664,11 @@ jobs:
             --oidc-audience "${G11_OIDC_AUDIENCE}"
           )
           runtime_stdout=../.relay-output/runtime.stdout
-          if [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
+          if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ]; then
+            python3 g11/relay/same_day_boundary_20261006.py run \
+              --state "${GITHUB_WORKSPACE}/.relay-state" --output "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
+              --source-sha "${G11_PRIVATE_SOURCE_SHA}" --run-id "${GITHUB_RUN_ID}" | tee "${runtime_stdout}"
+          elif [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
             python3 ../scripts/daily_predeadline_authority_recovery_v1.py predeadline "${args[@]}" | tee "${runtime_stdout}"
           else
             if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-04" ]; then
@@ -687,7 +707,7 @@ jobs:
           print("G11_RELAY_RESULT_EXTRACT=PASS")
           PY
       - name: Audit WILD4 training-food capture
-        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'same-day-rescue'
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
@@ -1626,7 +1646,7 @@ jobs:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
           set -euo pipefail
-          if [ ! -f ".relay-state/daily-runtime/${{ steps.due.outputs.operational_date }}/authority.json" ]; then
+          if [ ! -f ".relay-state/daily-runtime/${{ steps.due.outputs.operational_date }}/authority.json" ] && [ ! -f .relay-state/rescue/boundary.json ]; then
             echo 'ready=false' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
