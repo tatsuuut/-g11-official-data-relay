@@ -124,11 +124,11 @@ def _get(url: str, token: str | None = None) -> dict:
         Path('.relay-output').mkdir(exist_ok=True)
         try:
             return fetch(url)[0]
-        except CalledProcessError:
+        except CalledProcessError as exc:
             headers = Path('.relay-output/hot-get-headers.txt')
             status = [line.split()[1] for line in headers.read_text().splitlines()
                       if line.startswith('HTTP/') and len(line.split()) >= 2] if headers.exists() else []
-            if status and status[-1] == '404':
+            if exc.returncode == 22 and status and status[-1] == '404':
                 raise HTTPError(url, 404, 'DAY_FEED_NOT_YET_PUBLISHED', {}, None) from None
             raise RuntimeError('WATCHDOG_SITE_READBACK_FAILED') from None
     headers = {"Accept": "application/vnd.github+json",
