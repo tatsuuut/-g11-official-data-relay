@@ -508,6 +508,29 @@ jobs:
             --source-sha "${{ steps.source.outputs.source_sha }}" \
             --operational-date "${{ steps.due.outputs.operational_date }}" \
             --output .relay-output/next-morning-authority-dry-run.json
+      - name: Read back rescue boundary and preserved previous NIGHT
+        if: steps.due.outputs.phase == 'dry-run' && steps.due.outputs.operational_date == '2026-10-06'
+        run: |
+          python3 - <<'PYREAD'
+          import json, pathlib, urllib.request
+          from datetime import datetime
+          root=pathlib.Path('.relay-state')
+          f=json.loads((root/'rescue/feed.json').read_bytes())
+          b=f['same_day_rescue']
+          cutoff=datetime.fromisoformat(b['cutoff_at_jst'])
+          excluded=[{'key':r['key'],'deadline_jst':r['deadline_jst']} for r in f['races'] if not r.get('same_day_rescue_lock')]
+          past=[r for r in excluded if datetime.fromisoformat(r['deadline_jst'])<=cutoff]
+          assert len(past)==b['excluded_past_deadline_race_count']
+          assert len(f['races'])-len(excluded)==b['rescued_race_count']
+          assert f['counts']['formal']==f['counts']['research_samples']==0
+          prior=json.load(urllib.request.urlopen('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-05',timeout=30))
+          checkpoint=json.loads((root/'daily-runtime/2026-10-05/night-checkpoint.json').read_bytes())
+          assert prior['stage']=='NIGHT' and prior['counts']['results']==prior['counts']['races']==144
+          assert prior['transport']['canonical_feed_sha256']==checkpoint['feed_sha256']
+          print(json.dumps({'RESCUE_BOUNDARY_READBACK':'PASS','RESCUED':b['rescued_race_count'],
+              'EXCLUDED_PAST_DEADLINE':past,'PREVIOUS_NIGHT_UNCHANGED':'PASS',
+              'PREVIOUS_NIGHT_CANONICAL_SHA256':checkpoint['feed_sha256']},sort_keys=True))
+          PYREAD
       - name: Install pinned private runtime dependencies
         if: steps.due.outputs.phase != 'predeadline' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
         run: |
@@ -1748,7 +1771,7 @@ jobs:
             fi
           fi
       - name: Prove first formal V53 race from official snapshots and deployed readback
-        if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true' && steps.due.outputs.phase != 'night' && steps.readback.outcome == 'success'
+        if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true' && steps.due.outputs.phase != 'night' && steps.due.outputs.phase != 'same-day-rescue' && steps.readback.outcome == 'success'
         env:
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |

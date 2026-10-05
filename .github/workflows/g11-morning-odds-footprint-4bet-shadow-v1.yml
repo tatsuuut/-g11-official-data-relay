@@ -1,4 +1,5 @@
 name: runtime observation
+# Current-state v4 binding verified; missing MORNING remains isolated WAITING.
 
 on:
   push:
