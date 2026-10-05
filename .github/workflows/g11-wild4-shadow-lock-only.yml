@@ -66,10 +66,20 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-${{ steps.day.outputs.day }}-isolated-shadow-no-exact-match
+          key: g11-state-v4-${{ steps.day.outputs.day }}-isolated-shadow-no-exact-match
           restore-keys: |
-            g11-state-v2-${{ steps.day.outputs.day }}-
+            g11-state-v4-published-${{ steps.day.outputs.day }}-
+      - name: Verify current canonical state availability
+        id: state-ready
+        run: |
+          if [ -s .relay-cache/state.tgz.gpg ]; then
+            echo 'ready=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'ready=false' >> "${GITHUB_OUTPUT}"
+            echo 'WILD4_WAITING_CURRENT_CANONICAL_STATE; no decryption attempted'
+          fi
       - name: Retrieve exact frozen encrypted candidate
+        if: steps.state-ready.outputs.ready == 'true'
         uses: actions/download-artifact@v4
         with:
           name: g11-wild4-frozen-shadow-candidate-encrypted
@@ -77,6 +87,7 @@ jobs:
           github-token: ${{ github.token }}
           path: .candidate-encrypted
       - name: Identify the most recent encrypted shadow ledger
+        if: steps.state-ready.outputs.ready == 'true'
         id: prior
         env:
           GH_TOKEN: ${{ github.token }}
@@ -139,7 +150,7 @@ jobs:
           echo "run_id=${selected_run}" >> "${GITHUB_OUTPUT}"
           if [ -z "${id}" ]; then echo 'WILD4_PRIOR_LEDGER=NONE'; else echo 'WILD4_PRIOR_LEDGER=FOUND'; fi
       - name: Retrieve exact prior encrypted shadow ledger
-        if: steps.prior.outputs.id != ''
+        if: steps.state-ready.outputs.ready == 'true' && (steps.prior.outputs.id != '')
         uses: actions/download-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
@@ -147,6 +158,7 @@ jobs:
           github-token: ${{ github.token }}
           path: .prior-encrypted
       - name: Checkout frozen shadow source
+        if: steps.state-ready.outputs.ready == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -155,6 +167,8 @@ jobs:
           path: .g11-private
           persist-credentials: false
       - name: Decrypt verified state and candidate
+        id: decrypted
+        if: steps.state-ready.outputs.ready == 'true'
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
@@ -188,9 +202,13 @@ jobs:
           state=json.loads(pathlib.Path('.relay-state/relay-state.json').read_text())
           if state.get('OPERATIONAL_DATE_JST')!=os.environ['OPERATIONAL_DATE']:
               raise SystemExit('STATE_DATE_MISMATCH')
-          print('WILD4_FUTURE_STATE_READBACK=PASS')
+          ready=state.get('MORNING_COMPLETE') is True
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('canonical_ready='+str(ready).lower()+'\n')
+          print('WILD4_FUTURE_STATE_READBACK=PASS' if ready else 'WILD4_WAITING_CANONICAL_MORNING; rescue is not MORNING authority')
           PY
       - name: Restore and verify earlier immutable SHADOW locks
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true'
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
@@ -248,6 +266,7 @@ jobs:
               for p in files],sort_keys=True))
           PY
       - name: Check for a matching unexpired official odds packet
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true'
         id: availability
         working-directory: .g11-private
         env:
@@ -326,10 +345,10 @@ jobs:
           print('WILD4_MATCHING_UNEXPIRED='+str(len(due)))
           PY
       - name: Install CatBoost only in isolated research lane
-        if: steps.availability.outputs.due == 'true'
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true')
         run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
       - name: Lock future races before deadline without any production write
-        if: steps.availability.outputs.due == 'true'
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true')
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         working-directory: .g11-private
@@ -406,7 +425,7 @@ jobs:
           print('WILD4_PRODUCTION_MUTATED=false')
           PY
       - name: Read back frozen holdout evidence without retraining
-        if: steps.availability.outputs.due == 'true'
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true')
         working-directory: .g11-private
         run: |
           set -euo pipefail
@@ -488,7 +507,7 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Checkout pinned official settlement source
-        if: (github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -497,7 +516,7 @@ jobs:
           path: .g11-settlement
           persist-credentials: false
       - name: Settle only immutable locks from verified final NIGHT
-        if: (github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
@@ -533,7 +552,7 @@ jobs:
               output.write('new='+str(new)+'\n')
           PY
       - name: Encrypt immutable future locks
-        if: steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != ''
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -545,10 +564,11 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks
-        if: steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != ''
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
           path: ${{ runner.temp }}/future-locks.tgz.gpg
           if-no-files-found: error
           retention-days: 30
+
