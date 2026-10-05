@@ -114,8 +114,6 @@ class WatchdogTests(unittest.TestCase):
             self.assertIn("/dispatches", post.call_args.args[0].full_url)
 
 
-if __name__ == "__main__":
-    unittest.main()
 class SiteTransportTests(unittest.TestCase):
     def test_site_uses_existing_hash_verified_readback(self):
         import predeadline_watchdog_v1 as watchdog
@@ -132,3 +130,15 @@ class SiteTransportTests(unittest.TestCase):
                 with patch.object(watchdog.Path, 'read_text', return_value=f'HTTP/2 {status}\n'):
                     with self.assertRaises(HTTPError if status == 404 else RuntimeError):
                         watchdog._get('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-07')
+
+    def test_network_timeout_never_reuses_stale_404_headers(self):
+        import predeadline_watchdog_v1 as watchdog
+        from unittest.mock import patch
+        with patch('hot_delta_transport_v1.fetch', side_effect=CalledProcessError(28, 'curl')), \
+             patch.object(watchdog.Path, 'exists', return_value=True), \
+             patch.object(watchdog.Path, 'read_text', return_value='HTTP/2 404\n'):
+            with self.assertRaisesRegex(RuntimeError, 'WATCHDOG_SITE_READBACK_FAILED'):
+                watchdog._get('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-07')
+
+if __name__ == "__main__":
+    unittest.main()
