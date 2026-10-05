@@ -512,8 +512,10 @@ jobs:
         if: steps.due.outputs.phase == 'dry-run' && steps.due.outputs.operational_date == '2026-10-06'
         run: |
           python3 - <<'PYREAD'
-          import json, pathlib, urllib.request
+          import json, pathlib, sys
           from datetime import datetime
+          sys.path.insert(0, 'scripts')
+          from hot_delta_transport_v1 import fetch
           root=pathlib.Path('.relay-state')
           f=json.loads((root/'rescue/feed.json').read_bytes())
           b=f['same_day_rescue']
@@ -523,7 +525,7 @@ jobs:
           assert len(past)==b['excluded_past_deadline_race_count']
           assert len(f['races'])-len(excluded)==b['rescued_race_count']
           assert f['counts']['formal']==f['counts']['research_samples']==0
-          prior=json.load(urllib.request.urlopen('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-05',timeout=30))
+          prior, _, _ = fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-05')
           checkpoint=json.loads((root/'daily-runtime/2026-10-05/night-checkpoint.json').read_bytes())
           assert prior['stage']=='NIGHT' and prior['counts']['results']==prior['counts']['races']==144
           assert prior['transport']['canonical_feed_sha256']==checkpoint['feed_sha256']

@@ -1,6 +1,8 @@
 """Fault injection for missing scheduler and failed self-chain."""
 from datetime import datetime
 import unittest
+from subprocess import CalledProcessError
+from urllib.error import HTTPError
 from unittest import mock
 
 from predeadline_watchdog_v1 import (_last_deadline, decide, main,
@@ -114,3 +116,19 @@ class WatchdogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+class SiteTransportTests(unittest.TestCase):
+    def test_site_uses_existing_hash_verified_readback(self):
+        import predeadline_watchdog_v1 as watchdog
+        from unittest.mock import patch
+        with patch('hot_delta_transport_v1.fetch', return_value=({'status': 'PASS'}, {}, b'{}')) as fetch:
+            self.assertEqual(watchdog._get('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-07'), {'status': 'PASS'})
+            fetch.assert_called_once()
+
+    def test_only_missing_day_is_recoverable_not_access_failure(self):
+        import predeadline_watchdog_v1 as watchdog
+        from unittest.mock import patch
+        with patch('hot_delta_transport_v1.fetch', side_effect=CalledProcessError(22, 'curl')), patch.object(watchdog.Path, 'exists', return_value=True):
+            for status in (403, 404):
+                with patch.object(watchdog.Path, 'read_text', return_value=f'HTTP/2 {status}\n'):
+                    with self.assertRaises(HTTPError if status == 404 else RuntimeError):
+                        watchdog._get('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-07')

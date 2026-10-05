@@ -116,6 +116,21 @@ def recover_morning(now: datetime, token: str, repository: str, origin: str) -> 
 
 
 def _get(url: str, token: str | None = None) -> dict:
+    if url.startswith("https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?"):
+        # Reuse the production GET/readback transport and its payload-hash
+        # validation. GitHub API headers are not a Site API request contract.
+        from hot_delta_transport_v1 import fetch
+        from subprocess import CalledProcessError
+        Path('.relay-output').mkdir(exist_ok=True)
+        try:
+            return fetch(url)[0]
+        except CalledProcessError:
+            headers = Path('.relay-output/hot-get-headers.txt')
+            status = [line.split()[1] for line in headers.read_text().splitlines()
+                      if line.startswith('HTTP/') and len(line.split()) >= 2] if headers.exists() else []
+            if status and status[-1] == '404':
+                raise HTTPError(url, 404, 'DAY_FEED_NOT_YET_PUBLISHED', {}, None) from None
+            raise RuntimeError('WATCHDOG_SITE_READBACK_FAILED') from None
     headers = {"Accept": "application/vnd.github+json",
                "X-GitHub-Api-Version": "2022-11-28"}
     if token:
