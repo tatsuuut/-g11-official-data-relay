@@ -140,9 +140,13 @@ def send_morning(feed_path, feed, authority, origin, token):
 def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS, pause=time.sleep):
     require(origin == ORIGIN and 1 <= attempts <= MAX_ATTEMPTS, "DAILY_DELIVERY_CONFIGURATION")
     Path(".relay-output").mkdir(exist_ok=True)
-    day = json.loads(feed_path.read_bytes())["operational_date_jst"]
-    if json.loads(feed_path.read_bytes()).get("SNAPSHOT_CLASS") == "SAME_DAY_RESCUE_BOUNDARY":
+    incoming = json.loads(feed_path.read_bytes())
+    day = incoming["operational_date_jst"]
+    rescue_class = incoming.get("SNAPSHOT_CLASS")
+    if rescue_class == "SAME_DAY_RESCUE_BOUNDARY":
         return deliver_rescue(state, feed_path, origin, attempts, pause)
+    if rescue_class == "TODAY_ONLY_RESCUE_PREDEADLINE":
+        return deliver_rescue_predeadline(state, feed_path, origin)
     implementation = retained_module(state, day)
     authority = implementation.load(state, day)
     feed = implementation.json_file(feed_path)
@@ -219,6 +223,50 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             output.write("feed_sha=" + ack["payload_sha256"] + "\n")
+    print(json.dumps(receipt, sort_keys=True))
+    return receipt
+
+
+def deliver_rescue_predeadline(state, feed_path, origin):
+    """Publish only verified PREDEADLINE fields onto the accepted rescue base."""
+    sys.path.insert(0, str(Path('.g11-private').resolve()))
+    original_argv = sys.argv
+    try:
+        sys.argv = [sys.argv[0]]
+        from g11.relay import same_day_boundary_20261006 as boundary
+    finally:
+        sys.argv = original_argv
+    cert = boundary.verify(state.resolve() / 'rescue/store')
+    feed = json.loads(feed_path.read_bytes())
+    require(
+        feed.get('SNAPSHOT_CLASS') == 'TODAY_ONLY_RESCUE_PREDEADLINE'
+        and feed.get('operational_date_jst') == '2026-10-06'
+        and feed.get('stage') == 'PREDEADLINE'
+        and feed.get('daily_runtime') is None
+        and feed.get('CANONICAL_MORNING_PROMOTED') is False
+        and feed.get('NIGHT_RESEARCH_CONNECTED') is False
+        and feed.get('LEARNING_CONNECTED') is False
+        and feed.get('same_day_rescue', {}).get('authority_sha256') == cert['authority_sha256'],
+        'RESCUE_PREDEADLINE_TRANSPORT_IDENTITY',
+    )
+    hot.publish(feed_path, origin)
+    readback, headers, raw = hot.fetch(origin + '/api/g11-feed?date=2026-10-06')
+    require(
+        readback.get('operational_date_jst') == '2026-10-06'
+        and readback.get('same_day_rescue', {}).get('authority_sha256') == cert['authority_sha256']
+        and readback.get('counts', {}).get('formal') == 0,
+        'RESCUE_PREDEADLINE_READBACK_IDENTITY',
+    )
+    Path('.relay-output/hot-delta-readback.json').write_bytes(raw)
+    receipt = {
+        'schema': 'G11_SAME_DAY_RESCUE_PREDEADLINE_DELIVERY_V1',
+        'status': 'PASS',
+        'operational_date_jst': '2026-10-06',
+        'authority_sha256': cert['authority_sha256'],
+        'site_get_readback': 'PASS',
+        'site_payload_sha256': headers.get('x-g11-source-feed-sha256'),
+    }
+    (state / 'rescue/predeadline-delivery.json').write_bytes(hot.compact(receipt))
     print(json.dumps(receipt, sort_keys=True))
     return receipt
 
