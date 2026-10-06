@@ -342,8 +342,13 @@ def _run_same_day_rescue_night(day):
     _require(baseline["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"],
              "RESCUE_NIGHT_BASELINE_BINDING")
     sys.path.insert(0, str(Path.cwd()))
-    from g11.canonical import public_app_feed as feedlib
-    from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore, build_night_workbook_projection
+    original_argv = sys.argv
+    try:
+        sys.argv = [sys.argv[0]]
+        from g11.canonical import public_app_feed as feedlib
+        from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore, build_night_workbook_projection
+    finally:
+        sys.argv = original_argv
     target = datetime.fromisoformat(day).date()
     artifact_store = OfficialArtifactStore(store)
     CanonicalRunner(artifact_store).run_night(target, require_complete=True)
