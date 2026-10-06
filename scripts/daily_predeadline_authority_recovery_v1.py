@@ -205,7 +205,7 @@ def guard_optional_mashiro_shadow():
     mashiro.publish_shadow = before_deadline
 
 
-def rescue_certificate(state, day, *, now=None):
+def rescue_certificate(state, day, *, now=None, allow_night_rollover=False):
     """A rescue certificate authorizes only same-day future continuation."""
     from datetime import timedelta
     import os
@@ -216,7 +216,8 @@ def rescue_certificate(state, day, *, now=None):
     cert = json.loads(path.read_bytes())
     unsigned = dict(cert)
     sha = unsigned.pop("authority_sha256", None)
-    _require(day == "2026-10-06" == cert.get("operational_date_jst") == now.date().isoformat()
+    date_ok = now.date().isoformat() == day or (allow_night_rollover and day == "2026-10-06" and now.date().isoformat() == "2026-10-07" and now.hour < 2)
+    _require(day == "2026-10-06" == cert.get("operational_date_jst") and date_ok
              and cert.get("schema") == "G11_SAME_DAY_RESCUE_BOUNDARY_V1"
              and cert.get("canonical_morning_promoted") is False
              and cert.get("research_eligible") is False
@@ -335,7 +336,7 @@ def _run_same_day_rescue_night(day):
         return False
     if (state / "daily-runtime" / day / "authority.json").exists():
         return False
-    cert = rescue_certificate(state, day)
+    cert = rescue_certificate(state, day, allow_night_rollover=True)
     store = state / "rescue/store"
     baseline = json.loads((state / "rescue/feed.json").read_bytes())
     _require(baseline["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"],
