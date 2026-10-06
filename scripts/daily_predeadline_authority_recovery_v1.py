@@ -225,6 +225,15 @@ def _run_same_day_rescue_predeadline(day):
     finally:
         sys.argv = original_argv
     rescue_entry_v2._rescue._normal_morning_exists = lambda _state: False
+    base = rescue_entry_v2._CanonicalRunner
+    class BoundaryRescueRunner(rescue_entry_v2._RescueCanonicalRunner):
+        def run_due_predeadline(self, *args, **kwargs):
+            return base.run_due_predeadline.__wrapped__(self, *args, **kwargs)
+        def run_due_predeadline_predictions(self, *args, **kwargs):
+            return base.run_due_predeadline_predictions.__wrapped__(self, *args, **kwargs)
+        def run_predeadline_cycle(self, *args, **kwargs):
+            return base.run_predeadline_cycle.__wrapped__(self, *args, **kwargs)
+    rescue_entry_v2._rescue.CanonicalRunner = BoundaryRescueRunner
     if rescue_entry_v2.maybe_run_cli_rescue(values):
         print("G11_PREDEADLINE_RECOVERY=SAME_DAY_RESCUE_V2")
         return True
