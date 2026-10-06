@@ -149,6 +149,8 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
         return deliver_rescue(state, feed_path, origin, attempts, pause)
     if rescue_class == "TODAY_ONLY_RESCUE_PREDEADLINE":
         return deliver_rescue_predeadline(state, feed_path, origin)
+    if rescue_class == "SAME_DAY_RESCUE_NONRESEARCH" and incoming.get("stage") == "NIGHT":
+        return deliver_rescue_night(state, feed_path, origin)
     implementation = retained_module(state, day)
     authority = implementation.load(state, day)
     feed = implementation.json_file(feed_path)
@@ -228,6 +230,91 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     print(json.dumps(receipt, sort_keys=True))
     return receipt
 
+
+
+def deliver_rescue_night(state, feed_path, origin):
+    """Append official NIGHT results to the accepted rescue feed without daily authority."""
+    incoming = json.loads(feed_path.read_bytes())
+    require(incoming.get("operational_date_jst") == "2026-10-06"
+            and incoming.get("stage") == "NIGHT"
+            and incoming.get("SNAPSHOT_CLASS") == "SAME_DAY_RESCUE_NONRESEARCH"
+            and incoming.get("counts", {}).get("pending") == 0
+            and incoming.get("counts", {}).get("results") == incoming.get("counts", {}).get("races")
+            and incoming.get("counts", {}).get("formal") == 0
+            and incoming.get("counts", {}).get("research_samples") == 0,
+            "RESCUE_NIGHT_TRANSPORT_IDENTITY")
+    boundary = json.loads((state.resolve() / "rescue/boundary.json").read_bytes())
+    authority_sha = boundary.get("authority_sha256")
+    accepted, _, _ = hot.fetch(origin + "/api/g11-feed?date=2026-10-06")
+    require(accepted.get("same_day_rescue", {}).get("authority_sha256") == authority_sha,
+            "RESCUE_NIGHT_ACCEPTED_BOUNDARY")
+    prior = {row["key"]: row for row in accepted["races"]}
+    current = {row["key"]: row for row in incoming["races"]}
+    require(set(prior) == set(current), "RESCUE_NIGHT_RACE_SET")
+    out = json.loads(json.dumps(accepted))
+    out["stage"] = "NIGHT"
+    out["status"] = "PASS"
+    out["generated_at_jst"] = incoming.get("generated_at_jst", out.get("generated_at_jst"))
+    out["SNAPSHOT_CLASS"] = "SAME_DAY_RESCUE_NONRESEARCH"
+    out["ACCOUNTING_CLASS"] = "TODAY_RESCUE"
+    out["CANONICAL_MORNING_PROMOTED"] = False
+    out["RESEARCH_ELIGIBLE_AS_MORNING"] = False
+    out["MORNING_HISTORY_BACKFILL"] = False
+    out["research_db"] = incoming.get("research_db", {"available": False, "formal_races": 0})
+    out["counts"] = incoming["counts"]
+    for row in out["races"]:
+        src = current[row["key"]]
+        for field in ("result_trifecta", "payout", "result_meta"):
+            row[field] = src.get(field)
+        row["research_eligible"] = False
+        row["formal_status"] = "EXCLUDED"
+        row["exclusion_reason"] = "SAME_DAY_RESCUE_NONRESEARCH"
+        row["practical_hit"] = None
+        row["validation_hit"] = None
+        row["miss_classification"] = None
+        row["research_decision"] = None
+        row["research_finance"] = src.get("research_finance")
+    data = hot.compact(out)
+    token = os.environ["G11_SYNC_OIDC"]
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "rescue-night.json"
+        response = Path(directory) / "response.json"
+        path.write_bytes(data)
+        result = subprocess.run([
+            "curl", "--silent", "--show-error", "--max-time", "45", "-X", "POST",
+            origin + "/api/g11-sync", "-H", "Authorization: Bearer " + token,
+            "-H", "Content-Type: application/json",
+            "-H", "x-g11-feed-sha256: " + hot.hash_bytes(data),
+            "--data-binary", "@" + str(path), "--output", str(response), "--write-out", "%{http_code}",
+        ], capture_output=True, text=True, check=True)
+        ack = json.loads(response.read_bytes())
+        require(200 <= int(result.stdout) < 300 and ack.get("status") == "PASS",
+                "RESCUE_NIGHT_SITE_REJECTED:" + str(ack.get("error")))
+    readback, headers, raw = hot.fetch(origin + "/api/g11-feed?date=2026-10-06")
+    require(readback.get("stage") == "NIGHT"
+            and readback.get("counts", {}).get("pending") == 0
+            and readback.get("counts", {}).get("results") == readback.get("counts", {}).get("races")
+            and readback.get("counts", {}).get("formal") == 0
+            and headers.get("x-g11-source-feed-sha256") == hot.hash_bytes(data) == ack.get("payload_sha256"),
+            "RESCUE_NIGHT_READBACK")
+    rows = {row["key"]: row for row in readback["races"]}
+    for key, before in prior.items():
+        actual = rows[key]
+        for field in ("same_day_rescue_lock", "practical_bets", "p3_production_bets",
+                      "p3_snapshot_sha256", "production_points", "p3_head", "axis", "predeadline", "abeken_shadow"):
+            require(actual.get(field) == before.get(field),
+                    "RESCUE_NIGHT_PREDICTION_CHANGED:" + key + ":" + field)
+        require(actual.get("result_meta") == current[key].get("result_meta"),
+                "RESCUE_NIGHT_RESULT_READBACK:" + key)
+    Path(".relay-output/hot-delta-accepted").write_text(ack["payload_sha256"] + "\n")
+    Path(".relay-output/hot-delta-readback.json").write_bytes(raw)
+    receipt = {"schema":"G11_SAME_DAY_RESCUE_NIGHT_DELIVERY_V1","status":"PASS",
+               "operational_date_jst":"2026-10-06","results":readback["counts"]["results"],
+               "races":readback["counts"]["races"],"pending":0,"site_get_readback":"PASS",
+               "site_payload_sha256":ack["payload_sha256"]}
+    (state / "rescue/night-delivery.json").write_bytes(hot.compact(receipt))
+    print(json.dumps(receipt, sort_keys=True))
+    return receipt
 
 def deliver_rescue_predeadline(state, feed_path, origin):
     """Append only timely PREDEADLINE locks to the accepted rescue boundary."""
