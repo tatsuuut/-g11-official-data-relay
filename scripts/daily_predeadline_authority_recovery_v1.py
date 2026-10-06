@@ -352,7 +352,7 @@ def _run_same_day_rescue_night(day):
         runner = CanonicalRunner(artifact_store)
         run_night = getattr(CanonicalRunner.run_night, "__wrapped__", CanonicalRunner.run_night)
         run_night(runner, target, require_complete=True)
-        projection = build_night_workbook_projection(artifact_store, target)
+        projection, _odds_records = build_night_workbook_projection(artifact_store, target)
         feed = json.loads(json.dumps(baseline))
         feedlib._apply_night(feed["races"], projection)
     finally:
