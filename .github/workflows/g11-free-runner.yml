@@ -1778,7 +1778,7 @@ jobs:
                 --night-ready .relay-output/readback.json --day "${{ steps.due.outputs.operational_date }}"
             fi
           fi
-      - name: Keep same-day rescue PREDEADLINE alive
+      - name: Keep same-day rescue PREDEADLINE live
         if: steps.due.outputs.phase == 'predeadline' && steps.critical.outputs.rescue == 'true' && steps.runtime.outcome == 'success' && steps.publish.outcome == 'success' && steps.readback.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
