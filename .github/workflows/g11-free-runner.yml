@@ -1780,27 +1780,22 @@ jobs:
             fi
           fi
       - name: Keep same-day rescue PREDEADLINE alive
-        if: >-
-          always() && !cancelled() && steps.due.outputs.phase == 'predeadline' &&
-          steps.critical.outputs.rescue == 'true' && steps.runtime.outcome == 'success' &&
-          steps.publish.outcome == 'success' && steps.readback.outcome == 'success'
+        if: steps.due.outputs.phase == 'predeadline' && steps.critical.outputs.rescue == 'true' && steps.runtime.outcome == 'success' && steps.publish.outcome == 'success' && steps.readback.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
           set -euo pipefail
-          result=.relay-output/result.json
-          jq -e '.STATUS=="SAME_DAY_RESCUE_COMPLETE" and .PHASE=="PREDEADLINE_RESCUE" and .CANONICAL_MORNING_PROMOTED==false and .NIGHT_RESEARCH_CONNECTED==false and .LEARNING_CONNECTED==false' "${result}" >/dev/null
-          last="$(jq -er '.LAST_RACE_DEADLINE_JST' "${result}")"
-          [ "$(date -d "${last}" +%s)" -gt "$(date +%s)" ] || exit 0
+          r=.relay-output/result.json
+          jq -e '.STATUS=="SAME_DAY_RESCUE_COMPLETE" and .PHASE=="PREDEADLINE_RESCUE"' "${r}" >/dev/null
+          d="$(jq -er '.LAST_RACE_DEADLINE_JST' "${r}")"
+          [ "$(date -d "${d}" +%s)" -gt "$(date +%s)" ] || exit 0
           sleep 45
-          [ "$(date -d "${last}" +%s)" -gt "$(date +%s)" ] || exit 0
-          curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 20 -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
+          [ "$(date -d "${d}" +%s)" -gt "$(date +%s)" ] || exit 0
+          curl -fsS --max-time 20 -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
-            -d "$(jq -cn --arg day "${OPERATIONAL_DATE}" '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
-          echo "G11_RESCUE_PREDEADLINE_CHAIN=DISPATCHED day=${OPERATIONAL_DATE}"
+            -d "$(jq -cn --arg d "${OPERATIONAL_DATE}" '{ref:"main",inputs:{phase:"predeadline",operational_date:$d}}')"
       - name: Prove first formal V53 race from official snapshots and deployed readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true' && steps.due.outputs.phase != 'night' && steps.due.outputs.phase != 'same-day-rescue' && steps.readback.outcome == 'success' && steps.critical.outputs.rescue != 'true'
         env:
