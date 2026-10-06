@@ -69,6 +69,11 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
     path = state / "daily-runtime" / day / "authority.json"
+    if phase == "predeadline" and not path.exists():
+        from daily_predeadline_authority_recovery_v1 import rescue_certificate
+        cert = rescue_certificate(state, day)
+        return {"checkout_candidate": "true", "frozen": "false",
+                "rescue_bootstrap": "true", "source_sha": cert["runtime_source_sha"]}
     if not path.exists():
         if phase != "morning":
             raise RuntimeError("DAILY_AUTHORITY_UNKNOWN")

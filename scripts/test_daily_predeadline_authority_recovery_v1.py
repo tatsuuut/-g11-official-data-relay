@@ -133,5 +133,50 @@ class RecoveryTests(unittest.TestCase):
             now=datetime.fromisoformat(self.early))
 
 
+class RescueBootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.state = Path(self.temp.name)
+        self.now = datetime.fromisoformat("2026-10-06T10:00:00+09:00")
+        self.cert = dict(schema="G11_SAME_DAY_RESCUE_BOUNDARY_V1", operational_date_jst="2026-10-06",
+                         canonical_morning_promoted=False, research_eligible=False,
+                         same_day_results_used=False, immutable=True, runtime_source_sha="a"*40)
+        self.write()
+    def write(self):
+        unsigned = dict(self.cert)
+        unsigned.pop("authority_sha256", None)
+        self.cert["authority_sha256"] = recovery.hashlib.sha256(json.dumps(unsigned,
+            ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        p = self.state / "rescue/boundary.json"
+        p.parent.mkdir(exist_ok=True)
+        p.write_text(json.dumps(self.cert))
+    def test_case_b_rescue_bootstrap(self):
+        self.assertEqual(recovery.rescue_certificate(self.state, "2026-10-06", now=self.now), self.cert)
+    def test_case_c_missing_boundary_closed(self):
+        (self.state / "rescue/boundary.json").unlink()
+        with self.assertRaisesRegex(RuntimeError, "MISSING"):
+            recovery.rescue_certificate(self.state, "2026-10-06", now=self.now)
+    def test_case_d_wrong_date_closed(self):
+        self.cert["operational_date_jst"] = "2026-10-05"
+        self.write()
+        with self.assertRaisesRegex(RuntimeError, "INVALID"):
+            recovery.rescue_certificate(self.state, "2026-10-06", now=self.now)
+    def test_case_g_next_morning_not_suppressed(self):
+        import daily_runtime_bootstrap_v1 as bootstrap
+        self.assertEqual(bootstrap.prepare(self.state, "2026-10-07", "morning", self.state / "source"),
+                         {"checkout_candidate": "true", "frozen": "false"})
+    def test_case_a_normal_predeadline_no_rescue_bootstrap(self):
+        import daily_runtime_bootstrap_v1 as bootstrap
+        from unittest.mock import Mock, patch
+        path = self.state / "daily-runtime/2026-10-06/authority.json"
+        path.parent.mkdir(parents=True); path.write_text("{}")
+        module = Mock()
+        module.restore_source.return_value = {"runtime_source_sha": "b"*40, "authority_sha256": "c"*64}
+        with patch.object(bootstrap, "retained_module", return_value=module):
+            result = bootstrap.prepare(self.state, "2026-10-06", "predeadline", self.state / "source")
+        self.assertEqual(result["frozen"], "true")
+        self.assertNotIn("rescue_bootstrap", result)
+
 if __name__ == "__main__":
     unittest.main()

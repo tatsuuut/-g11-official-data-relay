@@ -205,11 +205,107 @@ def guard_optional_mashiro_shadow():
     mashiro.publish_shadow = before_deadline
 
 
+def rescue_certificate(state, day, *, now=None):
+    """A rescue certificate authorizes only same-day future continuation."""
+    from datetime import timedelta
+    import os
+    _require(not os.environ.get("G11_RELAY_NOW_JST"), "RESCUE_CLOCK_OVERRIDE")
+    now = now or datetime.now(timezone(timedelta(hours=9)))
+    path = state / "rescue/boundary.json"
+    _require(path.is_file() and not path.is_symlink(), "RESCUE_BOUNDARY_MISSING")
+    cert = json.loads(path.read_bytes())
+    unsigned = dict(cert)
+    sha = unsigned.pop("authority_sha256", None)
+    _require(day == "2026-10-06" == cert.get("operational_date_jst") == now.date().isoformat()
+             and cert.get("schema") == "G11_SAME_DAY_RESCUE_BOUNDARY_V1"
+             and cert.get("canonical_morning_promoted") is False
+             and cert.get("research_eligible") is False
+             and cert.get("same_day_results_used") is False
+             and cert.get("immutable") is True
+             and sha == hashlib.sha256(json.dumps(unsigned, ensure_ascii=False,
+                 sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+             and not (state / "daily-runtime" / day / "authority.json").exists(),
+             "RESCUE_BOUNDARY_INVALID")
+    return cert
+
+
+def _run_same_day_rescue_predeadline(day):
+    """Continue only the isolated 2026-10-06 rescue when canonical MORNING is absent."""
+    if day != "2026-10-06":
+        return False
+    values = sys.argv[1:]
+    if "--state-root" not in values:
+        return False
+    state = Path(values[values.index("--state-root") + 1])
+    rescue_boundary = state / "rescue" / "boundary.json"
+    canonical_authority = state / "daily-runtime" / day / "authority.json"
+    if not rescue_boundary.is_file() or canonical_authority.exists():
+        return False
+    cert = rescue_certificate(state, day)
+    sys.path.insert(0, str(Path.cwd()))
+    original_argv = sys.argv
+    try:
+        sys.argv = [sys.argv[0]]
+        from g11.relay import rescue_entry_v2
+    finally:
+        sys.argv = original_argv
+    from g11.relay import daily_runtime_authority_v1 as daily
+    _require(cert["source_files"] == daily.source_inventory(Path.cwd()), "RESCUE_SOURCE_CHANGED")
+    rescue = rescue_entry_v2._rescue
+    store = state / "rescue/store"
+    before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in (store / "snapshots/morning").glob("*.json")}
+    _require(bool(before), "RESCUE_BASELINE_MISSING")
+    baseline = json.loads((state / "rescue/feed.json").read_bytes())
+    _require(baseline["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"], "RESCUE_BASELINE_BINDING")
+    # Reuse the accepted baseline; never call morning generation during bootstrap.
+    manifest = {"RESCUE_LOCK_JST": cert["created_at_jst"],
+                "FUTURE_RACE_KEYS": [r["key"] for r in baseline["races"] if r.get("same_day_rescue_lock")],
+                "OPERATIONAL_DATE_JST": day}
+    manifest.update(P3_COMPLETED=manifest["FUTURE_RACE_KEYS"], ABEKEN_COMPLETED=manifest["FUTURE_RACE_KEYS"])
+    saved_manifest = state / "rescue/rescue-manifest.json"
+    if saved_manifest.exists():
+        manifest = json.loads(saved_manifest.read_bytes())
+    rescue._ensure_rescue_baseline = lambda *_: (store, manifest)
+    rescue._normal_morning_exists = lambda _state: False
+    rescue._copy_hash_locked_model(state, store)
+    import shutil
+    for name in ("wild-pack-models",):
+        shutil.copytree(state / "store/g11" / name, store / "g11" / name, dirs_exist_ok=True)
+    from g11.relay import v1 as relay
+    publish = relay.current_growth_p3.publish_future
+    def live_only(*args, **kwargs):
+        kwargs.update(include_research=False, strict_deadline=True)
+        return publish(*args, **kwargs)
+    relay.current_growth_p3.publish_future = live_only
+    base = rescue_entry_v2._CanonicalRunner
+    class BoundaryRescueRunner(rescue_entry_v2._RescueCanonicalRunner):
+        def run_due_predeadline(self, *args, **kwargs):
+            return base.run_due_predeadline.__wrapped__(self, *args, **kwargs)
+        def run_due_predeadline_predictions(self, *args, **kwargs):
+            return base.run_due_predeadline_predictions.__wrapped__(self, *args, **kwargs)
+        def run_predeadline_cycle(self, *args, **kwargs):
+            return base.run_predeadline_cycle.__wrapped__(self, *args, **kwargs)
+    rescue_entry_v2._rescue.CanonicalRunner = BoundaryRescueRunner
+    from g11.canonical import public_app_feed as rescue_feedlib
+    rescue_feedlib._abeken_public_projection = lambda *args, **kwargs: (None, {})
+    if rescue_entry_v2.maybe_run_cli_rescue(values):
+        after = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in (store / "snapshots/morning").glob("*.json")}
+        _require(before == after, "RESCUE_MORNING_LOCK_CHANGED")
+        print("G11_RESCUE_MORNING_LOCK_IMMUTABILITY=PASS")
+        print("G11_PREDEADLINE_RECOVERY=SAME_DAY_RESCUE_V2")
+        return True
+    return False
+
+
 def main():
     mode = sys.argv[1]
     sys.argv = [sys.argv[0], *sys.argv[2:]]
     _require("--operational-date" in sys.argv, "PREDEADLINE_RECOVERY_DAY_MISSING")
     day = sys.argv[sys.argv.index("--operational-date") + 1]
+    if mode == "predeadline" and _run_same_day_rescue_predeadline(day):
+        return 0
     # The workflow has already verified the archive and restored the frozen
     # source; only that source is imported here.
     sys.path.insert(0, str(Path.cwd()))
