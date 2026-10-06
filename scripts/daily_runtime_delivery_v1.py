@@ -287,12 +287,18 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         require(
             deadline > datetime.now(deadline.tzinfo)
             and proof.get('status') == 'LOCKED'
-            and proof.get('predeadline_p3_snapshot_sha256') == pre.get('snapshot_sha256')
+            and proof.get('p3_snapshot_sha256') == pre.get('snapshot_sha256')
             and datetime.fromisoformat(pre['captured_at_jst']) < deadline
             and datetime.fromisoformat(pre['odds_captured_at_jst']) < deadline
             and row.get('research_eligible') is False,
             'RESCUE_LIVE_PROOF_INVALID:' + row['key'],
         )
+        v4 = (new.get('abeken_shadow') or {}).get('v53') or {}
+        v4live = v4.get('live')
+        if v4live:
+            require(v4.get('morning') == row['abeken_shadow']['v53']['morning'],
+                    'RESCUE_V4_MORNING_CHANGED:' + row['key'])
+            row['abeken_shadow']['v53']['live'] = v4live
         row['predeadline'] = pre
         for field in ('best_ev', 'best_ev_bet', 'value_bets', 'odds_captured_at_jst'):
             row[field] = pre[field]
@@ -333,7 +339,10 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         'schema': 'G11_SAME_DAY_RESCUE_PREDEADLINE_DELIVERY_V1',
         'status': 'PASS', 'operational_date_jst': '2026-10-06',
         'authority_sha256': authority_sha, 'site_get_readback': 'PASS',
-        'new_live_locks': added, 'site_payload_sha256': ack['payload_sha256'],
+        'new_live_locks': added,
+        'live_proof': [{'key': k, 'captured_at_jst': rows[k]['predeadline']['captured_at_jst'],
+                        'deadline_jst': rows[k]['deadline_jst'],
+                        'morning_p3_snapshot_sha256': rows[k]['p3_snapshot_sha256']} for k in added], 'site_payload_sha256': ack['payload_sha256'],
     }
     (state / 'rescue/predeadline-delivery.json').write_bytes(hot.compact(receipt))
     print(json.dumps(receipt, sort_keys=True))

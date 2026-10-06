@@ -258,6 +258,15 @@ def _run_same_day_rescue_predeadline(day):
     _require(bool(before), "RESCUE_BASELINE_MISSING")
     baseline = json.loads((state / "rescue/feed.json").read_bytes())
     _require(baseline["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"], "RESCUE_BASELINE_BINDING")
+    for row in baseline["races"]:
+        proof = row.get("same_day_rescue_lock")
+        if not proof:
+            continue
+        for name, field in (("current-growth-p3-" + row["key"].lower(), "p3_snapshot_sha256"),
+                            ("abeken-v53-shadow-morning-" + row["key"].lower(), "v4_snapshot_sha256")):
+            path = store / "snapshots/morning" / (name + ".json")
+            _require(path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == proof[field],
+                     "RESCUE_ACCEPTED_MORNING_SHA:" + name)
     # Reuse the accepted baseline; never call morning generation during bootstrap.
     manifest = {"RESCUE_LOCK_JST": cert["created_at_jst"],
                 "FUTURE_RACE_KEYS": [r["key"] for r in baseline["races"] if r.get("same_day_rescue_lock")],
@@ -288,8 +297,22 @@ def _run_same_day_rescue_predeadline(day):
             return base.run_predeadline_cycle.__wrapped__(self, *args, **kwargs)
     rescue_entry_v2._rescue.CanonicalRunner = BoundaryRescueRunner
     from g11.canonical import public_app_feed as rescue_feedlib
+    abeken_projection = rescue_feedlib._abeken_public_projection
     rescue_feedlib._abeken_public_projection = lambda *args, **kwargs: (None, {})
     if rescue_entry_v2.maybe_run_cli_rescue(values):
+        from g11.relay import same_day_boundary_20261006 as boundary
+        def verified_boundary(root, source=None):
+            _require(root.resolve() == store.resolve(), "RESCUE_STORE_BINDING")
+            return rescue_certificate(state, day)
+        boundary.verify = verified_boundary
+        _, abeken_rows = abeken_projection(state / "rescue", "PREDEADLINE", day,
+                                            {r["key"] for r in baseline["races"]})
+        output = Path(values[values.index("--feed-output") + 1])
+        incoming = json.loads(output.read_bytes())
+        for row in incoming["races"]:
+            if row["key"] in abeken_rows:
+                row["abeken_shadow"] = abeken_rows[row["key"]]
+        output.write_text(json.dumps(incoming, ensure_ascii=False, separators=(",", ":")))
         after = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in (store / "snapshots/morning").glob("*.json")}
         _require(before == after, "RESCUE_MORNING_LOCK_CHANGED")

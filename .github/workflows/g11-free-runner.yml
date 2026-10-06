@@ -2067,7 +2067,7 @@ jobs:
         if: always() && steps.runtime.outcome == 'failure' && steps.due.outputs.phase == 'predeadline'
         run: echo 'G11_PREDEADLINE_OPTIONAL_UNAVAILABLE=CRITICAL_CHECKPOINT_RETAINED'
       - name: WILD4 shadow
-        if: steps.runtime.outcome == 'success' && contains('predeadline,night', steps.due.outputs.phase) && steps.critical.outputs.rescue != 'true'
+        if: steps.runtime.outcome == 'success' && contains('predeadline,night', steps.due.outputs.phase)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
