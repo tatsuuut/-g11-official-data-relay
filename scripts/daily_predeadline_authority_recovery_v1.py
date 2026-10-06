@@ -217,6 +217,7 @@ def _run_same_day_rescue_predeadline(day):
     canonical_authority = state / "daily-runtime" / day / "authority.json"
     if not rescue_boundary.is_file() or canonical_authority.exists():
         return False
+    sys.path.insert(0, str(Path.cwd()))
     from g11.relay import rescue_entry_v2
     if rescue_entry_v2.maybe_run_cli_rescue(values):
         print("G11_PREDEADLINE_RECOVERY=SAME_DAY_RESCUE_V2")
