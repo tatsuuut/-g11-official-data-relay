@@ -487,7 +487,7 @@ jobs:
                   raise SystemExit(f"{wild_id}_MATERIALIZED_MODEL_HASH")
           PY
       - name: Freeze and read back daily runtime authority before prediction
-        if: steps.due.outputs.phase != 'predeadline'
+        if: steps.due.outputs.phase != 'predeadline' && steps.authority.outputs.rescue_bootstrap != 'true'
         id: freeze
         run: |
           if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ]; then
