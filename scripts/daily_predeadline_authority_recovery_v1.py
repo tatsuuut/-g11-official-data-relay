@@ -322,12 +322,70 @@ def _run_same_day_rescue_predeadline(day):
     return False
 
 
+
+def _run_same_day_rescue_night(day):
+    """Settle the isolated 2026-10-06 rescue without inventing daily authority."""
+    if day != "2026-10-06":
+        return False
+    values = sys.argv[1:]
+    if "--state-root" not in values or "--feed-output" not in values:
+        return False
+    state = Path(values[values.index("--state-root") + 1]).resolve()
+    if not (state / "rescue/boundary.json").is_file():
+        return False
+    if (state / "daily-runtime" / day / "authority.json").exists():
+        return False
+    cert = rescue_certificate(state, day)
+    store = state / "rescue/store"
+    baseline = json.loads((state / "rescue/feed.json").read_bytes())
+    _require(baseline["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"],
+             "RESCUE_NIGHT_BASELINE_BINDING")
+    sys.path.insert(0, str(Path.cwd()))
+    from g11.relay import rescue_entry_v2
+    from g11.relay import v1 as relay
+    from g11.relay.nonresearch_feed_v1 import normalize_nonresearch_feed
+    from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
+    target = datetime.fromisoformat(day).date()
+    CanonicalRunner(OfficialArtifactStore(store)).run_night(target, require_complete=True)
+    run_id = values[values.index("--public-run-id") + 1] if "--public-run-id" in values else "0"
+    source_sha = cert["runtime_source_sha"]
+    feed = relay.build_feed(store, run_id=run_id, github_sha=source_sha,
+                            current_p3_publication=None, relay_phase="night")
+    _require(feed.get("stage") == "NIGHT" and feed.get("counts", {}).get("pending") == 0,
+             "RESCUE_NIGHT_INCOMPLETE")
+    normalize_nonresearch_feed(feed)
+    feed["stage"] = "NIGHT"
+    feed["status"] = "PASS"
+    feed["same_day_rescue"] = {k: v for k, v in cert.items() if k != "source_files"}
+    feed["same_day_rescue"]["night_results_only"] = True
+    feed["same_day_rescue"]["night_research_connected"] = False
+    feed["same_day_rescue"]["same_day_results_used_for_settlement_only"] = True
+    feed["daily_runtime"] = None
+    output = Path(values[values.index("--feed-output") + 1])
+    output.write_text(json.dumps(feed, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    result = {
+        "STATUS": "SAME_DAY_RESCUE_NIGHT_RESULTS_COMPLETE",
+        "PHASE": "NIGHT",
+        "OPERATIONAL_DATE_JST": day,
+        "RESULTS": feed["counts"]["results"],
+        "RACES": feed["counts"]["races"],
+        "PENDING": feed["counts"]["pending"],
+        "CANONICAL_MORNING_PROMOTED": False,
+        "RESEARCH_ELIGIBLE_AS_MORNING": False,
+        "NIGHT_RESEARCH_CONNECTED": False,
+        "PREDICTION_RECALCULATION": 0,
+    }
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    return True
+
 def main():
     mode = sys.argv[1]
     sys.argv = [sys.argv[0], *sys.argv[2:]]
     _require("--operational-date" in sys.argv, "PREDEADLINE_RECOVERY_DAY_MISSING")
     day = sys.argv[sys.argv.index("--operational-date") + 1]
     if mode == "predeadline" and _run_same_day_rescue_predeadline(day):
+        return 0
+    if mode == "night" and _run_same_day_rescue_night(day):
         return 0
     # The workflow has already verified the archive and restored the frozen
     # source; only that source is imported here.
