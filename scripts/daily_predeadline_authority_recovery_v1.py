@@ -347,14 +347,14 @@ def _run_same_day_rescue_night(day):
         sys.argv = [sys.argv[0]]
         from g11.canonical import public_app_feed as feedlib
         from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore, build_night_workbook_projection
+        target = datetime.fromisoformat(day).date()
+        artifact_store = OfficialArtifactStore(store)
+        CanonicalRunner(artifact_store).run_night(target, require_complete=True)
+        projection = build_night_workbook_projection(artifact_store, target)
+        feed = json.loads(json.dumps(baseline))
+        feedlib._apply_night(feed["races"], projection)
     finally:
         sys.argv = original_argv
-    target = datetime.fromisoformat(day).date()
-    artifact_store = OfficialArtifactStore(store)
-    CanonicalRunner(artifact_store).run_night(target, require_complete=True)
-    projection = build_night_workbook_projection(artifact_store, target)
-    feed = json.loads(json.dumps(baseline))
-    feedlib._apply_night(feed["races"], projection)
     for race in feed["races"]:
         race["research_eligible"] = False
         race["formal_status"] = "EXCLUDED"
