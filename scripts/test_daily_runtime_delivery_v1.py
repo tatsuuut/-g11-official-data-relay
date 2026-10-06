@@ -195,5 +195,188 @@ class DailyDeliveryTests(unittest.TestCase):
         self.assertTrue(all(len(hot.compact(chunk)) <= hot.NIGHT_HARD_CHUNK_BYTES for chunk in chunks))
 
 
+# Rescue fixtures are synthetic. They do not read production state or execute models.
+from datetime import datetime as _rescue_datetime
+import hashlib as _rescue_hashlib
+
+RESCUE_DAY = '2026-10-06'
+RESCUE_KEY = '20261006-01-01'  # Synthetic fixture, not a saved prediction.
+RESCUE_ORIGIN = 'https://example.invalid'
+
+def _rescue_compact(value):
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
+
+def _rescue_digest(value):
+    return _rescue_hashlib.sha256(value).hexdigest()
+
+class RescueFixedClock(_rescue_datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return _rescue_datetime.fromisoformat('2026-10-06T11:55:00+09:00').astimezone(tz)
+
+class RescueTransportTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        oldcwd = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, oldcwd)
+        self.state = self.root/'state'
+        (self.state/'rescue').mkdir(parents=True)
+        Path('.relay-output').mkdir()
+        self.feed_path = self.root/'incoming.json'
+        cert = {'schema':'G11_SAME_DAY_RESCUE_BOUNDARY_V1', 'operational_date_jst':RESCUE_DAY,
+                'canonical_morning_promoted':False, 'research_eligible':False}
+        cert['authority_sha256'] = _rescue_digest(json.dumps(cert, ensure_ascii=False, sort_keys=True,
+            separators=(',', ':'), allow_nan=False).encode())
+        (self.state/'rescue/boundary.json').write_bytes(_rescue_compact(cert))
+        self.p3 = {'snapshot_sha256':'1'*64, 'captured_at_jst':'2026-10-06T11:54:00+09:00',
+                   'odds_captured_at_jst':'2026-10-06T11:54:01+09:00',
+                   'practical_bets':['1-2-3'], 'production_points':1,
+                   'best_ev':None, 'best_ev_bet':None, 'value_bets':[], 'legacy_odds_merit':'TEST'}
+        self.morning = {'snapshot_sha256':'2'*64, 'practical_bets':['1-3-2'],
+                        'locked_at_jst':'2026-10-06T09:00:00+09:00'}
+        self.live = {'snapshot_sha256':'3'*64, 'practical_bets':['1-2-3'],
+                     'locked_at_jst':'2026-10-06T11:54:03+09:00', 'buy_count':1}
+        row = {'key':RESCUE_KEY, 'deadline_jst':'2026-10-06T12:00:00+09:00',
+               'research_eligible':False, 'formal_status':'EXCLUDED',
+               'same_day_rescue_lock':{'p3_snapshot_sha256':'4'*64},
+               'p3_snapshot_sha256':'4'*64, 'practical_bets':['1-3-2'], 'production_points':1,
+               'abeken_shadow':{'v53':{'morning':copy.deepcopy(self.morning), 'live':None}}}
+        self.accepted = {'operational_date_jst':RESCUE_DAY, 'SNAPSHOT_CLASS':'SAME_DAY_RESCUE_BOUNDARY',
+                         'same_day_rescue':{'authority_sha256':cert['authority_sha256']},
+                         'races':[row], 'source':{}, 'generated_at_jst':'2026-10-06T09:00:00+09:00'}
+        self.incoming = {'operational_date_jst':RESCUE_DAY, 'SNAPSHOT_CLASS':'TODAY_ONLY_RESCUE_PREDEADLINE',
+                         'CANONICAL_MORNING_PROMOTED':False, 'RESEARCH_ELIGIBLE_AS_MORNING':False,
+                         'source':{}, 'generated_at_jst':'2026-10-06T11:54:05+09:00',
+                         'races':[copy.deepcopy(row)]}
+        self.newrow = self.incoming['races'][0]
+        self.newrow['today_rescue'] = {'status':'LOCKED','p3_snapshot_sha256':'1'*64}
+        self.newrow['predeadline'] = copy.deepcopy(self.p3)
+        self.newrow['abeken_shadow']['v53']['live'] = copy.deepcopy(self.live)
+        self.site = copy.deepcopy(self.accepted)
+        self.posted = []
+        self.readback_corrupt = None
+        self.clock_patch = patch.object(delivery, 'datetime', RescueFixedClock)
+        self.clock_patch.start()
+        self.addCleanup(self.clock_patch.stop)
+        self.fetch_patch = patch.object(delivery.hot, 'fetch', side_effect=self.fetch)
+        self.fetch_patch.start()
+        self.addCleanup(self.fetch_patch.stop)
+        self.run_patch = patch.object(subprocess,'run',side_effect=self.send)
+        self.run_patch.start()
+        self.addCleanup(self.run_patch.stop)
+        self.env = patch.dict(os.environ,{'G11_SYNC_OIDC':'synthetic-token-only','GITHUB_OUTPUT':''})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def fetch(self, url):
+        value = copy.deepcopy(self.site)
+        if self.posted and self.readback_corrupt:
+            self.readback_corrupt(value)
+        raw = _rescue_compact(value)
+        source_sha = _rescue_digest(_rescue_compact(self.posted[-1])) if self.posted else _rescue_digest(_rescue_compact(self.site))
+        return value, {'x-g11-source-feed-sha256':source_sha, 'x-g11-feed-sha256':_rescue_digest(raw)}, raw
+
+    def send(self, args, **kwargs):
+        path = Path(args[args.index('--data-binary')+1][1:])
+        data = path.read_bytes()
+        self.site = json.loads(data)
+        self.posted.append(copy.deepcopy(self.site))
+        Path(args[args.index('--output')+1]).write_bytes(_rescue_compact({'status':'PASS','payload_sha256':_rescue_digest(data)}))
+        return subprocess.CompletedProcess(args,0,'200','')
+
+    def invoke(self):
+        self.feed_path.write_bytes(_rescue_compact(self.incoming))
+        return delivery.deliver_rescue_predeadline(self.state,self.feed_path,RESCUE_ORIGIN)
+
+    def prior_p3(self):
+        self.site['races'][0]['predeadline'] = copy.deepcopy(self.p3)
+        self.accepted = copy.deepcopy(self.site)
+
+    def test_p3_and_v4_can_arrive_together(self):
+        self.invoke()
+        self.assertEqual(self.site['races'][0]['predeadline'],self.p3)
+        self.assertEqual(self.site['races'][0]['abeken_shadow']['v53']['live'],self.live)
+
+    def test_v4_can_arrive_after_already_published_p3(self):
+        self.prior_p3()
+        self.invoke()
+        self.assertEqual(self.site['races'][0]['abeken_shadow']['v53']['live'],self.live)
+        self.assertEqual(self.site['races'][0]['predeadline'],self.p3)
+
+    def test_existing_v4_must_not_change(self):
+        self.prior_p3()
+        self.site['races'][0]['abeken_shadow']['v53']['live'] = copy.deepcopy(self.live)
+        self.newrow['abeken_shadow']['v53']['live']['practical_bets'] = ['1-3-2']
+        with self.assertRaisesRegex(RuntimeError,'RESCUE_V4_LIVE_LOCK_CHANGED'):
+            self.invoke()
+        self.assertEqual(self.posted,[])
+
+    def test_missing_v4_on_readback_is_not_pass(self):
+        def remove(value):
+            value['races'][0]['abeken_shadow']['v53']['live'] = None
+        self.readback_corrupt = remove
+        with self.assertRaisesRegex(RuntimeError,'RESCUE_V4_READBACK_LOCK'):
+            self.invoke()
+        self.assertFalse((self.state/'rescue/predeadline-delivery.json').exists())
+
+    def test_new_v4_after_deadline_rejected(self):
+        self.prior_p3()
+        self.site['races'][0]['deadline_jst'] = '2026-10-06T11:54:59+09:00'
+        self.newrow['deadline_jst'] = self.site['races'][0]['deadline_jst']
+        with self.assertRaisesRegex(RuntimeError,'RESCUE_LIVE_PROOF_INVALID'):
+            self.invoke()
+        self.assertEqual(self.posted,[])
+
+    def test_new_v4_requires_same_morning(self):
+        self.prior_p3()
+        self.newrow['abeken_shadow']['v53']['morning']['snapshot_sha256'] = '9'*64
+        with self.assertRaisesRegex(RuntimeError,'RESCUE_V4_MORNING_CHANGED'):
+            self.invoke()
+        self.assertEqual(self.posted,[])
+
+    def test_missing_p3_proof_cannot_publish_late_v4(self):
+        self.prior_p3()
+        self.newrow['today_rescue']['p3_snapshot_sha256'] = '9'*64
+        with self.assertRaisesRegex(RuntimeError,'RESCUE_LIVE_PROOF_INVALID'):
+            self.invoke()
+        self.assertEqual(self.posted,[])
+
+    def test_existing_p3_must_not_change(self):
+        self.prior_p3()
+        self.newrow['predeadline']['practical_bets'] = ['1-3-2']
+        with self.assertRaisesRegex(RuntimeError,'RESCUE_LIVE_LOCK_CHANGED'):
+            self.invoke()
+        self.assertEqual(self.posted,[])
+
+    def test_morning_survives_append(self):
+        self.invoke()
+        result = self.site['races'][0]
+        original = self.accepted['races'][0]
+        for field in ('practical_bets','p3_snapshot_sha256','same_day_rescue_lock','formal_status','research_eligible','production_points'):
+            self.assertEqual(result[field],original[field])
+        self.assertEqual(result['abeken_shadow']['v53']['morning'], self.morning)
+        self.assertFalse((self.state/'daily-runtime').exists())
+
+    def test_morning_corruption_on_readback_is_not_pass(self):
+        self.readback_corrupt = lambda v: v['races'][0].update(p3_snapshot_sha256='9'*64)
+        with self.assertRaisesRegex(RuntimeError,'RESCUE_MORNING_READBACK_LOCK'):
+            self.invoke()
+
+    def test_retained_live_and_no_new_are_explicit(self):
+        self.prior_p3()
+        self.site['races'][0]['abeken_shadow']['v53']['live'] = copy.deepcopy(self.live)
+        self.site['races'][0]['deadline_jst'] = '2026-10-06T11:54:59+09:00'
+        self.newrow['deadline_jst'] = self.site['races'][0]['deadline_jst']
+        result = self.invoke()
+        self.assertEqual(result['delivery_state'],'NO_NEW_LOCKS')
+        self.assertEqual(result['new_live_locks'],[])
+        self.assertEqual(result['new_v4_live_locks'],[])
+        self.assertEqual(result['verified_p3_live_count'],1)
+        self.assertEqual(result['verified_v4_live_count'],1)
+
+
 if __name__ == "__main__":
     unittest.main()

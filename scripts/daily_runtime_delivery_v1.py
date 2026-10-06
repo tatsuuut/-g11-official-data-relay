@@ -271,21 +271,32 @@ def deliver_rescue_predeadline(state, feed_path, origin):
     out['source'] = incoming['source']
     out['generated_at_jst'] = incoming['generated_at_jst']
     added = []
+    v4_added = []
     for row in out['races']:
         new = current[row['key']]
         proof = new['today_rescue']
         pre = new.get('predeadline')
         old = row.get('predeadline')
-        if isinstance(old, dict):
-            if isinstance(pre, dict):
-                for field in ('snapshot_sha256', 'captured_at_jst', 'practical_bets', 'production_points'):
-                    require(old.get(field) == pre.get(field), 'RESCUE_LIVE_LOCK_CHANGED:' + row['key'])
+        v4 = (new.get('abeken_shadow') or {}).get('v53') or {}
+        prior_v4 = (row.get('abeken_shadow') or {}).get('v53') or {}
+        v4live = v4.get('live')
+        old_v4live = prior_v4.get('live')
+        if isinstance(old, dict) and isinstance(pre, dict):
+            for field in ('snapshot_sha256', 'captured_at_jst', 'practical_bets', 'production_points'):
+                require(old.get(field) == pre.get(field), 'RESCUE_LIVE_LOCK_CHANGED:' + row['key'])
+        if old_v4live is not None and v4live is not None:
+            require(old_v4live == v4live, 'RESCUE_V4_LIVE_LOCK_CHANGED:' + row['key'])
+        new_p3 = isinstance(pre, dict) and not isinstance(old, dict)
+        new_v4 = v4live is not None and old_v4live is None
+        if not (new_p3 or new_v4):
             continue
-        if not isinstance(pre, dict):
-            continue
+        # P3 and V4 are independently delivered immutable locks. A P3 lock
+        # arriving first must not suppress a later V4 lock from the same input.
+        # Both additions retain the original pre-deadline P3 proof gate.
         deadline = datetime.fromisoformat(row['deadline_jst'])
         require(
-            deadline > datetime.now(deadline.tzinfo)
+            isinstance(pre, dict)
+            and deadline > datetime.now(deadline.tzinfo)
             and proof.get('status') == 'LOCKED'
             and proof.get('p3_snapshot_sha256') == pre.get('snapshot_sha256')
             and datetime.fromisoformat(pre['captured_at_jst']) < deadline
@@ -293,17 +304,20 @@ def deliver_rescue_predeadline(state, feed_path, origin):
             and row.get('research_eligible') is False,
             'RESCUE_LIVE_PROOF_INVALID:' + row['key'],
         )
-        v4 = (new.get('abeken_shadow') or {}).get('v53') or {}
-        v4live = v4.get('live')
-        if v4live:
-            require(v4.get('morning') == row['abeken_shadow']['v53']['morning'],
+        if new_v4:
+            require(isinstance(v4live, dict) and bool(v4live),
+                    'RESCUE_V4_LIVE_INVALID:' + row['key'])
+            require(isinstance(prior_v4.get('morning'), dict)
+                    and v4.get('morning') == prior_v4['morning'],
                     'RESCUE_V4_MORNING_CHANGED:' + row['key'])
             row['abeken_shadow']['v53']['live'] = v4live
-        row['predeadline'] = pre
-        for field in ('best_ev', 'best_ev_bet', 'value_bets', 'odds_captured_at_jst'):
-            row[field] = pre[field]
-        row['odds_merit'] = pre['legacy_odds_merit']
-        added.append(row['key'])
+            v4_added.append(row['key'])
+        if new_p3:
+            row['predeadline'] = pre
+            for field in ('best_ev', 'best_ev_bet', 'value_bets', 'odds_captured_at_jst'):
+                row[field] = pre[field]
+            row['odds_merit'] = pre['legacy_odds_merit']
+            added.append(row['key'])
     data = hot.compact(out)
     token = os.environ['G11_SYNC_OIDC']
     with tempfile.TemporaryDirectory() as directory:
@@ -327,8 +341,23 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         and headers.get('x-g11-source-feed-sha256') == hot.hash_bytes(data) == ack.get('payload_sha256'),
         'RESCUE_PREDEADLINE_READBACK_IDENTITY',
     )
-    for key in added:
-        require(rows.get(key, {}).get('predeadline') == current[key]['predeadline'],
+    require(set(rows) == set(prior), 'RESCUE_PREDEADLINE_READBACK_RACE_SET')
+    expected_rows = {row['key']: row for row in out['races']}
+    for key, before in prior.items():
+        actual = rows[key]
+        for field in ('same_day_rescue_lock', 'practical_bets', 'p3_production_bets',
+                      'p3_snapshot_sha256', 'production_points', 'p3_head', 'axis',
+                      'formal_status', 'research_eligible'):
+            require(actual.get(field) == before.get(field),
+                    'RESCUE_MORNING_READBACK_LOCK:' + key + ':' + field)
+        before_v4 = (before.get('abeken_shadow') or {}).get('v53') or {}
+        actual_v4 = (actual.get('abeken_shadow') or {}).get('v53') or {}
+        expected_v4 = (expected_rows[key].get('abeken_shadow') or {}).get('v53') or {}
+        require(actual_v4.get('morning') == before_v4.get('morning'),
+                'RESCUE_V4_MORNING_READBACK_LOCK:' + key)
+        require(actual_v4.get('live') == expected_v4.get('live'),
+                'RESCUE_V4_READBACK_LOCK:' + key)
+        require(actual.get('predeadline') == expected_rows[key].get('predeadline'),
                 'RESCUE_PREDEADLINE_READBACK_LOCK:' + key)
     Path('.relay-output/hot-delta-accepted').write_text(ack['payload_sha256'] + '\n')
     Path('.relay-output/hot-delta-readback.json').write_bytes(raw)
@@ -339,7 +368,12 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         'schema': 'G11_SAME_DAY_RESCUE_PREDEADLINE_DELIVERY_V1',
         'status': 'PASS', 'operational_date_jst': '2026-10-06',
         'authority_sha256': authority_sha, 'site_get_readback': 'PASS',
+        'delivery_state': 'APPENDED' if added or v4_added else 'NO_NEW_LOCKS',
         'new_live_locks': added,
+        'new_v4_live_locks': v4_added,
+        'verified_p3_live_count': sum(isinstance(row.get('predeadline'), dict) for row in rows.values()),
+        'verified_v4_live_count': sum(isinstance(((row.get('abeken_shadow') or {}).get('v53') or {}).get('live'), dict)
+                                      for row in rows.values()),
         'live_proof': [{'key': k, 'captured_at_jst': rows[k]['predeadline']['captured_at_jst'],
                         'deadline_jst': rows[k]['deadline_jst'],
                         'morning_p3_snapshot_sha256': rows[k]['p3_snapshot_sha256']} for k in added], 'site_payload_sha256': ack['payload_sha256'],
