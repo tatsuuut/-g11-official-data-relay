@@ -234,6 +234,8 @@ def _run_same_day_rescue_predeadline(day):
         def run_predeadline_cycle(self, *args, **kwargs):
             return base.run_predeadline_cycle.__wrapped__(self, *args, **kwargs)
     rescue_entry_v2._rescue.CanonicalRunner = BoundaryRescueRunner
+    from g11.canonical import public_app_feed as rescue_feedlib
+    rescue_feedlib._abeken_public_projection = lambda *args, **kwargs: (None, {})
     if rescue_entry_v2.maybe_run_cli_rescue(values):
         print("G11_PREDEADLINE_RECOVERY=SAME_DAY_RESCUE_V2")
         return True
