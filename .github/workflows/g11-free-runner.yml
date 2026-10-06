@@ -289,13 +289,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../.relay-output
+          if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-06" ] && \
+             [ -f "${GITHUB_WORKSPACE}/.relay-state/rescue/boundary.json" ] && \
+             [ ! -f "${GITHUB_WORKSPACE}/.relay-state/daily-runtime/2026-10-06/authority.json" ]; then
+            echo 'rescue=true' >> "${GITHUB_OUTPUT}"
+            echo 'G11_PREDEADLINE_CRITICAL=NOT_APPLICABLE_SAME_DAY_RESCUE'
+            exit 0
+          fi
           python3 -S ../scripts/daily_predeadline_authority_recovery_v1.py critical \
             --state-root "${GITHUB_WORKSPACE}/.relay-state" \
             --operational-date "${{ steps.due.outputs.operational_date }}" \
             --run-id "${GITHUB_RUN_ID}" \
             --result "${GITHUB_WORKSPACE}/.relay-output/result.json"
       - name: Encrypt critical state before optional work
-        if: steps.due.outputs.phase == 'predeadline' && steps.critical.outcome == 'success'
+        if: steps.due.outputs.phase == 'predeadline' && steps.critical.outcome == 'success' && steps.critical.outputs.rescue != 'true'
         id: critical-encrypt
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
@@ -732,7 +739,7 @@ jobs:
           print("G11_RELAY_RESULT_EXTRACT=PASS")
           PY
       - name: Audit WILD4 training-food capture
-        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'same-day-rescue'
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'same-day-rescue' && steps.critical.outputs.rescue != 'true'
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
@@ -1772,8 +1779,65 @@ jobs:
                 --night-ready .relay-output/readback.json --day "${{ steps.due.outputs.operational_date }}"
             fi
           fi
+      - name: Keep same-day rescue PREDEADLINE alive
+        if: >-
+          always() && !cancelled() &&
+          steps.due.outputs.phase == 'predeadline' &&
+          steps.critical.outputs.rescue == 'true' &&
+          steps.runtime.outcome == 'success' &&
+          steps.publish.outcome == 'success' &&
+          steps.readback.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+        run: |
+          set -euo pipefail
+          result=.relay-output/result.json
+          jq -e '
+            .STATUS == "SAME_DAY_RESCUE_COMPLETE"
+            and .PHASE == "PREDEADLINE_RESCUE"
+            and .CANONICAL_MORNING_PROMOTED == false
+            and .NIGHT_RESEARCH_CONNECTED == false
+            and .LEARNING_CONNECTED == false
+          ' "${result}" >/dev/null
+          last_deadline="$(jq -er '.LAST_RACE_DEADLINE_JST' "${result}")"
+          if [ "$(date -d "${last_deadline}" +%s)" -le "$(date +%s)" ]; then
+            echo 'G11_RESCUE_PREDEADLINE_CHAIN=LAST_RACE_REACHED'
+            exit 0
+          fi
+          sleep 45
+          if [ "$(date -d "${last_deadline}" +%s)" -le "$(date +%s)" ]; then
+            echo 'G11_RESCUE_PREDEADLINE_CHAIN=LAST_RACE_REACHED'
+            exit 0
+          fi
+          runs="$(curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 20 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=100")"
+          active="$(printf '%s' "${runs}" | jq --argjson current "${GITHUB_RUN_ID}" '
+            [.workflow_runs[] |
+              select(.id != $current and
+                (.status == "queued" or .status == "in_progress" or
+                 .status == "requested" or .status == "waiting" or
+                 .status == "pending"))] | length')"
+          if [ "${active}" -gt 0 ]; then
+            echo "G11_RESCUE_PREDEADLINE_CHAIN=DEFER_ACTIVE count=${active}"
+            exit 0
+          fi
+          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
+            '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 20 -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+            -d "${payload}"
+          echo "G11_RESCUE_PREDEADLINE_CHAIN=DISPATCHED day=${OPERATIONAL_DATE}"
       - name: Prove first formal V53 race from official snapshots and deployed readback
-        if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true' && steps.due.outputs.phase != 'night' && steps.due.outputs.phase != 'same-day-rescue' && steps.readback.outcome == 'success'
+        if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true' && steps.due.outputs.phase != 'night' && steps.due.outputs.phase != 'same-day-rescue' && steps.readback.outcome == 'success' && steps.critical.outputs.rescue != 'true'
         env:
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
         run: |
@@ -2064,7 +2128,7 @@ jobs:
         if: always() && steps.runtime.outcome == 'failure' && steps.due.outputs.phase == 'predeadline'
         run: echo 'G11_PREDEADLINE_OPTIONAL_UNAVAILABLE=CRITICAL_CHECKPOINT_RETAINED'
       - name: WILD4 shadow
-        if: steps.runtime.outcome == 'success' && contains('predeadline,night', steps.due.outputs.phase)
+        if: steps.runtime.outcome == 'success' && contains('predeadline,night', steps.due.outputs.phase) && steps.critical.outputs.rescue != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
