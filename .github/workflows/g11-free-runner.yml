@@ -1439,9 +1439,7 @@ jobs:
               test -s .relay-output/stored-feed.json || { echo 'G11_RESCUE_ACCEPTED_FEED_READBACK_REQUIRED' >&2; exit 1; }
               python3 scripts/audit_public_surface.py project-rescue-stored-schema "${FEED}" .relay-output/stored-feed.json
             elif jq -e '.SNAPSHOT_CLASS == "SAME_DAY_RESCUE_NONRESEARCH"' "${FEED}" >/dev/null; then
-              echo "G11_SITE_SCHEMA_PROJECT=SKIP_RESCUE_NONRESEARCH"
-              jq -c 'del(.SNAPSHOT_CLASS,.CANONICAL_MORNING_PROMOTED,.RESEARCH_ELIGIBLE_AS_MORNING,.MORNING_HISTORY_BACKFILL,.ACCOUNTING_CLASS)' "${FEED}" > .relay-output/feed-rescue-site.json
-              mv .relay-output/feed-rescue-site.json "${FEED}"
+              echo "G11_SITE_SCHEMA_PROJECT=PRESERVE_RESCUE_NONRESEARCH_FOR_DEDICATED_TRANSPORT"
             else
               python3 scripts/audit_public_surface.py project-feed-schema "${FEED}" "${previous_wild}"
             fi
