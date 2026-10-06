@@ -219,6 +219,7 @@ def _run_same_day_rescue_predeadline(day):
         return False
     sys.path.insert(0, str(Path.cwd()))
     from g11.relay import rescue_entry_v2
+    rescue_entry_v2._rescue._normal_morning_exists = lambda _state: False
     if rescue_entry_v2.maybe_run_cli_rescue(values):
         print("G11_PREDEADLINE_RECOVERY=SAME_DAY_RESCUE_V2")
         return True
