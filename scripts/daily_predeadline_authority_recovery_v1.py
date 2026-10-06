@@ -342,7 +342,6 @@ def _run_same_day_rescue_night(day):
     _require(baseline["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"],
              "RESCUE_NIGHT_BASELINE_BINDING")
     sys.path.insert(0, str(Path.cwd()))
-    from g11.relay.nonresearch_feed_v1 import normalize_nonresearch_feed
     from g11.canonical import public_app_feed as feedlib
     from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore, build_night_workbook_projection
     target = datetime.fromisoformat(day).date()
@@ -351,7 +350,28 @@ def _run_same_day_rescue_night(day):
     projection = build_night_workbook_projection(artifact_store, target)
     feed = json.loads(json.dumps(baseline))
     feedlib._apply_night(feed["races"], projection)
-    normalize_nonresearch_feed(feed)
+    for race in feed["races"]:
+        race["research_eligible"] = False
+        race["formal_status"] = "EXCLUDED"
+        race["exclusion_reason"] = "SAME_DAY_RESCUE_NONRESEARCH"
+        race["practical_hit"] = None
+        race["validation_hit"] = None
+        race["miss_classification"] = None
+        race["research_decision"] = None
+        race["research_finance"] = {"status":"NOT_ELIGIBLE","race_refund_occurred":None,
+            "gross_stake":None,"refund_amount":None,"net_investment":None,
+            "prize_return":None,"profit":None,"source":None}
+    result_count = sum(1 for race in feed["races"]
+        if isinstance(race.get("result_meta"), dict)
+        and race["result_meta"].get("result_status") in ("ESTABLISHED","TRIFECTA_NOT_ESTABLISHED"))
+    feed["counts"] = {"races":len(feed["races"]),"formal":0,"excluded":len(feed["races"]),
+        "odds_enriched":0,"odds_waiting":0,"win_candidates":0,"results":result_count,
+        "pending":len(feed["races"])-result_count,"practical_hits":0,"validation_hits":0,
+        "research_samples":0}
+    feed["research_db"] = {"available":False,"formal_races":0,"excluded_races":0,
+        "practical_hits":0,"practical_investment":0,"practical_return":0,"practical_profit":0,
+        "validation_hits":0,"rescue_hits":0,"axis_first_hits":0,"axis_top3_hits":0,
+        "refund_races":0,"last_updated_at_jst":None}
     feed["stage"] = "NIGHT"
     feed["status"] = "PASS"
     feed["same_day_rescue"] = {k: v for k, v in cert.items() if k != "source_files"}
