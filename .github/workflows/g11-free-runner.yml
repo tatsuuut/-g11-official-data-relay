@@ -1778,7 +1778,7 @@ jobs:
                 --night-ready .relay-output/readback.json --day "${{ steps.due.outputs.operational_date }}"
             fi
           fi
-      - name: Chain rescue live locks
+      - name: Chain rescue T7 safely
         if: steps.due.outputs.phase == 'predeadline' && steps.critical.outputs.rescue == 'true' && steps.runtime.outcome == 'success' && steps.publish.outcome == 'success' && steps.readback.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
