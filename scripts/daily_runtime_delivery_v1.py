@@ -273,8 +273,11 @@ def deliver_rescue_predeadline(state, feed_path, origin):
     added = []
     for row in out['races']:
         new = current[row['key']]
-        for field in ('p3_snapshot_sha256', 'practical_bets', 'p3_production_bets', 'production_points'):
-            require(row.get(field) == new.get(field), 'RESCUE_MORNING_LOCK_CHANGED:' + row['key'])
+        proof = new['today_rescue']
+        require(
+            proof.get('morning_p3_snapshot_sha256') == row.get('p3_snapshot_sha256'),
+            'RESCUE_MORNING_LOCK_CHANGED:' + row['key'],
+        )
         pre = new.get('predeadline')
         old = row.get('predeadline')
         if isinstance(old, dict):
@@ -285,7 +288,6 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         if not isinstance(pre, dict):
             continue
         deadline = datetime.fromisoformat(row['deadline_jst'])
-        proof = new['today_rescue']
         require(
             deadline > datetime.now(deadline.tzinfo)
             and proof.get('status') == 'LOCKED'
