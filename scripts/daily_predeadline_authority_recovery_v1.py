@@ -341,18 +341,15 @@ def _run_same_day_rescue_night(day):
     _require(baseline["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"],
              "RESCUE_NIGHT_BASELINE_BINDING")
     sys.path.insert(0, str(Path.cwd()))
-    from g11.relay import rescue_entry_v2
-    from g11.relay import v1 as relay
     from g11.relay.nonresearch_feed_v1 import normalize_nonresearch_feed
-    from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
+    from g11.canonical import public_app_feed as feedlib
+    from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore, build_night_workbook_projection
     target = datetime.fromisoformat(day).date()
-    CanonicalRunner(OfficialArtifactStore(store)).run_night(target, require_complete=True)
-    run_id = values[values.index("--public-run-id") + 1] if "--public-run-id" in values else "0"
-    source_sha = cert["runtime_source_sha"]
-    feed = relay.build_feed(store, run_id=run_id, github_sha=source_sha,
-                            current_p3_publication=None, relay_phase="night")
-    _require(feed.get("stage") == "NIGHT" and feed.get("counts", {}).get("pending") == 0,
-             "RESCUE_NIGHT_INCOMPLETE")
+    artifact_store = OfficialArtifactStore(store)
+    CanonicalRunner(artifact_store).run_night(target, require_complete=True)
+    projection = build_night_workbook_projection(artifact_store, target)
+    feed = json.loads(json.dumps(baseline))
+    feedlib._apply_night(feed["races"], projection)
     normalize_nonresearch_feed(feed)
     feed["stage"] = "NIGHT"
     feed["status"] = "PASS"
