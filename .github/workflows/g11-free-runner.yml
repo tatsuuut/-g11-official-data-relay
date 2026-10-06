@@ -293,7 +293,6 @@ jobs:
              [ -f "${GITHUB_WORKSPACE}/.relay-state/rescue/boundary.json" ] && \
              [ ! -f "${GITHUB_WORKSPACE}/.relay-state/daily-runtime/2026-10-06/authority.json" ]; then
             echo 'rescue=true' >> "${GITHUB_OUTPUT}"
-            echo 'G11_PREDEADLINE_CRITICAL=NOT_APPLICABLE_SAME_DAY_RESCUE'
             exit 0
           fi
           python3 -S ../scripts/daily_predeadline_authority_recovery_v1.py critical \
