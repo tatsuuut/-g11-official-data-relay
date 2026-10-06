@@ -218,7 +218,12 @@ def _run_same_day_rescue_predeadline(day):
     if not rescue_boundary.is_file() or canonical_authority.exists():
         return False
     sys.path.insert(0, str(Path.cwd()))
-    from g11.relay import rescue_entry_v2
+    original_argv = sys.argv
+    try:
+        sys.argv = [sys.argv[0]]
+        from g11.relay import rescue_entry_v2
+    finally:
+        sys.argv = original_argv
     rescue_entry_v2._rescue._normal_morning_exists = lambda _state: False
     if rescue_entry_v2.maybe_run_cli_rescue(values):
         print("G11_PREDEADLINE_RECOVERY=SAME_DAY_RESCUE_V2")
