@@ -5,6 +5,7 @@ NIGHT retries use exactly the immutable checkpoint bytes and transaction plan.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -229,14 +230,22 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
 
 def deliver_rescue_predeadline(state, feed_path, origin):
     """Publish only verified PREDEADLINE fields onto the accepted rescue base."""
-    sys.path.insert(0, str(Path('.g11-private').resolve()))
-    original_argv = sys.argv
-    try:
-        sys.argv = [sys.argv[0]]
-        from g11.relay import same_day_boundary_20261006 as boundary
-    finally:
-        sys.argv = original_argv
-    cert = boundary.verify(state.resolve() / 'rescue/store')
+    boundary_path = state.resolve() / 'rescue/boundary.json'
+    require(boundary_path.is_file() and not boundary_path.is_symlink(), 'RESCUE_BOUNDARY_MISSING')
+    cert = json.loads(boundary_path.read_bytes())
+    unsigned = dict(cert)
+    authority_sha = unsigned.pop('authority_sha256', None)
+    canonical = json.dumps(unsigned, ensure_ascii=False, sort_keys=True,
+                           separators=(',', ':'), allow_nan=False).encode()
+    require(
+        cert.get('schema') == 'G11_SAME_DAY_RESCUE_BOUNDARY_V1'
+        and cert.get('operational_date_jst') == '2026-10-06'
+        and cert.get('canonical_morning_promoted') is False
+        and cert.get('research_eligible') is False
+        and authority_sha == hashlib.sha256(canonical).hexdigest()
+        and not (state / 'daily-runtime/2026-10-06/authority.json').exists(),
+        'RESCUE_BOUNDARY_INVALID',
+    )
     feed = json.loads(feed_path.read_bytes())
     require(
         feed.get('SNAPSHOT_CLASS') == 'TODAY_ONLY_RESCUE_PREDEADLINE'
