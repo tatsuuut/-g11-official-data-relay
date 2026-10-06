@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 import subprocess
 import tempfile
@@ -229,7 +230,7 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
 
 
 def deliver_rescue_predeadline(state, feed_path, origin):
-    """Publish only verified PREDEADLINE fields onto the accepted rescue base."""
+    """Append only timely PREDEADLINE locks to the accepted rescue boundary."""
     boundary_path = state.resolve() / 'rescue/boundary.json'
     require(boundary_path.is_file() and not boundary_path.is_symlink(), 'RESCUE_BOUNDARY_MISSING')
     cert = json.loads(boundary_path.read_bytes())
@@ -246,38 +247,99 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         and not (state / 'daily-runtime/2026-10-06/authority.json').exists(),
         'RESCUE_BOUNDARY_INVALID',
     )
-    feed = json.loads(feed_path.read_bytes())
+    incoming = json.loads(feed_path.read_bytes())
     require(
-        feed.get('SNAPSHOT_CLASS') == 'TODAY_ONLY_RESCUE_PREDEADLINE'
-        and feed.get('operational_date_jst') == '2026-10-06'
-        and feed.get('stage') == 'PREDEADLINE'
-        and feed.get('daily_runtime') is None
-        and feed.get('CANONICAL_MORNING_PROMOTED') is False
-        and feed.get('RESEARCH_ELIGIBLE_AS_MORNING') is False
-        and all(isinstance(row.get('today_rescue'), dict) for row in feed.get('races', [])),
+        incoming.get('SNAPSHOT_CLASS') == 'TODAY_ONLY_RESCUE_PREDEADLINE'
+        and incoming.get('operational_date_jst') == '2026-10-06'
+        and incoming.get('stage') == 'PREDEADLINE'
+        and incoming.get('daily_runtime') is None
+        and incoming.get('CANONICAL_MORNING_PROMOTED') is False
+        and incoming.get('RESEARCH_ELIGIBLE_AS_MORNING') is False
+        and all(isinstance(row.get('today_rescue'), dict) for row in incoming.get('races', [])),
         'RESCUE_PREDEADLINE_TRANSPORT_IDENTITY',
     )
-    hot.publish(feed_path, origin)
-    readback, headers, raw = hot.fetch(origin + '/api/g11-feed?date=2026-10-06')
+    url = origin + '/api/g11-feed?date=2026-10-06'
+    accepted, _, _ = hot.fetch(url)
     require(
-        readback.get('operational_date_jst') == '2026-10-06'
-        and readback.get('same_day_rescue', {}).get('authority_sha256') == cert['authority_sha256']
-        and readback.get('counts', {}).get('formal') == 0,
+        accepted.get('operational_date_jst') == '2026-10-06'
+        and accepted.get('SNAPSHOT_CLASS') == 'SAME_DAY_RESCUE_BOUNDARY'
+        and accepted.get('same_day_rescue', {}).get('authority_sha256') == authority_sha,
+        'RESCUE_ACCEPTED_BOUNDARY_IDENTITY',
+    )
+    current = {row['key']: row for row in incoming['races']}
+    prior = {row['key']: row for row in accepted['races']}
+    require(set(current) == set(prior), 'RESCUE_PREDEADLINE_RACE_SET')
+    out = json.loads(json.dumps(accepted))
+    added = []
+    for row in out['races']:
+        new = current[row['key']]
+        for field in ('p3_snapshot_sha256', 'practical_bets', 'p3_production_bets', 'production_points'):
+            require(row.get(field) == new.get(field), 'RESCUE_MORNING_LOCK_CHANGED:' + row['key'])
+        pre = new.get('predeadline')
+        old = row.get('predeadline')
+        if isinstance(old, dict):
+            if isinstance(pre, dict):
+                for field in ('snapshot_sha256', 'captured_at_jst', 'practical_bets', 'production_points'):
+                    require(old.get(field) == pre.get(field), 'RESCUE_LIVE_LOCK_CHANGED:' + row['key'])
+            continue
+        if not isinstance(pre, dict):
+            continue
+        deadline = datetime.fromisoformat(row['deadline_jst'])
+        proof = new['today_rescue']
+        require(
+            deadline > datetime.now(deadline.tzinfo)
+            and proof.get('status') == 'LOCKED'
+            and proof.get('p3_snapshot_sha256') == pre.get('snapshot_sha256')
+            and datetime.fromisoformat(pre['captured_at_jst']) < deadline
+            and datetime.fromisoformat(pre['odds_captured_at_jst']) < deadline
+            and row.get('research_eligible') is False,
+            'RESCUE_LIVE_PROOF_INVALID:' + row['key'],
+        )
+        row['predeadline'] = pre
+        for field in ('best_ev', 'best_ev_bet', 'value_bets', 'odds_captured_at_jst'):
+            row[field] = pre[field]
+        row['odds_merit'] = pre['legacy_odds_merit']
+        added.append(row['key'])
+    data = hot.compact(out)
+    token = os.environ['G11_SYNC_OIDC']
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / 'rescue-predeadline.json'
+        response = Path(directory) / 'response.json'
+        path.write_bytes(data)
+        result = subprocess.run([
+            'curl', '--silent', '--show-error', '--max-time', '45', '-X', 'POST',
+            origin + '/api/g11-sync', '-H', 'Authorization: Bearer ' + token,
+            '-H', 'Content-Type: application/json',
+            '-H', 'x-g11-feed-sha256: ' + hot.hash_bytes(data),
+            '--data-binary', '@' + str(path), '--output', str(response), '--write-out', '%{http_code}',
+        ], capture_output=True, text=True, check=True)
+        ack = json.loads(response.read_bytes())
+        require(200 <= int(result.stdout) < 300 and ack.get('status') == 'PASS',
+                'RESCUE_PREDEADLINE_SITE_REJECTED:' + str(ack.get('error')))
+    readback, headers, raw = hot.fetch(url)
+    rows = {row['key']: row for row in readback['races']}
+    require(
+        readback.get('same_day_rescue', {}).get('authority_sha256') == authority_sha
+        and headers.get('x-g11-source-feed-sha256') == hot.hash_bytes(data) == ack.get('payload_sha256'),
         'RESCUE_PREDEADLINE_READBACK_IDENTITY',
     )
+    for key in added:
+        require(rows.get(key, {}).get('predeadline') == current[key]['predeadline'],
+                'RESCUE_PREDEADLINE_READBACK_LOCK:' + key)
+    Path('.relay-output/hot-delta-accepted').write_text(ack['payload_sha256'] + '\n')
     Path('.relay-output/hot-delta-readback.json').write_bytes(raw)
+    if os.environ.get('GITHUB_OUTPUT'):
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+            output.write('feed_sha=' + ack['payload_sha256'] + '\n')
     receipt = {
         'schema': 'G11_SAME_DAY_RESCUE_PREDEADLINE_DELIVERY_V1',
-        'status': 'PASS',
-        'operational_date_jst': '2026-10-06',
-        'authority_sha256': cert['authority_sha256'],
-        'site_get_readback': 'PASS',
-        'site_payload_sha256': headers.get('x-g11-source-feed-sha256'),
+        'status': 'PASS', 'operational_date_jst': '2026-10-06',
+        'authority_sha256': authority_sha, 'site_get_readback': 'PASS',
+        'new_live_locks': added, 'site_payload_sha256': ack['payload_sha256'],
     }
     (state / 'rescue/predeadline-delivery.json').write_bytes(hot.compact(receipt))
     print(json.dumps(receipt, sort_keys=True))
     return receipt
-
 
 def deliver_rescue(state, feed_path, origin, attempts, pause):
     """Transport one explicitly nonresearch boundary; no canonical fallback."""
