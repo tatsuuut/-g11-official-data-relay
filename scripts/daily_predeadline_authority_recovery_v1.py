@@ -349,7 +349,9 @@ def _run_same_day_rescue_night(day):
         from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore, build_night_workbook_projection
         target = datetime.fromisoformat(day).date()
         artifact_store = OfficialArtifactStore(store)
-        CanonicalRunner(artifact_store).run_night(target, require_complete=True)
+        runner = CanonicalRunner(artifact_store)
+        run_night = getattr(CanonicalRunner.run_night, "__wrapped__", CanonicalRunner.run_night)
+        run_night(runner, target, require_complete=True)
         projection = build_night_workbook_projection(artifact_store, target)
         feed = json.loads(json.dumps(baseline))
         feedlib._apply_night(feed["races"], projection)
