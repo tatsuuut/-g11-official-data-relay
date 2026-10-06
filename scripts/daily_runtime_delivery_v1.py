@@ -254,7 +254,7 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         and feed.get('daily_runtime') is None
         and feed.get('CANONICAL_MORNING_PROMOTED') is False
         and feed.get('RESEARCH_ELIGIBLE_AS_MORNING') is False
-        and feed.get('same_day_rescue', {}).get('authority_sha256') == cert['authority_sha256'],
+        and all(isinstance(row.get('today_rescue'), dict) for row in feed.get('races', [])),
         'RESCUE_PREDEADLINE_TRANSPORT_IDENTITY',
     )
     hot.publish(feed_path, origin)
