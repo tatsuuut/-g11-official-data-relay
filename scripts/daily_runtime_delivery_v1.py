@@ -244,8 +244,7 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         and feed.get('stage') == 'PREDEADLINE'
         and feed.get('daily_runtime') is None
         and feed.get('CANONICAL_MORNING_PROMOTED') is False
-        and feed.get('NIGHT_RESEARCH_CONNECTED') is False
-        and feed.get('LEARNING_CONNECTED') is False
+        and feed.get('RESEARCH_ELIGIBLE_AS_MORNING') is False
         and feed.get('same_day_rescue', {}).get('authority_sha256') == cert['authority_sha256'],
         'RESCUE_PREDEADLINE_TRANSPORT_IDENTITY',
     )
