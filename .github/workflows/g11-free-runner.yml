@@ -2066,6 +2066,16 @@ jobs:
       - name: Classify optional PREDEADLINE relay failure
         if: always() && steps.runtime.outcome == 'failure' && steps.due.outputs.phase == 'predeadline'
         run: echo 'G11_PREDEADLINE_OPTIONAL_UNAVAILABLE=CRITICAL_CHECKPOINT_RETAINED'
+      - name: Continue same-day rescue within official race window
+        if: steps.authority.outputs.rescue_bootstrap == 'true' && steps.readback.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 45
+          test "$(python3 scripts/dynamic_last_race_heartbeat.py --result .relay-output/result.json --operational-date 2026-10-06)" = CONTINUE || exit 0
+          active=$(gh run list --workflow g11-free-runner.yml --json databaseId,status --limit 30 --jq '[.[] | select(.databaseId != '${GITHUB_RUN_ID}' and (.status == "queued" or .status == "in_progress"))] | length')
+          [ "${active}" = 0 ] || exit 0
+          gh workflow run g11-free-runner.yml -f phase=predeadline -f operational_date=2026-10-06
       - name: WILD4 shadow
         if: steps.runtime.outcome == 'success' && contains('predeadline,night', steps.due.outputs.phase)
         continue-on-error: true
