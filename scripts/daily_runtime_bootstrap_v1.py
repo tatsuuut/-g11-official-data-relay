@@ -71,7 +71,7 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
     path = state / "daily-runtime" / day / "authority.json"
     if phase in {"predeadline", "night"} and not path.exists() and day == "2026-10-06":
         from daily_predeadline_authority_recovery_v1 import rescue_certificate
-        cert = rescue_certificate(state, day)
+        cert = rescue_certificate(state, day, allow_night_rollover=(phase == "night"))
         return {"checkout_candidate": "true", "frozen": "false",
                 "rescue_bootstrap": "true", "source_sha": cert["runtime_source_sha"]}
     if not path.exists():
