@@ -1459,7 +1459,7 @@ jobs:
             -H 'Accept: application/json' \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
           token="$(printf '%s' "${oidc}" | jq -er '.value')"
-          if jq -e '.SNAPSHOT_CLASS == "SAME_DAY_RESCUE_NONRESEARCH" and .stage == "NIGHT"' "${FEED}" >/dev/null; then
+          if [ "${RELAY_PHASE}" = "night" ] && jq -e '.stage == "NIGHT" and .operational_date_jst == "2026-10-06" and .counts.pending == 0 and .counts.results == .counts.races and .counts.formal == 0' "${FEED}" >/dev/null; then
             G11_SYNC_OIDC="${token}" python3 scripts/daily_runtime_delivery_v1.py \
               --state-root .relay-state --feed "${FEED}" --origin "${G11_APP_ORIGIN}"
             exit 0
