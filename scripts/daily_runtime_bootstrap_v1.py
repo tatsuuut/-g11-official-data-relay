@@ -69,16 +69,6 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
     path = state / "daily-runtime" / day / "authority.json"
-    rescue_boundary = state / "rescue" / "boundary.json"
-    if (
-        day == "2026-10-06"
-        and phase == "predeadline"
-        and not path.exists()
-        and rescue_boundary.is_file()
-    ):
-        # The isolated same-day rescue is explicitly noncanonical/nonresearch.
-        # Allow only its future PREDEADLINE continuation; never mint a daily authority.
-        return {"checkout_candidate": "true", "frozen": "false"}
     if not path.exists():
         if phase != "morning":
             raise RuntimeError("DAILY_AUTHORITY_UNKNOWN")
