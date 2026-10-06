@@ -268,6 +268,8 @@ def deliver_rescue_predeadline(state, feed_path, origin):
     prior = {row['key']: row for row in accepted['races']}
     require(set(current) == set(prior), 'RESCUE_PREDEADLINE_RACE_SET')
     out = json.loads(json.dumps(accepted))
+    out['source'] = incoming['source']
+    out['generated_at_jst'] = incoming['generated_at_jst']
     added = []
     for row in out['races']:
         new = current[row['key']]
