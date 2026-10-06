@@ -186,7 +186,7 @@ jobs:
             --decrypt --output "${RUNNER_TEMP}/candidate.tgz" .candidate-encrypted/g11-wild4-candidate.tgz.gpg
           exec 3<&-
           python3 - <<'PY'
-          import json, os, pathlib, tarfile
+          import json, os, pathlib, tarfile, hashlib
           root=pathlib.Path(os.environ['RUNNER_TEMP'])
           for archive,dest in ((root/'g11-state.tgz',pathlib.Path('.relay-state')),
                                (root/'candidate.tgz',root)):
@@ -203,12 +203,28 @@ jobs:
           if state.get('OPERATIONAL_DATE_JST')!=os.environ['OPERATIONAL_DATE']:
               raise SystemExit('STATE_DATE_MISMATCH')
           ready=state.get('MORNING_COMPLETE') is True
+          rescue=False
+          path=pathlib.Path('.relay-state/rescue/boundary.json')
+          if not ready and path.is_file():
+              cert=json.loads(path.read_bytes()); unsigned=dict(cert)
+              sha=unsigned.pop('authority_sha256',None)
+              canonical=json.dumps(unsigned,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
+              rescue=(cert.get('operational_date_jst')==os.environ['OPERATIONAL_DATE']=='2026-10-06'
+                  and cert.get('schema')=='G11_SAME_DAY_RESCUE_BOUNDARY_V1'
+                  and cert.get('canonical_morning_promoted') is False
+                  and cert.get('research_eligible') is False
+                  and cert.get('same_day_results_used') is False
+                  and sha==hashlib.sha256(canonical).hexdigest()
+                  and not pathlib.Path('.relay-state/daily-runtime/2026-10-06/authority.json').exists())
+              if not rescue: raise SystemExit('WILD4_RESCUE_BOUNDARY_INVALID')
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('canonical_ready='+str(ready).lower()+'\n')
-          print('WILD4_FUTURE_STATE_READBACK=PASS' if ready else 'WILD4_WAITING_CANONICAL_MORNING; rescue is not MORNING authority')
+              out.write('runtime_ready='+str(ready or rescue).lower()+'\n')
+              out.write('store='+('.relay-state/rescue/store' if rescue else '.relay-state/store')+'\n')
+          print('WILD4_STATE_MODE='+('RESCUE_PROSPECTIVE_SHADOW_ONLY' if rescue else 'CANONICAL' if ready else 'WAITING'))
           PY
       - name: Restore and verify earlier immutable SHADOW locks
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true'
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
@@ -266,7 +282,7 @@ jobs:
               for p in files],sort_keys=True))
           PY
       - name: Check for a matching unexpired official odds packet
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true'
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         id: availability
         working-directory: .g11-private
         env:
@@ -281,7 +297,7 @@ jobs:
           day=os.environ['OPERATIONAL_DATE']
           candidate=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-candidate'
           binding,registry,model=future.verified_candidate(candidate)
-          history=workspace/'.relay-state/store/g11/wild-pack-oos/morning'/day
+          history=workspace/'${{ steps.decrypted.outputs.store }}'/'g11/wild-pack-oos/morning'/day
           source=history/'bet-prediction-time-odds.manifest.json'
           if source.is_file():
               manifest,odds=train.verified_gzip(source,
@@ -294,7 +310,7 @@ jobs:
               odds=None
           from g11.wild_pack.v1 import bet_oos_collection_v1 as bet
           from g11.canonical.official_pipeline import OfficialArtifactStore
-          source_store=workspace/'.relay-state/store'
+          source_store=workspace/'${{ steps.decrypted.outputs.store }}'
           upstream_path=history/'bet-upstream.manifest.json'
           if upstream_path.is_file():
               upstream_manifest,upstream=train.verified_gzip(upstream_path,
@@ -344,11 +360,21 @@ jobs:
           print('WILD4_ODDS_DAY_CONSIDERED='+str(len(records)))
           print('WILD4_MATCHING_UNEXPIRED='+str(len(due)))
           PY
-      - name: Install CatBoost only in isolated research lane
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true')
-        run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
+      - name: Verify frozen WILD4 inference runtime
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
+        working-directory: .g11-private
+        run: |
+          python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
+          python3 - <<'PYREADY'
+          import os, pathlib
+          from catboost import CatBoostClassifier
+          from g11.wild_pack.v1 import wild_bet_future_oos_v1 as future
+          binding,registry,path=future.verified_candidate(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-candidate')
+          model=CatBoostClassifier(); model.load_model(str(path))
+          print('WILD4_RUNTIME_READY=PASS MODEL_SHA256='+binding['MODEL_SHA256'])
+          PYREADY
       - name: Lock future races before deadline without any production write
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true')
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         working-directory: .g11-private
@@ -425,7 +451,7 @@ jobs:
           print('WILD4_PRODUCTION_MUTATED=false')
           PY
       - name: Read back frozen holdout evidence without retraining
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true')
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         working-directory: .g11-private
         run: |
           set -euo pipefail
@@ -552,7 +578,7 @@ jobs:
               output.write('new='+str(new)+'\n')
           PY
       - name: Encrypt immutable future locks
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -564,7 +590,7 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
