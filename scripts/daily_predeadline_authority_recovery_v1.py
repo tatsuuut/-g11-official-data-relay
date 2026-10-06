@@ -205,11 +205,32 @@ def guard_optional_mashiro_shadow():
     mashiro.publish_shadow = before_deadline
 
 
+def _run_same_day_rescue_predeadline(day):
+    """Continue only the isolated 2026-10-06 rescue when canonical MORNING is absent."""
+    if day != "2026-10-06":
+        return False
+    values = sys.argv[1:]
+    if "--state-root" not in values:
+        return False
+    state = Path(values[values.index("--state-root") + 1])
+    rescue_boundary = state / "rescue" / "boundary.json"
+    canonical_authority = state / "daily-runtime" / day / "authority.json"
+    if not rescue_boundary.is_file() or canonical_authority.exists():
+        return False
+    from g11.relay import rescue_entry_v2
+    if rescue_entry_v2.maybe_run_cli_rescue(values):
+        print("G11_PREDEADLINE_RECOVERY=SAME_DAY_RESCUE_V2")
+        return True
+    return False
+
+
 def main():
     mode = sys.argv[1]
     sys.argv = [sys.argv[0], *sys.argv[2:]]
     _require("--operational-date" in sys.argv, "PREDEADLINE_RECOVERY_DAY_MISSING")
     day = sys.argv[sys.argv.index("--operational-date") + 1]
+    if mode == "predeadline" and _run_same_day_rescue_predeadline(day):
+        return 0
     # The workflow has already verified the archive and restored the frozen
     # source; only that source is imported here.
     sys.path.insert(0, str(Path.cwd()))
