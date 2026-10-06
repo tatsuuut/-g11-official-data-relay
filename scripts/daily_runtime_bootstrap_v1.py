@@ -69,7 +69,7 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
     path = state / "daily-runtime" / day / "authority.json"
-    if phase == "predeadline" and not path.exists():
+    if phase in {"predeadline", "night"} and not path.exists() and day == "2026-10-06":
         from daily_predeadline_authority_recovery_v1 import rescue_certificate
         cert = rescue_certificate(state, day)
         return {"checkout_candidate": "true", "frozen": "false",
@@ -128,24 +128,3 @@ def main():
             value = {"status": "PASS", "test": "NEXT_OPERATIONAL_DAY_AUTHORITY_DRY_RUN",
                      "operational_date_jst": candidate_day,
                      "authority_sha256": authority["authority_sha256"],
-                     "runtime_source_sha": authority["runtime_source_sha"],
-                     "p3_version": authority["p3"]["version"],
-                     "abeken_v53_version": authority["abeken_v53"]["version"],
-                     "source_file_count": len(authority["source_files"]), "model_file_count": len(authority["model_files"]),
-                     "production_state_mutated": False, "prediction_executed": False, "site_write": False}
-        if args.output:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_bytes(canonical(value) + b"\n")
-    else:
-        implementation = retained_module(args.state_root, args.operational_date)
-        value = implementation.emit_checkpoint(args.state_root, args.operational_date, args.output)
-    if os.environ.get("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-            for key, item in value.items():
-                if isinstance(item, (str, int, bool)):
-                    output.write(f"{key}={item}\n")
-    print(json.dumps(value, sort_keys=True))
-
-
-if __name__ == "__main__":
-    main()
