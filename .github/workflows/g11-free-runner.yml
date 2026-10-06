@@ -700,7 +700,7 @@ jobs:
           elif [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
             python3 ../scripts/daily_predeadline_authority_recovery_v1.py predeadline "${args[@]}" | tee "${runtime_stdout}"
           else
-            if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-04" ]; then
+            if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-04" ] || [ "${{ steps.due.outputs.operational_date }}" = "2026-10-06" ]; then
               python3 ../scripts/daily_predeadline_authority_recovery_v1.py night "${args[@]}" | tee "${runtime_stdout}"
             else
               python3 -m g11.relay.v1 "${args[@]}" | tee "${runtime_stdout}"
