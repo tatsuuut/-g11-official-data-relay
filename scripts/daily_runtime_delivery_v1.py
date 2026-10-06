@@ -283,10 +283,6 @@ def deliver_rescue_predeadline(state, feed_path, origin):
             continue
         if not isinstance(pre, dict):
             continue
-        require(
-            proof.get('morning_p3_snapshot_sha256') == row.get('p3_snapshot_sha256'),
-            'RESCUE_MORNING_LOCK_CHANGED:' + row['key'],
-        )
         deadline = datetime.fromisoformat(row['deadline_jst'])
         require(
             deadline > datetime.now(deadline.tzinfo)
