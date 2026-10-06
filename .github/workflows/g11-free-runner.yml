@@ -1,6 +1,4 @@
 name: runtime sync
-# 2026-10-06 rescue NIGHT final transport trigger; morning proof preserved.
-# 2026-10-06 rescue NIGHT bootstrap verified; unpacked-canonical settlement trigger.
 run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
 on:
   push:
