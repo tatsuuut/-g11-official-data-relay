@@ -287,7 +287,7 @@ def deliver_rescue_predeadline(state, feed_path, origin):
         require(
             deadline > datetime.now(deadline.tzinfo)
             and proof.get('status') == 'LOCKED'
-            and proof.get('p3_snapshot_sha256') == pre.get('snapshot_sha256')
+            and proof.get('predeadline_p3_snapshot_sha256') == pre.get('snapshot_sha256')
             and datetime.fromisoformat(pre['captured_at_jst']) < deadline
             and datetime.fromisoformat(pre['odds_captured_at_jst']) < deadline
             and row.get('research_eligible') is False,
