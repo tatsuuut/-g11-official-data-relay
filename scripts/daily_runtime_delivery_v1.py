@@ -251,8 +251,6 @@ def deliver_rescue_predeadline(state, feed_path, origin):
     require(
         incoming.get('SNAPSHOT_CLASS') == 'TODAY_ONLY_RESCUE_PREDEADLINE'
         and incoming.get('operational_date_jst') == '2026-10-06'
-        and incoming.get('stage') == 'PREDEADLINE'
-        and incoming.get('daily_runtime') is None
         and incoming.get('CANONICAL_MORNING_PROMOTED') is False
         and incoming.get('RESEARCH_ELIGIBLE_AS_MORNING') is False
         and all(isinstance(row.get('today_rescue'), dict) for row in incoming.get('races', [])),
