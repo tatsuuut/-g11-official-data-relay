@@ -7,10 +7,17 @@ on:
     paths:
       - .github/workflows/g11-wild4-shadow-lock-only.yml
   workflow_call:
+    inputs:
+      lineage_readback_date:
+        description: Read-only promotion readback of existing 2026-10-07 lineage
+        type: string
+        required: false
+        default: ""
 
 permissions:
   actions: read
   contents: read
+  id-token: write
 
 concurrency:
   group: g11-wild4-prospective-shadow-lock
@@ -35,13 +42,18 @@ jobs:
         env:
           UPSTREAM_RUN_TITLE: ${{ github.event.workflow_run.display_title }}
           REQUESTED_DAY: ${{ github.event.inputs.operational_date }}
+          LINEAGE_READBACK_DATE: ${{ inputs.lineage_readback_date }}
         run: |
           python3 - <<'PY'
           import os, re
           from datetime import datetime
           from zoneinfo import ZoneInfo
           title=os.environ.get('UPSTREAM_RUN_TITLE','')
-          if os.environ['GITHUB_EVENT_NAME'] in {'push','schedule'}:
+          readback=os.environ.get('LINEAGE_READBACK_DATE','')
+          if readback:
+              if readback!='2026-10-07': raise SystemExit('READBACK_DATE_NOT_AUTHORIZED')
+              day=readback
+          elif os.environ['GITHUB_EVENT_NAME'] in {'push','schedule'}:
               day=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()
           elif os.environ['GITHUB_EVENT_NAME']=='workflow_dispatch':
               day=os.environ.get('REQUESTED_DAY','')
@@ -55,7 +67,7 @@ jobs:
                   day=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()
               else:
                   raise SystemExit('UPSTREAM_RUN_TITLE_MISMATCH')
-          if day!=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat():
+          if not readback and day!=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat():
               raise SystemExit('NON_CURRENT_OPERATIONAL_DATE')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
@@ -361,7 +373,7 @@ jobs:
           print('WILD4_MATCHING_UNEXPIRED='+str(len(due)))
           PY
       - name: Verify frozen WILD4 inference runtime
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         working-directory: .g11-private
         run: |
           python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
@@ -374,7 +386,7 @@ jobs:
           print('WILD4_RUNTIME_READY=PASS MODEL_SHA256='+binding['MODEL_SHA256'])
           PYREADY
       - name: Lock future races before deadline without any production write
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         working-directory: .g11-private
@@ -451,7 +463,7 @@ jobs:
           print('WILD4_PRODUCTION_MUTATED=false')
           PY
       - name: Read back frozen holdout evidence without retraining
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         working-directory: .g11-private
         run: |
           set -euo pipefail
@@ -533,7 +545,7 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Checkout pinned official settlement source
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -542,7 +554,7 @@ jobs:
           path: .g11-settlement
           persist-credentials: false
       - name: Settle only immutable locks from verified final NIGHT
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
@@ -578,7 +590,7 @@ jobs:
               output.write('new='+str(new)+'\n')
           PY
       - name: Encrypt immutable future locks
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -590,7 +602,7 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
@@ -598,3 +610,78 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+
+      - name: Checkout read-only WILD4 public projection adapter
+        if: steps.decrypted.outputs.canonical_ready == 'true' && github.ref == 'refs/heads/main'
+        id: public-source
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 591a5fdadec235c6bc7b8b0b67ae912877339bc7
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-public-projection
+          persist-credentials: false
+      - name: Project saved WILD4 locks and official settlements without source mutation
+        if: steps.public-source.outcome == 'success'
+        id: public-projection
+        continue-on-error: true
+        working-directory: .g11-public-projection
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          LINEAGE_READBACK_DATE: ${{ inputs.lineage_readback_date }}
+        run: |
+          set -euo pipefail
+          if [ ! -s "${RUNNER_TEMP}/g11-wild4-future-locks/batch-manifest.json" ] || [ ! -s "${RUNNER_TEMP}/wild4-verified-odds-day.json" ]; then
+            echo 'GORIPAN_PUBLIC_PROJECTION=WAITING_CANONICAL_LOCK'
+            exit 0
+          fi
+          if [ -n "${LINEAGE_READBACK_DATE}" ]; then
+            python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1
+          fi
+          python3 -m g11.wild_pack.v1.goripan_public_projection_v1 \
+            --ledger "${RUNNER_TEMP}/g11-wild4-future-locks" \
+            --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json" \
+            --operational-date "${OPERATIONAL_DATE}" \
+            --output "${RUNNER_TEMP}/goripan-public-projection.json"
+          echo 'ready=true' >> "${GITHUB_OUTPUT}"
+      - name: Deliver WILD4 public projection and verify exact Site GET readback
+        if: steps.public-projection.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,urllib.parse,urllib.request
+          base='https://g11-race-lab.higatatsunori2.chatgpt.site'
+          raw=(pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-public-projection.json').read_bytes()
+          projection=json.loads(raw)
+          audience='g11-race-lab'
+          url=os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']
+          request=urllib.request.Request(url+('&' if '?' in url else '?')+'audience='+audience,
+              headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+          with urllib.request.urlopen(request,timeout=30) as response:
+              token=json.load(response)['value']
+          request=urllib.request.Request(base+'/api/g11-wild4-projection',data=raw,method='POST',headers={
+              'Authorization':'Bearer '+token,'Content-Type':'application/json',
+              'X-G11-Feed-Sha256':hashlib.sha256(raw).hexdigest()})
+          with urllib.request.urlopen(request,timeout=45) as response:
+              saved=json.load(response)
+          if saved.get('status')!='PASS': raise SystemExit('GORIPAN_DELIVERY_READBACK')
+          query=urllib.parse.urlencode({'view':'v53-final','date':os.environ['OPERATIONAL_DATE']})
+          with urllib.request.urlopen(base+'/api/g11-feed?'+query,timeout=45) as response:
+              data=response.read();expected=response.headers['x-g11-feed-sha256']
+          if hashlib.sha256(data).hexdigest()!=expected: raise SystemExit('SITE_GET_SHA')
+          feed=json.loads(data)
+          if feed.get('goripan',{}).get('status')!='VERIFIED_CANONICAL_PROJECTION': raise SystemExit('SITE_PROJECTION_STATUS')
+          races={r['key']:r for r in feed['races']}
+          for lock in projection['races']:
+              actual=races[lock['race_key']].get('wild_pack',{}).get('wild4',{}).get('goripan')
+              if actual!=lock: raise SystemExit('SITE_LOCK_READBACK_MISMATCH')
+          print('GORIPAN_SITE_GET_READBACK=PASS')
+          print('GORIPAN_SAVED_LOCKS='+str(len(projection['races'])))
+          print('GORIPAN_ABSTAIN='+str(sum(r['abstain'] for r in projection['races'])))
+          print('GORIPAN_BET_COUNTS='+json.dumps(sorted({r['bet_count'] for r in projection['races']})))
+          print('GORIPAN_SOURCE_LOCK_MUTATION=0')
+          print('GORIPAN_AUTOMATIC_CANDIDATE_PROMOTION=false')
+          PY
