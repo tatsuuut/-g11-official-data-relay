@@ -652,7 +652,7 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         run: |
           python3 - <<'PY'
-          import hashlib,json,os,pathlib,urllib.parse,urllib.request
+          import hashlib,json,os,pathlib,subprocess,sys,urllib.parse,urllib.request
           base='https://g11-race-lab.higatatsunori2.chatgpt.site'
           raw=(pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-public-projection.json').read_bytes()
           projection=json.loads(raw)
@@ -662,15 +662,23 @@ jobs:
               headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
           with urllib.request.urlopen(request,timeout=30) as response:
               token=json.load(response)['value']
-          request=urllib.request.Request(base+'/api/g11-wild4-projection',data=raw,method='POST',headers={
-              'Authorization':'Bearer '+token,'Content-Type':'application/json',
-              'X-G11-Feed-Sha256':hashlib.sha256(raw).hexdigest()})
-          with urllib.request.urlopen(request,timeout=45) as response:
-              saved=json.load(response)
-          if saved.get('status')!='PASS': raise SystemExit('GORIPAN_DELIVERY_READBACK')
+          # Use the existing Site transport's curl path; keep the bearer off argv.
+          output=pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-delivery-response.json'
+          request_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-public-projection.json'
+          headers='Authorization: Bearer '+token+'\nContent-Type: application/json\nX-G11-Feed-Sha256: '+hashlib.sha256(raw).hexdigest()+'\n'
+          sent=subprocess.run(['curl','--silent','--show-error','--max-time','45','-X','POST',
+              base+'/api/g11-wild4-projection','--header','@-','--data-binary','@'+str(request_path),
+              '--output',str(output),'--write-out','%{http_code}'],input=headers,capture_output=True,text=True)
+          if sent.returncode: raise SystemExit('GORIPAN_DELIVERY_TRANSPORT_FAILED')
+          try: saved=json.loads(output.read_bytes())
+          except ValueError: raise SystemExit('GORIPAN_DELIVERY_HTTP_'+sent.stdout+'_NON_JSON')
+          if saved.get('status')!='PASS': raise SystemExit('GORIPAN_DELIVERY_HTTP_'+sent.stdout+':'+str(saved.get('error')))
           query=urllib.parse.urlencode({'view':'v53-final','date':os.environ['OPERATIONAL_DATE']})
-          with urllib.request.urlopen(base+'/api/g11-feed?'+query,timeout=45) as response:
-              data=response.read();expected=response.headers['x-g11-feed-sha256']
+          sys.path.insert(0,'scripts')
+          import hot_delta_transport_v1 as hot
+          pathlib.Path('.relay-output').mkdir(exist_ok=True)
+          feed,readback_headers,data=hot.fetch(base+'/api/g11-feed?'+query)
+          expected=readback_headers['x-g11-feed-sha256']
           if hashlib.sha256(data).hexdigest()!=expected: raise SystemExit('SITE_GET_SHA')
           feed=json.loads(data)
           if feed.get('goripan',{}).get('status')!='VERIFIED_CANONICAL_PROJECTION': raise SystemExit('SITE_PROJECTION_STATUS')
