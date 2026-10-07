@@ -40,6 +40,7 @@ on:
 permissions:
   actions: read
   contents: read
+  id-token: write
 
 concurrency:
   group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
@@ -278,7 +279,7 @@ jobs:
           git push origin HEAD:g11-runtime
 
   wild4-prospective:
-    name: WILD4 prospective SHADOW observation
+    name: Goripan WILD4 prospective observation
     if: >-
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
@@ -295,5 +296,8 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@538868ba95cd4bb439ccd4c6fd98fe2a4a01a73d
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@579fb2f6046584bfaea1ea32aafaf1b39a23b5a9
+    with:
+      lineage_readback_date: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[goripan-promotion]') && '2026-10-07' || '' }}
     secrets: inherit
+
