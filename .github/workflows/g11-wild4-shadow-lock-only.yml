@@ -42,11 +42,12 @@ jobs:
         env:
           UPSTREAM_RUN_TITLE: ${{ github.event.workflow_run.display_title }}
           REQUESTED_DAY: ${{ github.event.inputs.operational_date }}
+          REQUESTED_MODE: ${{ github.event.inputs.mode }}
           LINEAGE_READBACK_DATE: ${{ inputs.lineage_readback_date }}
         run: |
           python3 - <<'PY'
           import os, re
-          from datetime import datetime
+          from datetime import datetime, timedelta
           from zoneinfo import ZoneInfo
           title=os.environ.get('UPSTREAM_RUN_TITLE','')
           readback=os.environ.get('LINEAGE_READBACK_DATE','')
@@ -67,10 +68,18 @@ jobs:
                   day=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()
               else:
                   raise SystemExit('UPSTREAM_RUN_TITLE_MISMATCH')
-          if not readback and day!=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat():
+          now_jst=datetime.now(ZoneInfo('Asia/Tokyo'))
+          # Match the normal NIGHT lane's previous-day window before 02:00 JST.
+          # This exception is settlement-only; expired predictions are never generated.
+          night_rollover=(not readback and os.environ['GITHUB_EVENT_NAME']=='workflow_dispatch'
+              and os.environ.get('REQUESTED_MODE','')=='wild4-settle'
+              and now_jst.hour<2
+              and day==(now_jst.date()-timedelta(days=1)).isoformat())
+          if not readback and day!=now_jst.date().isoformat() and not night_rollover:
               raise SystemExit('NON_CURRENT_OPERATIONAL_DATE')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
+              output.write('night_rollover='+str(night_rollover).lower()+'\n')
               output.write('artifact_name=g11-wild4-'+day.replace('-','')+'-future-oos-locks-encrypted\n')
           print('WILD4_SHADOW_OPERATIONAL_DATE='+day)
           PY
@@ -386,7 +395,7 @@ jobs:
           print('WILD4_RUNTIME_READY=PASS MODEL_SHA256='+binding['MODEL_SHA256'])
           PYREADY
       - name: Lock future races before deadline without any production write
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
+        if: inputs.lineage_readback_date == '' && steps.day.outputs.night_rollover != 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         working-directory: .g11-private
@@ -463,7 +472,7 @@ jobs:
           print('WILD4_PRODUCTION_MUTATED=false')
           PY
       - name: Read back frozen holdout evidence without retraining
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
+        if: inputs.lineage_readback_date == '' && steps.day.outputs.night_rollover != 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         working-directory: .g11-private
         run: |
           set -euo pipefail
