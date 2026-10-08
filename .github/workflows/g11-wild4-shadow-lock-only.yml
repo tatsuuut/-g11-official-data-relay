@@ -174,7 +174,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 13ce9fc06d9796f54e52a45dfb0ee811d6e4fa39
+          ref: df56ee73d365c023f5c01b4d248bff51a5dcf4bb
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -618,7 +618,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: d076eac2f1fb210a3ea2f9956902dcbd4279799d
+          ref: 52cdf5a11bcfa8e229961dafb55f6eee9ebf6e2b
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
