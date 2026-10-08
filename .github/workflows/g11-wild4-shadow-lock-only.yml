@@ -618,7 +618,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 591a5fdadec235c6bc7b8b0b67ae912877339bc7
+          ref: d076eac2f1fb210a3ea2f9956902dcbd4279799d
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -643,6 +643,8 @@ jobs:
             --ledger "${RUNNER_TEMP}/g11-wild4-future-locks" \
             --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json" \
             --operational-date "${OPERATIONAL_DATE}" \
+            --store "${GITHUB_WORKSPACE}/${{ steps.decrypted.outputs.store }}" \
+            --candidate-root "${RUNNER_TEMP}/g11-wild4-candidate" \
             --output "${RUNNER_TEMP}/goripan-public-projection.json"
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
       - name: Deliver WILD4 public projection and verify exact Site GET readback
