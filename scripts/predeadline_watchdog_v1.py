@@ -95,6 +95,37 @@ def morning_watchdog_decision(feed: dict, runs: list[dict], now: datetime) -> st
     return "DISPATCH_MORNING"
 
 
+def morning_predeadline_handoff_decision(feed: dict, runs: list[dict], jobs_for_run,
+                                        now: datetime) -> str:
+    """Seed the existing self-chain from the already scheduled morning watchdog."""
+    if now.utcoffset() != timedelta(hours=9) or not 6 <= now.hour < 8:
+        return "OUTSIDE_HANDOFF_WINDOW"
+    day = now.date().isoformat()
+    authority = feed.get("daily_runtime")
+    canonical = feed.get("canonical_authorities")
+    p3 = canonical.get("growth_p3") if isinstance(canonical, dict) else None
+    if (not isinstance(authority, dict) or authority.get("immutable") is not True
+            or authority.get("operational_date_jst") != day
+            or not isinstance(p3, dict) or p3.get("app_readback_status") != "PASS"):
+        return "MORNING_NOT_VERIFIED"
+    try:
+        _last_deadline(feed, day)
+        first = min(datetime.fromisoformat(row["deadline_jst"]) for row in feed["races"])
+    except (KeyError, TypeError, ValueError):
+        return "MORNING_NOT_VERIFIED"
+    if now >= first:
+        return "FIRST_DEADLINE_REACHED"
+    # Reuse the current active-run and six-minute checkpoint guards. The
+    # private critical lane retains ownership of per-race timing and locks.
+    # Do not spend the three-minute supervisor budget reading yesterday's
+    # completed jobs. Keep every active run, including a rollover run.
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    since = start.isoformat().replace("+00:00", "Z")
+    current = [run for run in runs if run.get("status") in ACTIVE
+               or str(run.get("created_at", since)) >= since]
+    return decide(current, jobs_for_run, now, day)
+
+
 def recover_morning(now: datetime, token: str, repository: str, origin: str) -> None:
     day = now.date().isoformat()
     base = f"https://api.github.com/repos/{repository}/actions/workflows/g11-free-runner.yml"
@@ -112,6 +143,21 @@ def recover_morning(now: datetime, token: str, repository: str, origin: str) -> 
         if decision == "DISPATCH_MORNING":
             _post(base + "/dispatches", token,
                   {"ref": "main", "inputs": {"phase": "morning", "operational_date": day}})
+    elif decision in {"MORNING_ALREADY_PUBLISHED", "OUTSIDE_MORNING_WINDOW"}:
+        def jobs(run_id):
+            return _get(f"https://api.github.com/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100", token)["jobs"]
+        handoff = morning_predeadline_handoff_decision(feed, runs, jobs, now)
+        if handoff in {"NO_CRITICAL_RUN", "STALE_CRITICAL"}:
+            # Re-read both bindings immediately before the single POST.
+            # Never retry a POST after an ambiguous network response.
+            feed = _get(f"{origin}/api/g11-feed?date={day}")
+            runs = _get(base + "/runs?per_page=100", token)["workflow_runs"]
+            handoff = morning_predeadline_handoff_decision(feed, runs, jobs, now)
+            if handoff in {"NO_CRITICAL_RUN", "STALE_CRITICAL"}:
+                _post(base + "/dispatches", token,
+                      {"ref": "main", "inputs": {"phase": "predeadline", "operational_date": day}})
+                handoff = "DISPATCH_ACCEPTED reason=" + handoff
+        print("G11_MORNING_PREDEADLINE_HANDOFF=" + handoff)
     print("G11_MORNING_WATCHDOG=" + decision)
 
 

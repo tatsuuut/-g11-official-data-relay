@@ -6,7 +6,8 @@ from urllib.error import HTTPError
 from unittest import mock
 
 from predeadline_watchdog_v1 import (_last_deadline, decide, main,
-    runner_retry_decision, morning_watchdog_decision, RUNNER_NOT_ACQUIRED)
+    runner_retry_decision, morning_watchdog_decision,
+    morning_predeadline_handoff_decision, RUNNER_NOT_ACQUIRED)
 
 DAY = "2026-10-01"
 NOW = datetime.fromisoformat("2026-10-01T18:20:00+09:00")
@@ -114,6 +115,156 @@ class WatchdogTests(unittest.TestCase):
             self.assertIn("/dispatches", post.call_args.args[0].full_url)
 
 
+class MorningPredeadlineHandoffTests(unittest.TestCase):
+    """No runtime execution: all reads and dispatches are isolated test doubles."""
+    def setUp(self):
+        self.now = datetime.fromisoformat("2026-10-11T06:31:47+09:00")
+        self.feed = {
+            "operational_date_jst": "2026-10-11", "stage": "MORNING", "status": "PASS",
+            "daily_runtime": {"immutable": True, "operational_date_jst": "2026-10-11"},
+            "counts": {"races": 1},
+            "canonical_authorities": {"growth_p3": {"status": "LOCKED", "app_readback_status": "PASS"}},
+            "races": [{"deadline_jst": "2026-10-11T08:35:00+09:00"}],
+        }
+
+    def decision(self, runs=None, jobs=None, at=None):
+        return morning_predeadline_handoff_decision(
+            self.feed, runs or [], lambda _: jobs or [], at or self.now)
+
+    def exercise(self, feeds=None, run_reads=None, post_error=None, at=None):
+        import copy
+        feeds = list(feeds or [self.feed, self.feed])
+        run_reads = list(run_reads or [[], []])
+        original = copy.deepcopy(feeds)
+        def get(url, token=None):
+            if "/api/g11-feed?date=" in url:
+                return feeds.pop(0)
+            if "/jobs?" in url:
+                return {"jobs": []}
+            return {"workflow_runs": run_reads.pop(0)}
+        with mock.patch.dict("os.environ", {
+            "GH_TOKEN": "test", "GITHUB_REPOSITORY": "tatsuuut/-g11-official-data-relay",
+            "G11_APP_ORIGIN": "https://example.invalid", "GITHUB_EVENT_NAME": "schedule"
+        }), mock.patch("predeadline_watchdog_v1._get", side_effect=get), \
+             mock.patch("predeadline_watchdog_v1._post", side_effect=post_error) as post:
+            if post_error:
+                with self.assertRaises(type(post_error)):
+                    main(at or self.now)
+            else:
+                main(at or self.now)
+            calls = post.call_args_list
+        self.assertEqual(self.feed, original[0])
+        return calls
+
+    def test_observed_0631_gap_seeds_existing_predeadline_once(self):
+        self.assertEqual(self.decision(), "NO_CRITICAL_RUN")
+        calls = self.exercise()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].args, (
+            "https://api.github.com/repos/tatsuuut/-g11-official-data-relay/actions/workflows/g11-free-runner.yml/dispatches",
+            "test", {"ref": "main", "inputs": {"phase": "predeadline", "operational_date": "2026-10-11"}}))
+
+    def test_handoff_window_preserves_morning_cutoff_and_night(self):
+        for at in ("05:59:59", "08:00:00", "23:34:00"):
+            with self.subTest(at=at):
+                self.assertEqual(self.decision(at=datetime.fromisoformat("2026-10-11T"+at+"+09:00")), "OUTSIDE_HANDOFF_WINDOW")
+        for at in ("06:00:00", "07:35:00", "07:59:59"):
+            with self.subTest(at=at):
+                now = datetime.fromisoformat("2026-10-11T"+at+"+09:00")
+                self.assertEqual(self.decision(at=now), "NO_CRITICAL_RUN")
+                self.assertEqual(len(self.exercise(at=now)), 1)
+        self.assertEqual(self.decision(at=datetime.fromisoformat("2026-10-11T06:31:47+00:00")), "OUTSIDE_HANDOFF_WINDOW")
+
+    def test_every_active_state_suppresses_duplicate(self):
+        for status in ("queued", "in_progress", "requested", "waiting", "pending"):
+            with self.subTest(status=status):
+                self.assertEqual(self.decision(runs=[{"status": status}]), "ACTIVE_CAPTURE")
+                self.assertEqual(self.exercise(run_reads=[[{"status": status}]]), [])
+
+    def test_recheck_observes_parallel_chain_and_does_not_post(self):
+        self.assertEqual(self.exercise(run_reads=[[], [{"status": "pending"}]]), [])
+
+    def test_previous_day_history_does_not_consume_watchdog_budget(self):
+        jobs = mock.Mock(side_effect=AssertionError("historical jobs must not be fetched"))
+        runs = [{"id": i, "status": "completed", "created_at": "2026-10-10T10:00:00Z"}
+                for i in range(100)]
+        self.assertEqual(morning_predeadline_handoff_decision(self.feed, runs, jobs, self.now), "NO_CRITICAL_RUN")
+        jobs.assert_not_called()
+        runs.append({"id": 101, "status": "pending", "created_at": "2026-10-10T10:00:00Z"})
+        self.assertEqual(morning_predeadline_handoff_decision(self.feed, runs, jobs, self.now), "ACTIVE_CAPTURE")
+
+    def test_second_watchdog_run_is_idempotent_with_pending_chain(self):
+        self.assertEqual(len(self.exercise()), 1)
+        self.assertEqual(self.exercise(run_reads=[[{"status": "pending"}]]), [])
+
+    def test_recent_checkpoint_defers_and_stale_checkpoint_recovers(self):
+        runs = [{"id": 1, "status": "completed"}]
+        def jobs(at):
+            return [{"steps": [{"name": "Save early encrypted critical checkpoint",
+                                "conclusion": "success", "completed_at": at}]}]
+        self.assertEqual(self.decision(runs, jobs("2026-10-10T21:25:47Z")), "RECENT_CRITICAL")
+        self.assertEqual(self.decision(runs, jobs("2026-10-10T21:25:46Z")), "STALE_CRITICAL")
+        self.assertEqual(self.decision(runs, jobs("2026-10-09T21:31:00Z")), "NO_CRITICAL_RUN")
+
+    def test_wrong_date_or_missing_authority_is_not_accepted(self):
+        import copy
+        original = copy.deepcopy(self.feed)
+        for mutate in (
+            lambda f: f.update(operational_date_jst="2026-10-10"),
+            lambda f: f.update(stage="NIGHT"),
+            lambda f: f.update(status="FAIL"),
+            lambda f: f.update(daily_runtime=None),
+            lambda f: f["daily_runtime"].update(immutable=False),
+            lambda f: f["daily_runtime"].update(operational_date_jst="2026-10-10"),
+            lambda f: f.update(canonical_authorities=None),
+            lambda f: f["canonical_authorities"]["growth_p3"].update(status="UNLOCKED"),
+            lambda f: f["canonical_authorities"]["growth_p3"].update(app_readback_status="FAIL"),
+            lambda f: f["counts"].update(races=2),
+            lambda f: f.update(races=[]),
+            lambda f: f["races"][0].update(deadline_jst="2026-10-10T08:35:00+09:00"),
+            lambda f: f["races"][0].update(deadline_jst="2026-10-11T08:35:00+00:00"),
+            lambda f: f["races"][0].update(deadline_jst="invalid"),
+        ):
+            self.feed = copy.deepcopy(original)
+            mutate(self.feed)
+            self.assertEqual(self.decision(), "MORNING_NOT_VERIFIED")
+
+    def test_first_deadline_is_exclusive(self):
+        self.feed["races"][0]["deadline_jst"] = self.now.isoformat()
+        self.assertEqual(self.decision(), "FIRST_DEADLINE_REACHED")
+        self.assertEqual(self.exercise(), [])
+
+    def test_recheck_feed_change_prevents_dispatch(self):
+        import copy
+        changed = copy.deepcopy(self.feed)
+        changed["stage"] = "NIGHT"
+        self.assertEqual(self.exercise(feeds=[self.feed, changed]), [])
+
+    def test_ambiguous_post_failure_is_never_retried(self):
+        self.assertEqual(len(self.exercise(post_error=TimeoutError("dispatch response unavailable"))), 1)
+
+    def test_transport_access_failure_never_dispatches(self):
+        for code in (403, 429):
+            with mock.patch.dict("os.environ", {
+                "GH_TOKEN": "test", "GITHUB_REPOSITORY": "tatsuuut/-g11-official-data-relay",
+                "G11_APP_ORIGIN": "https://example.invalid", "GITHUB_EVENT_NAME": "schedule"
+            }), mock.patch("predeadline_watchdog_v1._get", side_effect=HTTPError("url", code, "blocked", {}, None)), \
+                 mock.patch("predeadline_watchdog_v1._post") as post:
+                with self.assertRaises(HTTPError):
+                    main(self.now)
+                post.assert_not_called()
+
+    def test_absent_morning_uses_original_recovery_not_predeadline(self):
+        with mock.patch.dict("os.environ", {
+            "GH_TOKEN": "test", "GITHUB_REPOSITORY": "tatsuuut/-g11-official-data-relay",
+            "G11_APP_ORIGIN": "https://example.invalid", "GITHUB_EVENT_NAME": "schedule"
+        }), mock.patch("predeadline_watchdog_v1._get", side_effect=[{}, {"workflow_runs": []}, {"workflow_runs": []}]), \
+             mock.patch("predeadline_watchdog_v1._post") as post:
+            main(self.now)
+            self.assertEqual(post.call_count, 1)
+            self.assertEqual(post.call_args.args[2]["inputs"]["phase"], "morning")
+
+
 class SiteTransportTests(unittest.TestCase):
     def test_site_uses_existing_hash_verified_readback(self):
         import predeadline_watchdog_v1 as watchdog
@@ -142,3 +293,4 @@ class SiteTransportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
