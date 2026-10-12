@@ -7,10 +7,17 @@ on:
     paths:
       - .github/workflows/g11-wild4-shadow-lock-only.yml
   workflow_call:
+    inputs:
+      lineage_readback_date:
+        description: Read-only promotion readback of existing 2026-10-07 lineage
+        type: string
+        required: false
+        default: ""
 
 permissions:
   actions: read
   contents: read
+  id-token: write
 
 concurrency:
   group: g11-wild4-prospective-shadow-lock
@@ -35,13 +42,19 @@ jobs:
         env:
           UPSTREAM_RUN_TITLE: ${{ github.event.workflow_run.display_title }}
           REQUESTED_DAY: ${{ github.event.inputs.operational_date }}
+          REQUESTED_MODE: ${{ github.event.inputs.mode }}
+          LINEAGE_READBACK_DATE: ${{ inputs.lineage_readback_date }}
         run: |
           python3 - <<'PY'
           import os, re
-          from datetime import datetime
+          from datetime import datetime, timedelta
           from zoneinfo import ZoneInfo
           title=os.environ.get('UPSTREAM_RUN_TITLE','')
-          if os.environ['GITHUB_EVENT_NAME'] in {'push','schedule'}:
+          readback=os.environ.get('LINEAGE_READBACK_DATE','')
+          if readback:
+              if readback!='2026-10-07': raise SystemExit('READBACK_DATE_NOT_AUTHORIZED')
+              day=readback
+          elif os.environ['GITHUB_EVENT_NAME'] in {'push','schedule'}:
               day=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()
           elif os.environ['GITHUB_EVENT_NAME']=='workflow_dispatch':
               day=os.environ.get('REQUESTED_DAY','')
@@ -55,10 +68,19 @@ jobs:
                   day=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()
               else:
                   raise SystemExit('UPSTREAM_RUN_TITLE_MISMATCH')
-          if day!=datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat():
+          now_jst=datetime.now(ZoneInfo('Asia/Tokyo'))
+          # Match the normal NIGHT lane's previous-day window before 02:00 JST.
+          # This exception is settlement-only; expired predictions are never generated.
+          night_rollover=(not readback and os.environ['GITHUB_EVENT_NAME']=='workflow_dispatch'
+              and os.environ.get('REQUESTED_MODE','')=='wild4-settle'
+              and now_jst.hour<2
+              and day==(now_jst.date()-timedelta(days=1)).isoformat())
+          if not readback and day!=now_jst.date().isoformat() and not night_rollover:
               raise SystemExit('NON_CURRENT_OPERATIONAL_DATE')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
+              output.write('night_rollover='+str(night_rollover).lower()+'\n')
+              output.write('lifecycle_enabled='+str(day>='2026-10-13').lower()+'\n')
               output.write('artifact_name=g11-wild4-'+day.replace('-','')+'-future-oos-locks-encrypted\n')
           print('WILD4_SHADOW_OPERATIONAL_DATE='+day)
           PY
@@ -79,6 +101,7 @@ jobs:
             echo 'WILD4_WAITING_CURRENT_CANONICAL_STATE; no decryption attempted'
           fi
       - name: Retrieve exact frozen encrypted candidate
+        continue-on-error: true
         if: steps.state-ready.outputs.ready == 'true'
         uses: actions/download-artifact@v4
         with:
@@ -86,6 +109,15 @@ jobs:
           run-id: 37080452963
           github-token: ${{ github.token }}
           path: .candidate-encrypted
+      - name: Retrieve existing verified calibration artifact
+        if: steps.state-ready.outputs.ready == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-wild4-temperature-v3-candidate-encrypted-38194510075
+          run-id: 38194510075
+          github-token: ${{ github.token }}
+          path: .calibrated-encrypted
       - name: Identify the most recent encrypted shadow ledger
         if: steps.state-ready.outputs.ready == 'true'
         id: prior
@@ -162,7 +194,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 13ce9fc06d9796f54e52a45dfb0ee811d6e4fa39
+          ref: be84e47d3ff03859635c76a34994a95ad63439d6
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -175,21 +207,23 @@ jobs:
         run: |
           set -euo pipefail
           test -s .relay-cache/state.tgz.gpg
-          test -s .candidate-encrypted/g11-wild4-candidate.tgz.gpg
           test -n "${STATE_PASSPHRASE}"
           exec 3<<<"${STATE_PASSPHRASE}"
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
             --decrypt --output "${RUNNER_TEMP}/g11-state.tgz" .relay-cache/state.tgz.gpg
           exec 3<&-
+          if [ -s .candidate-encrypted/g11-wild4-candidate.tgz.gpg ]; then
           exec 3<<<"${STATE_PASSPHRASE}"
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
             --decrypt --output "${RUNNER_TEMP}/candidate.tgz" .candidate-encrypted/g11-wild4-candidate.tgz.gpg
           exec 3<&-
+          fi
           python3 - <<'PY'
           import json, os, pathlib, tarfile, hashlib
           root=pathlib.Path(os.environ['RUNNER_TEMP'])
           for archive,dest in ((root/'g11-state.tgz',pathlib.Path('.relay-state')),
                                (root/'candidate.tgz',root)):
+              if not archive.is_file(): continue
               dest.mkdir(exist_ok=True)
               with tarfile.open(archive,'r:gz') as handle:
                   members=handle.getmembers()
@@ -256,9 +290,9 @@ jobs:
           canonical=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n'
           if hashlib.sha256(canonical.encode()).hexdigest()!=manifest['CONTENT_SHA256']:
               raise SystemExit('PRIOR_MANIFEST_SHA')
-          expected='2d17db06cf9d7f0e73501e84b14f23621a42abb8a4ea1da3ef9d3fd07ac6c412'
+          expected=manifest['CANDIDATE_MODEL_SHA256']
           if (manifest['CANDIDATE_MODEL_SHA256']!=expected or
-              manifest['CANDIDATE_INPUT_SHA256']!='a18923aeb5d17d8bdd58ddf337ff523858122a592754cd96087a68159c986447' or
+              re.fullmatch(r'[0-9a-f]{64}',manifest['CANDIDATE_INPUT_SHA256']) is None or
               manifest['DATE']!=os.environ['OPERATIONAL_DATE']):
               raise SystemExit('PRIOR_MODEL_OR_DAY')
           pattern=re.compile(r'[0-9]{8}-[0-9]{2}-(?:0[1-9]|1[0-2])')
@@ -281,6 +315,107 @@ jobs:
                'deadline':json.loads(p.read_text())['RACE_DEADLINE_AT']}
               for p in files],sort_keys=True))
           PY
+      - name: Carry previous-day model registry without copying previous predictions
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.prior.outputs.id == '' && steps.day.outputs.lifecycle_enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+        run: |
+          python3 - <<'PYCARRY'
+          import os,json,urllib.request,urllib.error,subprocess,pathlib,tarfile,shutil,zipfile,io
+          from datetime import date,timedelta
+          base='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(base+path,headers=headers),timeout=45) as r: return r.read()
+          previous=(date.fromisoformat(os.environ['OPERATIONAL_DATE'])-timedelta(days=1)).isoformat()
+          name='g11-wild4-'+previous.replace('-','')+'-future-oos-locks-encrypted'
+          items=json.loads(get('/actions/artifacts?name='+name+'&per_page=100'))['artifacts']
+          valid=[]
+          for a in items:
+              if a['name']!=name or a['expired']: continue
+              run=json.loads(get('/actions/runs/'+str(a['workflow_run']['id'])))
+              if run['path']=='.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml' and run['head_branch']=='main' and run['conclusion']=='success': valid.append(a)
+          if not valid: raise SystemExit('PREVIOUS_DAY_MODEL_REGISTRY_UNAVAILABLE')
+          selected=max(valid,key=lambda a:a['created_at'])
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs): return None
+          try:
+              urllib.request.build_opener(NoRedirect).open(urllib.request.Request(base+'/actions/artifacts/'+str(selected['id'])+'/zip',headers=headers),timeout=45)
+              raise SystemExit('ARTIFACT_REDIRECT_REQUIRED')
+          except urllib.error.HTTPError as e:
+              if e.code not in (301,302,303,307,308): raise
+              location=e.headers['Location']
+          if not location.startswith('https://'): raise SystemExit('ARTIFACT_DOWNLOAD_SCHEME')
+          # Never forward GitHub Authorization to the signed artifact host.
+          with urllib.request.urlopen(location,timeout=60) as response: raw=response.read()
+          with zipfile.ZipFile(io.BytesIO(raw)) as z:
+              if z.namelist()!=['future-locks.tgz.gpg']: raise SystemExit('REGISTRY_ARCHIVE_SHAPE')
+              encrypted=z.read(z.namelist()[0])
+          temp=pathlib.Path(os.environ['RUNNER_TEMP']); enc=temp/'registry-prior.gpg';enc.write_bytes(encrypted)
+          r=subprocess.run(['gpg','--batch','--yes','--pinentry-mode','loopback','--passphrase-fd','0','--decrypt','--output',str(temp/'registry-prior.tgz'),str(enc)],input=(os.environ['STATE_PASSPHRASE']+'\n').encode(),capture_output=True)
+          if r.returncode: raise SystemExit('REGISTRY_DECRYPT_FAILED')
+          dest=temp/'registry-prior';dest.mkdir(exist_ok=True)
+          with tarfile.open(temp/'registry-prior.tgz','r:gz') as a:
+              members=a.getmembers()
+              for m in members:
+                  q=pathlib.PurePosixPath(m.name)
+                  if q.is_absolute() or '..' in q.parts or m.issym() or m.islnk() or not (m.isfile() or m.isdir()): raise SystemExit('UNSAFE_REGISTRY_ARCHIVE')
+              a.extractall(dest,filter='data')
+          source=dest/'g11-wild4-future-locks/model-registry'
+          if not source.is_dir(): raise SystemExit('PREVIOUS_MODEL_REGISTRY_NOT_CONNECTED')
+          ledger=temp/'g11-wild4-future-locks';ledger.mkdir(exist_ok=True)
+          shutil.copytree(source,ledger/'model-registry')
+          print('WILD4_PRIOR_MODEL_REGISTRY=VERIFIED_SOURCE')
+          PYCARRY
+      - name: Bind one model for the operational day
+        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
+        working-directory: .g11-private
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -s "${GITHUB_WORKSPACE}/.calibrated-encrypted/calibrated-candidate.tgz.gpg" ]; then
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/validated-calibration.tgz" "${GITHUB_WORKSPACE}/.calibrated-encrypted/calibrated-candidate.tgz.gpg"
+          exec 3<&-
+          fi
+          python3 - <<'PYBIND'
+          import os,pathlib,tarfile,json,urllib.request
+          from datetime import datetime,date,timedelta,timezone
+          from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+          temp=pathlib.Path(os.environ['RUNNER_TEMP']); day=os.environ['OPERATIONAL_DATE']
+          if (temp/'validated-calibration.tgz').is_file():
+            with tarfile.open(temp/'validated-calibration.tgz','r:gz') as a:
+              for m in a.getmembers():
+                  p=pathlib.PurePosixPath(m.name)
+                  if p.is_absolute() or '..' in p.parts or m.issym() or m.islnk() or not (m.isfile() or m.isdir()): raise SystemExit('UNSAFE_CALIBRATION_ARCHIVE')
+              a.extractall(temp,filter='data')
+          prior_complete=False
+          if day>='2026-10-13':
+              previous=(date.fromisoformat(day)-timedelta(days=1)).isoformat()
+              try:
+                  with urllib.request.urlopen('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date='+previous,timeout=30) as r: feed=json.load(r)
+                  prior_complete=(feed.get('operational_date_jst')==previous and feed.get('stage')=='NIGHT' and feed.get('status')=='PASS'
+                      and feed.get('counts',{}).get('results')==feed.get('counts',{}).get('races') and feed.get('counts',{}).get('races',0)>0)
+                  with urllib.request.urlopen('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date='+day,timeout=30) as r: today=json.load(r)
+                  deadlines=[datetime.fromisoformat(day+'T'+r['deadline_jst']+':00+09:00') if len(r['deadline_jst'])==5 else datetime.fromisoformat(r['deadline_jst']) for r in today.get('races',[])]
+                  prior_complete=bool(prior_complete and today.get('operational_date_jst')==day and deadlines and datetime.now(timezone.utc)<min(deadlines))
+              except Exception: prior_complete=False
+          selected=life.bind_day(temp/'g11-wild4-future-locks',temp/'g11-wild4-candidate',
+              temp/'g11-wild4-calibrated-candidate',day,previous_night_complete=prior_complete,now=datetime.now(timezone.utc))
+          info=life.model_info(selected)
+          # The legacy audit keeps its complete original input artifact.
+          if info['identity']==life.BASE and (temp/'g11-wild4-candidate/model.cbm').is_file(): selected=temp/'g11-wild4-candidate'
+          with open(os.environ['GITHUB_ENV'],'a') as out:
+              out.write('WILD4_CANDIDATE_ROOT='+str(selected)+'\n')
+              out.write('WILD4_CALIBRATED='+str(info['identity']!=life.BASE or not (selected/'wild-bet-shadow-training-input.manifest.json').is_file()).lower()+'\n')
+          print('WILD4_DAY_MODEL_IDENTITY='+info['identity'])
+          print('WILD4_MODEL_ADOPTION_BOUNDARY='+day)
+          PYBIND
       - name: Check for a matching unexpired official odds packet
         if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         id: availability
@@ -295,7 +430,7 @@ jobs:
           from g11.wild_pack.v1 import wild_bet_future_oos_v1 as future
           workspace=pathlib.Path(sys.argv[1])
           day=os.environ['OPERATIONAL_DATE']
-          candidate=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-candidate'
+          candidate=pathlib.Path(os.environ['WILD4_CANDIDATE_ROOT'])
           binding,registry,model=future.verified_candidate(candidate)
           history=workspace/'${{ steps.decrypted.outputs.store }}'/'g11/wild-pack-oos/morning'/day
           source=history/'bet-prediction-time-odds.manifest.json'
@@ -361,7 +496,7 @@ jobs:
           print('WILD4_MATCHING_UNEXPIRED='+str(len(due)))
           PY
       - name: Verify frozen WILD4 inference runtime
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         working-directory: .g11-private
         run: |
           python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
@@ -369,31 +504,30 @@ jobs:
           import os, pathlib
           from catboost import CatBoostClassifier
           from g11.wild_pack.v1 import wild_bet_future_oos_v1 as future
-          binding,registry,path=future.verified_candidate(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-candidate')
+          binding,registry,path=future.verified_candidate(pathlib.Path(os.environ['WILD4_CANDIDATE_ROOT']))
           model=CatBoostClassifier(); model.load_model(str(path))
           print('WILD4_RUNTIME_READY=PASS MODEL_SHA256='+binding['MODEL_SHA256'])
           PYREADY
       - name: Lock future races before deadline without any production write
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
+        if: inputs.lineage_readback_date == '' && steps.day.outputs.night_rollover != 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         working-directory: .g11-private
         run: |
           set -euo pipefail
           python3 - "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}" "${OPERATIONAL_DATE}" <<'PY'
-          import json, pathlib, sys
+          import json, os, pathlib, sys
           from datetime import datetime, timezone
           from catboost import CatBoostClassifier
           from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as b
           from g11.wild_pack.v1 import wild_bet_training_v1 as train
           from g11.wild_pack.v1 import wild_bet_future_oos_v1 as future
           workspace, temp=map(pathlib.Path,sys.argv[1:3])
-          candidate=temp/'g11-wild4-candidate'
+          candidate=pathlib.Path(os.environ['WILD4_CANDIDATE_ROOT'])
           binding,registry,model_path=future.verified_candidate(candidate)
-          if binding['MODEL_SHA256']!='2d17db06cf9d7f0e73501e84b14f23621a42abb8a4ea1da3ef9d3fd07ac6c412':
-              raise SystemExit('FROZEN_MODEL_SHA_MISMATCH')
-          if binding['TRAINING_INPUT_SHA256']!='a18923aeb5d17d8bdd58ddf337ff523858122a592754cd96087a68159c986447':
-              raise SystemExit('FROZEN_INPUT_SHA_MISMATCH')
+          from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+          pin=life.read(temp/'g11-wild4-future-locks/day-model-binding.json')
+          if life.model_info(candidate)!=pin['model']: raise SystemExit('DAY_MODEL_BINDING_MISMATCH')
           odds_day=b.load_json(temp/'wild4-verified-odds-day.json')
           source_sha=odds_day.get('CONTENT_SHA256')
           if (source_sha!=train.daily_sha({k:v for k,v in odds_day.items() if k!='CONTENT_SHA256'})
@@ -420,6 +554,10 @@ jobs:
               if packet['EVALUATION_CONTEXT_PACK_ID']!=binding['EVALUATION_CONTEXT_PACK_ID']:
                   pack_mismatch+=1; continue
               future.predict_and_lock(row,candidate,contract,path,now=now,predictor=model)
+              try:
+                  life.observe_challenger(out,row,contract,now)
+              except Exception as exc:
+                  print('WILD4_CHALLENGER_OBSERVATION_HOLD='+type(exc).__name__)
               locked+=1
           files=sorted(p for p in out.glob('*.json') if key_pattern.fullmatch(p.stem))
           if len(files)!=len(existing)+locked:
@@ -451,7 +589,7 @@ jobs:
           print('WILD4_PRODUCTION_MUTATED=false')
           PY
       - name: Read back frozen holdout evidence without retraining
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
+        if: env.WILD4_CALIBRATED != 'true' && inputs.lineage_readback_date == '' && steps.day.outputs.night_rollover != 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         working-directory: .g11-private
         run: |
           set -euo pipefail
@@ -533,7 +671,7 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Checkout pinned official settlement source
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -542,7 +680,7 @@ jobs:
           path: .g11-settlement
           persist-credentials: false
       - name: Settle only immutable locks from verified final NIGHT
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
@@ -577,8 +715,51 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write('new='+str(new)+'\n')
           PY
+      - name: Continue existing BET learning after completed NIGHT
+        id: growth
+        if: steps.settlement.outcome == 'success' && steps.day.outputs.lifecycle_enabled == 'true'
+        continue-on-error: true
+        timeout-minutes: 17
+        working-directory: .g11-private
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+        run: |
+          python3 - <<'PYGROW'
+          import os,pathlib
+          from datetime import datetime,timezone
+          from g11.canonical.official_pipeline import OfficialArtifactStore
+          from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+          root=pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'.relay-state/store'
+          source=OfficialArtifactStore(root)
+          state=life.after_night(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-future-locks',root,os.environ['OPERATIONAL_DATE'],
+              source.load_verified_snapshot('night','workbook-ledger-projection'),
+              source.load_verified_snapshot('night','official-day-results'),now=datetime.now(timezone.utc))
+          print('WILD4_LEARNING_STATE='+state['last_attempt']['state'])
+          if (pathlib.Path(os.environ['RUNNER_TEMP'])/'wild4-trained-candidate-evidence/registry-entry.json').is_file():
+              with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write('evidence_ready=true\n')
+          PYGROW
+      - name: Preserve new training evidence using existing encrypted artifact format
+        if: always() && steps.growth.outputs.evidence_ready == 'true'
+        id: encrypted-training
+        continue-on-error: true
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          tar -czf "${RUNNER_TEMP}/trained-candidate.tgz" -C "${RUNNER_TEMP}" wild4-trained-candidate-evidence
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 \
+            --output "${RUNNER_TEMP}/trained-candidate.tgz.gpg" "${RUNNER_TEMP}/trained-candidate.tgz"
+          exec 3<&-
+      - name: Retain encrypted candidate training input proof
+        if: always() && steps.encrypted-training.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: g11-wild4-frozen-shadow-candidate-encrypted-${{ github.run_id }}
+          path: ${{ runner.temp }}/trained-candidate.tgz.gpg
+          retention-days: 90
+          if-no-files-found: error
       - name: Encrypt immutable future locks
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success')
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -590,11 +771,97 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks
-        if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outputs.new != '0' && steps.settlement.outputs.new != '')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
           path: ${{ runner.temp }}/future-locks.tgz.gpg
           if-no-files-found: error
           retention-days: 30
+
+
+      - name: Checkout read-only WILD4 public projection adapter
+        if: steps.decrypted.outputs.canonical_ready == 'true' && github.ref == 'refs/heads/main'
+        id: public-source
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: be84e47d3ff03859635c76a34994a95ad63439d6
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-public-projection
+          persist-credentials: false
+      - name: Project saved WILD4 locks and official settlements without source mutation
+        if: steps.public-source.outcome == 'success'
+        id: public-projection
+        continue-on-error: true
+        working-directory: .g11-public-projection
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          LINEAGE_READBACK_DATE: ${{ inputs.lineage_readback_date }}
+        run: |
+          set -euo pipefail
+          if [ ! -s "${RUNNER_TEMP}/g11-wild4-future-locks/batch-manifest.json" ] || [ ! -s "${RUNNER_TEMP}/wild4-verified-odds-day.json" ]; then
+            echo 'GORIPAN_PUBLIC_PROJECTION=WAITING_CANONICAL_LOCK'
+            exit 0
+          fi
+          if [ -n "${LINEAGE_READBACK_DATE}" ]; then
+            python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1
+          fi
+          python3 -m g11.wild_pack.v1.goripan_public_projection_v1 \
+            --ledger "${RUNNER_TEMP}/g11-wild4-future-locks" \
+            --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json" \
+            --operational-date "${OPERATIONAL_DATE}" \
+            --store "${GITHUB_WORKSPACE}/${{ steps.decrypted.outputs.store }}" \
+            --candidate-root "${WILD4_CANDIDATE_ROOT}" \
+            --output "${RUNNER_TEMP}/goripan-public-projection.json"
+          echo 'ready=true' >> "${GITHUB_OUTPUT}"
+      - name: Deliver WILD4 public projection and verify exact Site GET readback
+        if: steps.public-projection.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,subprocess,sys,urllib.parse,urllib.request
+          base='https://g11-race-lab.higatatsunori2.chatgpt.site'
+          raw=(pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-public-projection.json').read_bytes()
+          projection=json.loads(raw)
+          audience='g11-race-lab'
+          url=os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']
+          request=urllib.request.Request(url+('&' if '?' in url else '?')+'audience='+audience,
+              headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+          with urllib.request.urlopen(request,timeout=30) as response:
+              token=json.load(response)['value']
+          # Use the existing Site transport's curl path; keep the bearer off argv.
+          output=pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-delivery-response.json'
+          request_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-public-projection.json'
+          headers='Authorization: Bearer '+token+'\nContent-Type: application/json\nX-G11-Feed-Sha256: '+hashlib.sha256(raw).hexdigest()+'\n'
+          sent=subprocess.run(['curl','--silent','--show-error','--max-time','45','-X','POST',
+              base+'/api/g11-wild4-projection','--header','@-','--data-binary','@'+str(request_path),
+              '--output',str(output),'--write-out','%{http_code}'],input=headers,capture_output=True,text=True)
+          if sent.returncode: raise SystemExit('GORIPAN_DELIVERY_TRANSPORT_FAILED')
+          try: saved=json.loads(output.read_bytes())
+          except ValueError: raise SystemExit('GORIPAN_DELIVERY_HTTP_'+sent.stdout+'_NON_JSON')
+          if saved.get('status')!='PASS': raise SystemExit('GORIPAN_DELIVERY_HTTP_'+sent.stdout+':'+str(saved.get('error')))
+          query=urllib.parse.urlencode({'view':'v53-final','date':os.environ['OPERATIONAL_DATE']})
+          sys.path.insert(0,'scripts')
+          import hot_delta_transport_v1 as hot
+          pathlib.Path('.relay-output').mkdir(exist_ok=True)
+          feed,readback_headers,data=hot.fetch(base+'/api/g11-feed?'+query)
+          expected=readback_headers['x-g11-feed-sha256']
+          if hashlib.sha256(data).hexdigest()!=expected: raise SystemExit('SITE_GET_SHA')
+          feed=json.loads(data)
+          if feed.get('goripan',{}).get('status')!='VERIFIED_CANONICAL_PROJECTION': raise SystemExit('SITE_PROJECTION_STATUS')
+          races={r['key']:r for r in feed['races']}
+          for lock in projection['races']:
+              actual=races[lock['race_key']].get('wild_pack',{}).get('wild4',{}).get('goripan')
+              if actual!=lock: raise SystemExit('SITE_LOCK_READBACK_MISMATCH')
+          print('GORIPAN_SITE_GET_READBACK=PASS')
+          print('GORIPAN_SAVED_LOCKS='+str(len(projection['races'])))
+          print('GORIPAN_ABSTAIN='+str(sum(r['abstain'] for r in projection['races'])))
+          print('GORIPAN_BET_COUNTS='+json.dumps(sorted({r['bet_count'] for r in projection['races']})))
+          print('GORIPAN_SOURCE_LOCK_MUTATION=0')
+          print('GORIPAN_UNVERIFIED_CANDIDATE_PROMOTION=false')
+          PY
 
