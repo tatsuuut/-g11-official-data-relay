@@ -271,7 +271,7 @@ def fetch(url: str) -> tuple[dict, dict[str, str], bytes]:
     return json.loads(body), headers, body
 
 
-def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
+def create_delta(incoming: dict, accepted: dict, base_sha: str, research_projection: dict | None = None) -> dict:
     day = incoming["operational_date_jst"]
     if day != accepted["operational_date_jst"] or incoming["stage"] not in ("PREDEADLINE", "NIGHT"):
         raise RuntimeError("HOT_DATE_OR_STAGE")
@@ -318,6 +318,10 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str) -> dict:
         top["daily_runtime"] = incoming["daily_runtime"]
     if incoming["stage"] == "NIGHT":
         top.update({key: incoming[key] for key in NIGHT_TOP if key in incoming})
+        # Optional shadow projection; immutable canonical feed/checkpoint bytes
+        # remain untouched. The normal transaction hashes cover this section.
+        if research_projection is not None:
+            top["deme_discovery"] = research_projection
     fingerprint = hash_bytes(compact({"stage": incoming["stage"], "day": day, "top": top, "races": changes}))
     changed = Counter(field for race in changes for field in race["CHANGED_FIELDS"])
     print("G11_HOT_DELTA_FIELD_COUNTS=" + json.dumps(changed, sort_keys=True))
@@ -573,3 +577,4 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
+
