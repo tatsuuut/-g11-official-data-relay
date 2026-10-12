@@ -194,7 +194,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: be84e47d3ff03859635c76a34994a95ad63439d6
+          ref: 836bdbbaf8401b0441baa037af3e6fc4c70c2ed5
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -384,7 +384,10 @@ jobs:
           exec 3<&-
           fi
           python3 - <<'PYBIND'
-          import os,pathlib,tarfile,json,urllib.request
+          import os,pathlib,tarfile,json,sys
+          sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'scripts'))
+          import hot_delta_transport_v1 as hot
+          pathlib.Path('.relay-output').mkdir(exist_ok=True)
           from datetime import datetime,date,timedelta,timezone
           from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
           temp=pathlib.Path(os.environ['RUNNER_TEMP']); day=os.environ['OPERATIONAL_DATE']
@@ -398,10 +401,10 @@ jobs:
           if day>='2026-10-13':
               previous=(date.fromisoformat(day)-timedelta(days=1)).isoformat()
               try:
-                  with urllib.request.urlopen('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date='+previous,timeout=30) as r: feed=json.load(r)
+                  feed,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date='+previous)
                   prior_complete=(feed.get('operational_date_jst')==previous and feed.get('stage')=='NIGHT' and feed.get('status')=='PASS'
                       and feed.get('counts',{}).get('results')==feed.get('counts',{}).get('races') and feed.get('counts',{}).get('races',0)>0)
-                  with urllib.request.urlopen('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date='+day,timeout=30) as r: today=json.load(r)
+                  today,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date='+day)
                   deadlines=[datetime.fromisoformat(day+'T'+r['deadline_jst']+':00+09:00') if len(r['deadline_jst'])==5 else datetime.fromisoformat(r['deadline_jst']) for r in today.get('races',[])]
                   prior_complete=bool(prior_complete and today.get('operational_date_jst')==day and deadlines and datetime.now(timezone.utc)<min(deadlines))
               except Exception: prior_complete=False
@@ -787,7 +790,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: be84e47d3ff03859635c76a34994a95ad63439d6
+          ref: 836bdbbaf8401b0441baa037af3e6fc4c70c2ed5
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -857,6 +860,8 @@ jobs:
           for lock in projection['races']:
               actual=races[lock['race_key']].get('wild_pack',{}).get('wild4',{}).get('goripan')
               if actual!=lock: raise SystemExit('SITE_LOCK_READBACK_MISMATCH')
+          if feed.get('goripan',{}).get('observation',{}).get('lifecycle') != projection.get('observation',{}).get('lifecycle'): raise SystemExit('SITE_LIFECYCLE_READBACK_MISMATCH')
+          print('GORIPAN_LIFECYCLE_READBACK='+json.dumps(projection.get('observation',{}).get('lifecycle'),sort_keys=True))
           print('GORIPAN_SITE_GET_READBACK=PASS')
           print('GORIPAN_SAVED_LOCKS='+str(len(projection['races'])))
           print('GORIPAN_ABSTAIN='+str(sum(r['abstain'] for r in projection['races'])))

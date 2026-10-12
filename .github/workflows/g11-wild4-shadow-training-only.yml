@@ -29,9 +29,15 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 76fa845117e4ea42d5f74b4d92b0e1a7edf1e6d1
+          ref: 836bdbbaf8401b0441baa037af3e6fc4c70c2ed5
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
+          persist-credentials: false
+      - name: Reuse existing public GET transport
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 538868ba95cd4bb439ccd4c6fd98fe2a4a01a73d
+          path: .g11-transport
           persist-credentials: false
       - name: Retrieve exact existing frozen encrypted artifact
         id: artifact
@@ -118,6 +124,8 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check --no-input catboost==1.2.8
       - name: Validate real artifact lifecycle without training or new predictions
         id: validation
+        env:
+          G11_TRANSPORT_ROOT: ${{ github.workspace }}/.g11-transport/scripts
         working-directory: .g11-private
         run: |
           set -euo pipefail
