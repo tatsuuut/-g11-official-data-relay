@@ -833,6 +833,31 @@ jobs:
               "WILD_BET_ELIGIBLE_RACES": bet_status["BET_ELIGIBLE_RACES"],
           }, sort_keys=True))
           PY
+      - name: Checkout pinned P3 shadow research consumer
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && steps.due.outputs.phase != 'same-day-rescue' && steps.critical.outputs.rescue != 'true' && hashFiles('.relay-output/feed.json') != ''
+        id: deme-source
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          ref: 502d99cb171dba89a47aa565dc0d0205dc8250fa
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-deme-research
+          persist-credentials: false
+          fetch-depth: 1
+          sparse-checkout: g11/canonical/deme_discovery.py
+          sparse-checkout-cone-mode: false
+      - name: Update P3 shadow discovery in retained research state
+        if: steps.deme-source.outcome == 'success'
+        continue-on-error: true
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          rm -f .relay-output/deme-discovery-public.json
+          timeout 120 python3 .g11-deme-research/g11/canonical/deme_discovery.py \
+            --store .relay-state/store --feed .relay-output/feed.json \
+            --projection-output .relay-output/deme-discovery-public.json
       - name: Encrypt changed state before persistence
         if: always() && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'dry-run'
         id: encrypt-state
