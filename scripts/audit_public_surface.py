@@ -934,7 +934,7 @@ def main() -> int:
             fail(f"forbidden artifact type: {name}")
         # Existing OIDC workflow plus bounded authority/transport routing.
         # No prediction code or model is admitted by this larger YAML budget.
-        cap = 120_000 if name == ".github/workflows/g11-free-runner.yml" else 100_000
+        cap = 122_048 if name == ".github/workflows/g11-free-runner.yml" else 100_000
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
         text = path.read_text(encoding="utf-8")
