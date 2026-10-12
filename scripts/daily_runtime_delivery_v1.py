@@ -74,6 +74,29 @@ def commit_request(manifest):
             **{k: manifest[k] for k in ("OPERATIONAL_DATE", "NIGHT_TRANSACTION_ID", "MANIFEST_SHA256", "SOURCE_NIGHT_SHA")}}
 
 
+def optional_deme_projection(day):
+    """Read only the bounded shadow output; a research failure cannot stop NIGHT."""
+    path = Path(".relay-output/deme-discovery-public.json")
+    if not path.is_file():
+        return None
+    try:
+        raw = path.read_bytes()
+        if len(raw) > 180_000:
+            raise ValueError("BUDGET")
+        value = json.loads(raw)
+        if (not isinstance(value, dict) or value.get("schema") != "G11_P3_DEME_DISCOVERY_V1"
+                or value.get("production_mutated") is not False
+                or not isinstance(value.get("available"), bool)
+                or not isinstance(value.get("counts"), dict)
+                or not isinstance(value.get("candidates"), list)
+                or str(value.get("discovery_through") or "") > day):
+            raise ValueError("CONTRACT")
+        return value
+    except (OSError, ValueError, UnicodeDecodeError):
+        print("G11_DEME_PUBLIC=HELD_INVALID_OPTIONAL_PROJECTION")
+        return None
+
+
 def send_night(state, day, feed, checkpoint, authority, implementation, origin, token):
     url = f"{origin}/api/g11-feed?date={day}"
     accepted, headers, _ = hot.fetch(url)
@@ -102,7 +125,7 @@ def send_night(state, day, feed, checkpoint, authority, implementation, origin, 
             manifest, chunks = plan["manifest"], plan["chunks"]
             require(headers["x-g11-source-feed-sha256"] == manifest["BASE_FEED_SHA"], "NIGHT_TRANSPORT_BASE_CHANGED")
         else:
-            delta = hot.create_delta(feed, accepted, headers["x-g11-source-feed-sha256"])
+            delta = hot.create_delta(feed, accepted, headers["x-g11-source-feed-sha256"], optional_deme_projection(day))
             manifest, chunks = hot.night_chunks(delta, feed, checkpoint)
             plan = {"checkpoint_sha256": checkpoint["checkpoint_sha256"], "manifest": manifest, "chunks": chunks}
             plan["plan_sha256"] = implementation.digest(implementation.canonical(plan))
@@ -116,6 +139,17 @@ def send_night(state, day, feed, checkpoint, authority, implementation, origin, 
     readback, next_headers, raw = hot.fetch(url)
     require(ack.get("payload_sha256") == next_headers.get("x-g11-source-feed-sha256"), "DAILY_SITE_COMMIT_READBACK_SHA")
     verify_night_readback(feed, readback, next_headers, checkpoint, authority)
+    # The saved immutable transaction plan, including optional research, is the
+    # retry authority. Research readback is diagnostic and never blocks NIGHT.
+    if plan_path.is_file():
+        try:
+            plan = implementation.json_file(plan_path)
+            parts = [c["TOP_LEVEL"].get("deme_discovery") for c in plan.get("chunks", [])
+                     if "deme_discovery" in c.get("TOP_LEVEL", {})]
+            if parts:
+                print("G11_DEME_SITE_READBACK=" + ("PASS" if all(hot.includes(readback.get("deme_discovery"), p) for p in parts) else "HELD"))
+        except (OSError, ValueError, KeyError):
+            print("G11_DEME_SITE_READBACK=HELD")
     return ack, next_headers, raw, manifest
 
 
