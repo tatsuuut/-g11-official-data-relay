@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 8db9fbd50f2f8faac40e5e955e84a44b2f5494f1
+          ref: 77b121212c64361e42b4e5fe0ffdeee166079c25
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -41,14 +41,22 @@ jobs:
           run-id: 37080452963
           github-token: ${{ github.token }}
           path: .candidate-encrypted
-      - name: Restore completed-day encrypted state read-only
+      - name: Retrieve exact already calibrated encrypted candidate
+        id: calibrated
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-wild4-temperature-v3-candidate-encrypted-38194510075
+          run-id: 38194510075
+          github-token: ${{ github.token }}
+          path: .calibrated-encrypted
+      - name: Read completed dates from existing current encrypted snapshot
         id: prior-state
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-2026-10-11-temperature-validation-no-exact-match
+          key: g11-state-v4-published-2026-10-12-38194421081
           restore-keys: |
-            g11-state-v4-published-2026-10-11-
+            g11-state-v4-published-2026-10-12-
       - name: Decrypt using existing authority inside runner only
         id: decrypt
         env:
@@ -65,6 +73,10 @@ jobs:
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
             --output "${RUNNER_TEMP}/candidate.tgz" .candidate-encrypted/g11-wild4-candidate.tgz.gpg
           exec 3<&-
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/completed-calibration.tgz" .calibrated-encrypted/calibrated-candidate.tgz.gpg
+          exec 3<&-
           if [ -s .relay-cache/state.tgz.gpg ]; then
             exec 3<<<"${STATE_PASSPHRASE}"
             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
@@ -74,7 +86,7 @@ jobs:
           python3 - <<'PY'
           import os,pathlib,tarfile
           root=pathlib.Path(os.environ['RUNNER_TEMP'])
-          for name,dest in [('candidate.tgz',root),('completed-state.tgz',root/'completed-state')]:
+          for name,dest in [('candidate.tgz',root),('completed-calibration.tgz',root),('completed-state.tgz',root/'completed-state')]:
               archive=root/name
               if not archive.exists(): continue
               dest.mkdir(exist_ok=True)
@@ -86,13 +98,14 @@ jobs:
                       assert not p.is_absolute() and '..' not in p.parts and not member.issym() and not member.islnk(),'UNSAFE_ARCHIVE'
                       assert member.isfile() or member.isdir(),'UNSAFE_MEMBER_TYPE'
                   handle.extractall(dest,filter='data')
+          (root/'g11-wild4-calibrated-candidate').rename(root/'g11-wild4-completed-calibration')
           PY
-          chmod -R a-w "${RUNNER_TEMP}/g11-wild4-candidate"
+          chmod -R a-w "${RUNNER_TEMP}/g11-wild4-candidate" "${RUNNER_TEMP}/g11-wild4-completed-calibration"
           if [ -d "${RUNNER_TEMP}/completed-state" ]; then chmod -R a-w "${RUNNER_TEMP}/completed-state"; fi
       - name: Install existing pinned evaluation backend
         id: backend
         run: python3 -m pip install --disable-pip-version-check --no-input catboost==1.2.8
-      - name: Validate frozen model with existing temperature V2
+      - name: Compare existing candidate on bounded saved OOS inputs
         id: validation
         working-directory: .g11-private
         run: |
@@ -100,28 +113,9 @@ jobs:
           python3 -m g11.wild_pack.v1.wild_bet_secure_validation_v3 \
             --source "${RUNNER_TEMP}/g11-wild4-candidate" \
             --state "${RUNNER_TEMP}/completed-state" \
+            --calibrated-source "${RUNNER_TEMP}/g11-wild4-completed-calibration" \
             --output "${RUNNER_TEMP}/g11-wild4-calibrated-candidate" \
             --safe-output "${RUNNER_TEMP}/safe-results"
-      - name: Preserve calibrated candidate using existing encrypted artifact convention
-        id: preserve
-        if: steps.validation.outcome == 'success'
-        env:
-          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          tar -czf "${RUNNER_TEMP}/calibrated-candidate.tgz" -C "${RUNNER_TEMP}" g11-wild4-calibrated-candidate
-          exec 3<<<"${STATE_PASSPHRASE}"
-          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 \
-            --output "${RUNNER_TEMP}/calibrated-candidate.tgz.gpg" "${RUNNER_TEMP}/calibrated-candidate.tgz"
-          exec 3<&-
-      - name: Preserve encrypted non-production candidate only
-        if: steps.preserve.outcome == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: g11-wild4-temperature-v3-candidate-encrypted-${{ github.run_id }}
-          path: ${{ runner.temp }}/calibrated-candidate.tgz.gpg
-          if-no-files-found: error
-          retention-days: 30
       - name: Write sanitized execution status
         if: always()
         env:
@@ -129,12 +123,11 @@ jobs:
           ARTIFACT_OUTCOME: ${{ steps.artifact.outcome }}
           DECRYPT_OUTCOME: ${{ steps.decrypt.outcome }}
           VALIDATION_OUTCOME: ${{ steps.validation.outcome }}
-          PRESERVE_OUTCOME: ${{ steps.preserve.outcome }}
         run: |
           python3 - <<'PY'
           import os,json,pathlib
           root=pathlib.Path(os.environ['RUNNER_TEMP'])/'safe-results';root.mkdir(exist_ok=True)
-          fields=['SOURCE_OUTCOME','ARTIFACT_OUTCOME','DECRYPT_OUTCOME','VALIDATION_OUTCOME','PRESERVE_OUTCOME']
+          fields=['SOURCE_OUTCOME','ARTIFACT_OUTCOME','DECRYPT_OUTCOME','VALIDATION_OUTCOME']
           result={k:os.environ.get(k,'unknown') for k in fields}
           result.update(RUN_ID=os.environ['GITHUB_RUN_ID'],SOURCE_COMMIT=os.environ['GITHUB_SHA'],
               PRODUCTION_MUTATED=False,PRODUCTION_ADOPTED=False,MODEL_WEIGHT_TRAINING=False)
