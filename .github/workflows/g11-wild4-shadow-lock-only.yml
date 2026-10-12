@@ -194,7 +194,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 1849ebb9edf56c1f998266a9b69bc4775eb96a84
+          ref: 928deb5e874e3001b2afa49e604b9a4908e9c90e
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -408,8 +408,22 @@ jobs:
                   deadlines=[datetime.fromisoformat(day+'T'+r['deadline_jst']+':00+09:00') if len(r['deadline_jst'])==5 else datetime.fromisoformat(r['deadline_jst']) for r in today.get('races',[])]
                   prior_complete=bool(prior_complete and today.get('operational_date_jst')==day and deadlines and datetime.now(timezone.utc)<min(deadlines))
               except Exception: prior_complete=False
+          generation_evidence=None
+          previous=(date.fromisoformat(day)-timedelta(days=1)).isoformat()
+          try:
+              ledger=temp/'g11-wild4-future-locks'
+              saved=life.read(life.state_path(ledger)) if life.state_path(ledger).is_file() else {}
+              active=saved.get('active',{}).get('identity',life.BASE)
+              generation=saved.get('generations',{}).get(active,{})
+              q=generation.get('qualification',{})
+              cached=(q.get('state')=='VERIFIED' and q.get('through')==previous and q.get('contract')==life.GENERATION_CONTRACT
+                  and (q.get('valid_races',0)<1000 or generation.get('first_adoption')))
+              if not cached:
+                  generation_evidence,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=goripan-generation&generation='+active+'&through='+previous)
+          except Exception:
+              print('WILD4_GENERATION_SOURCE=UNAVAILABLE_PROMOTION_HELD')
           selected=life.bind_day(temp/'g11-wild4-future-locks',temp/'g11-wild4-candidate',
-              temp/'g11-wild4-calibrated-candidate',day,previous_night_complete=prior_complete,now=datetime.now(timezone.utc))
+              temp/'g11-wild4-calibrated-candidate',day,previous_night_complete=prior_complete,now=datetime.now(timezone.utc),generation_evidence=generation_evidence)
           info=life.model_info(selected)
           # The legacy audit keeps its complete original input artifact.
           if info['identity']==life.BASE and (temp/'g11-wild4-candidate/model.cbm').is_file(): selected=temp/'g11-wild4-candidate'
@@ -417,6 +431,7 @@ jobs:
               out.write('WILD4_CANDIDATE_ROOT='+str(selected)+'\n')
               out.write('WILD4_CALIBRATED='+str(info['identity']!=life.BASE or not (selected/'wild-bet-shadow-training-input.manifest.json').is_file()).lower()+'\n')
           print('WILD4_DAY_MODEL_IDENTITY='+info['identity'])
+          print('WILD4_GENERATION_GATE='+life.public_status(temp/'g11-wild4-future-locks')['generation_gate']['status'])
           print('WILD4_MODEL_ADOPTION_BOUNDARY='+day)
           PYBIND
       - name: Check for a matching unexpired official odds packet
@@ -790,7 +805,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 1849ebb9edf56c1f998266a9b69bc4775eb96a84
+          ref: 928deb5e874e3001b2afa49e604b9a4908e9c90e
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -869,4 +884,5 @@ jobs:
           print('GORIPAN_SOURCE_LOCK_MUTATION=0')
           print('GORIPAN_UNVERIFIED_CANDIDATE_PROMOTION=false')
           PY
+
 
