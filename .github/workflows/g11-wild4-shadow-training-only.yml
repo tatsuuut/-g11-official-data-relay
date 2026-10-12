@@ -1,176 +1,154 @@
-name: G11 WILD4 isolated shadow candidate training
+name: G11 WILD4 isolated temperature candidate validation
+run-name: WILD4-temperature-V3-${{ github.sha }}
 
 on:
   push:
-    branches:
-      - codex/wild4-shadow-training-20261003
-    paths:
-      - .github/workflows/g11-wild4-shadow-training-only.yml
+    branches: [codex/wild4-temperature-v3-validation-20261012]
+    paths: [.github/workflows/g11-wild4-shadow-training-only.yml]
 
 permissions:
   actions: read
   contents: read
 
 concurrency:
-  group: g11-wild4-isolated-shadow-training
+  group: g11-wild4-temperature-v3-validation
   cancel-in-progress: false
 
 jobs:
-  train-shadow-only:
-    if: github.repository_id == '1367703708'
+  validate-frozen-model:
+    if: github.repository_id == '1367703708' && github.ref == 'refs/heads/codex/wild4-temperature-v3-validation-20261012'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 45
     env:
       PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
       TZ: Asia/Tokyo
-      CUTOFF_DATE: '2026-10-02'
     steps:
-      - name: Checkout isolated research branch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: Restore immutable encrypted canonical state from default branch
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .relay-cache/state.tgz.gpg
-          key: g11-state-v2-2026-10-03-isolated-shadow-no-exact-match
-          restore-keys: |
-            g11-state-v2-2026-10-03-
-      - name: Checkout private frozen candidate source
+      - name: Checkout exact private V2 validation candidate
+        id: source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 18425df1b2eace270c0314a88dc1fb2222988d69
+          ref: 8db9fbd50f2f8faac40e5e955e84a44b2f5494f1
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
-      - name: Checkout baseline research authority
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: tatsuuut/boat-brain-lab
-          ref: g11-runtime
-          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-          path: .g11-runtime
-          sparse-checkout: |
-            g11/wild-pack-oos
-          persist-credentials: false
-      - name: Decrypt state and verify date without exposing any record
-        env:
-          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -s .relay-cache/state.tgz.gpg
-          test -n "${STATE_PASSPHRASE}"
-          exec 3<<<"${STATE_PASSPHRASE}"
-          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-            --decrypt --output "${RUNNER_TEMP}/g11-state.tgz" .relay-cache/state.tgz.gpg
-          exec 3<&-
-          python3 - <<'PY'
-          import json, pathlib, tarfile
-          archive=pathlib.Path(__import__('os').environ['RUNNER_TEMP'])/'g11-state.tgz'
-          root=pathlib.Path('.relay-state')
-          root.mkdir()
-          with tarfile.open(archive,'r:gz') as handle:
-              members=handle.getmembers()
-              if not members:
-                  raise SystemExit('EMPTY_STATE')
-              for member in members:
-                  path=pathlib.PurePosixPath(member.name)
-                  if path.is_absolute() or '..' in path.parts or member.issym() or member.islnk():
-                      raise SystemExit('UNSAFE_STATE_ARCHIVE')
-              handle.extractall(root, filter='data')
-          state=json.loads((root/'relay-state.json').read_text())
-          if state.get('OPERATIONAL_DATE_JST') != '2026-10-03':
-              raise SystemExit('STATE_DATE_MISMATCH')
-          print('WILD4_ENCRYPTED_CANONICAL_READBACK=PASS')
-          PY
-      - name: Bind baseline and audit 10000 unique settled races
-        working-directory: .g11-private
-        run: |
-          set -euo pipefail
-          python3 - "${GITHUB_WORKSPACE}" <<'PY'
-          import pathlib, shutil, sys
-          from g11.wild_pack.v1 import bet_oos_collection_v1 as food
-          root=pathlib.Path(sys.argv[1])
-          history=root/'.relay-state/store/g11/wild-pack-oos/morning'
-          baseline=root/'.g11-runtime/g11/wild-pack-oos/morning/bootstrap'
-          if not baseline.is_dir():
-              raise SystemExit('BASELINE_MISSING')
-          target=history/'bootstrap'
-          if not target.exists():
-              shutil.copytree(baseline,target)
-          # A restored canonical checkpoint may carry a newer, independently
-          # verified baseline manifest. Never overwrite or mix its files with
-          # runtime-branch evidence; status() validates the accepted pair.
-          status=food.status(history)
-          if status['BET_ELIGIBLE_RACES']<10000 or status['FIRST_CURRENT_READY'] is not False:
-              raise SystemExit('ELIGIBLE_FOOD_GATE')
-          print('WILD4_ELIGIBLE_SETTLED_RACES='+str(status['BET_ELIGIBLE_RACES']))
-          print('WILD4_FOOD_GATE=PASS')
-          PY
-      - name: Install research-only pinned model backend after canonical restore
-        run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
-      - name: Freeze actual-data candidate without production or Site write
-        working-directory: .g11-private
-        run: |
-          set -euo pipefail
-          python3 - "${GITHUB_WORKSPACE}" <<'PY'
-          import pathlib,sys
-          from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as b
-          from g11.wild_pack.v1 import wild_bet_training_v1 as t
-          root=pathlib.Path(sys.argv[1])
-          manifest,baseline=t.verified_gzip(root/'.relay-state/store/g11/wild-pack-oos/morning/bootstrap/wild-bet-eligible-dataset.manifest.json',schema='G11_WILD_BET_ELIGIBLE_DATASET_MANIFEST_V1')
-          contract=b.load_json(pathlib.Path('g11/wild_pack/v1/BET_MODEL_CONTRACT_V1.json'))
-          print('WILD4_BASELINE_SCHEMA='+str(baseline.get('SCHEMA')))
-          print('WILD4_BASELINE_COUNT='+str(baseline.get('ELIGIBLE_RACES')))
-          print('WILD4_BASELINE_MANIFEST_COUNT='+str(manifest.get('ELIGIBLE_RACES')))
-          print('WILD4_BASELINE_CONTRACT_SHA='+str(baseline.get('CONTRACT_SHA256')))
-          print('WILD4_CURRENT_CONTRACT_SHA='+b.sha256_value(contract))
-          PY
-          python3 -m g11.wild_pack.v1.wild_bet_training_v1 \
-            --history-root "${GITHUB_WORKSPACE}/.relay-state/store/g11/wild-pack-oos/morning" \
-            --contract g11/wild_pack/v1/BET_MODEL_CONTRACT_V1.json \
-            --through-date "${CUTOFF_DATE}" \
-            --output-dir "${RUNNER_TEMP}/g11-wild4-candidate" --train-shadow
-      - name: Verify candidate identity and no production authority
-        working-directory: .g11-private
-        run: |
-          python3 - <<'PY'
-          import json, os, pathlib
-          from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as b
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-candidate'
-          registry=b.load_json(root/'registry-entry.json')
-          binding=b.load_json(root/'wild-bet-shadow-candidate-binding.json')
-          manifest=b.load_json(root/'wild-bet-shadow-training-input.manifest.json')
-          assert registry['REGISTRY_SHA256']==b.sha256_value({k:v for k,v in registry.items() if k!='REGISTRY_SHA256'})
-          assert registry['MODEL_SHA256']==b.file_sha256(root/'model.cbm')==binding['MODEL_SHA256']
-          assert registry['DATASET_SHA256']==binding['TRAINING_INPUT_SHA256']==manifest['CONTENT_SHA256']
-          assert registry['INITIAL_ELIGIBLE_RACES']>=10000
-          assert all(value is False for value in (registry['PRODUCTION_PROMOTION_ELIGIBLE'],registry['APP_PUBLISHED'],binding['PRODUCTION_PROMOTION_ELIGIBLE'],binding['APP_PUBLISHED']))
-          print('WILD4_CANDIDATE_READBACK=PASS')
-          print('WILD4_CANDIDATE_MODEL_SHA256='+registry['MODEL_SHA256'])
-          print('WILD4_CANDIDATE_INPUT_SHA256='+registry['DATASET_SHA256'])
-          print('WILD4_CANDIDATE_HOLDOUT_RACES='+str(registry['FINAL_HOLDOUT_RACES']))
-          PY
-      - name: Encrypt candidate evidence for private authorized recovery
-        if: success()
-        env:
-          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          tar -czf "${RUNNER_TEMP}/g11-wild4-candidate.tgz" -C "${RUNNER_TEMP}" g11-wild4-candidate
-          exec 3<<<"${STATE_PASSPHRASE}"
-          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-            --symmetric --cipher-algo AES256 \
-            --output "${RUNNER_TEMP}/g11-wild4-candidate.tgz.gpg" \
-            "${RUNNER_TEMP}/g11-wild4-candidate.tgz"
-          exec 3<&-
-          test -s "${RUNNER_TEMP}/g11-wild4-candidate.tgz.gpg"
-      - name: Preserve only encrypted candidate output
-        if: success()
-        uses: actions/upload-artifact@v4
+      - name: Retrieve exact existing frozen encrypted artifact
+        id: artifact
+        uses: actions/download-artifact@v4
         with:
           name: g11-wild4-frozen-shadow-candidate-encrypted
-          path: ${{ runner.temp }}/g11-wild4-candidate.tgz.gpg
+          run-id: 37080452963
+          github-token: ${{ github.token }}
+          path: .candidate-encrypted
+      - name: Restore completed-day encrypted state read-only
+        id: prior-state
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-2026-10-11-temperature-validation-no-exact-match
+          restore-keys: |
+            g11-state-v4-published-2026-10-11-
+      - name: Decrypt using existing authority inside runner only
+        id: decrypt
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${STATE_PASSPHRASE}"
+          python3 - <<'PY'
+          import hashlib,pathlib
+          p=pathlib.Path('.candidate-encrypted/g11-wild4-candidate.tgz.gpg')
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='8158a651d81796166ed528d355e65628f832d0bf77cc56fb7c209f1067a77ae6','ENCRYPTED_ARTIFACT_IDENTITY'
+          PY
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/candidate.tgz" .candidate-encrypted/g11-wild4-candidate.tgz.gpg
+          exec 3<&-
+          if [ -s .relay-cache/state.tgz.gpg ]; then
+            exec 3<<<"${STATE_PASSPHRASE}"
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+              --output "${RUNNER_TEMP}/completed-state.tgz" .relay-cache/state.tgz.gpg
+            exec 3<&-
+          fi
+          python3 - <<'PY'
+          import os,pathlib,tarfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          for name,dest in [('candidate.tgz',root),('completed-state.tgz',root/'completed-state')]:
+              archive=root/name
+              if not archive.exists(): continue
+              dest.mkdir(exist_ok=True)
+              with tarfile.open(archive,'r:gz') as handle:
+                  members=handle.getmembers()
+                  assert members,'EMPTY_ARCHIVE'
+                  for member in members:
+                      p=pathlib.PurePosixPath(member.name)
+                      assert not p.is_absolute() and '..' not in p.parts and not member.issym() and not member.islnk(),'UNSAFE_ARCHIVE'
+                      assert member.isfile() or member.isdir(),'UNSAFE_MEMBER_TYPE'
+                  handle.extractall(dest,filter='data')
+          PY
+          chmod -R a-w "${RUNNER_TEMP}/g11-wild4-candidate"
+          if [ -d "${RUNNER_TEMP}/completed-state" ]; then chmod -R a-w "${RUNNER_TEMP}/completed-state"; fi
+      - name: Install existing pinned evaluation backend
+        id: backend
+        run: python3 -m pip install --disable-pip-version-check --no-input catboost==1.2.8
+      - name: Validate frozen model with existing temperature V2
+        id: validation
+        working-directory: .g11-private
+        run: |
+          set -euo pipefail
+          python3 -m g11.wild_pack.v1.wild_bet_secure_validation_v3 \
+            --source "${RUNNER_TEMP}/g11-wild4-candidate" \
+            --state "${RUNNER_TEMP}/completed-state" \
+            --output "${RUNNER_TEMP}/g11-wild4-calibrated-candidate" \
+            --safe-output "${RUNNER_TEMP}/safe-results"
+      - name: Preserve calibrated candidate using existing encrypted artifact convention
+        id: preserve
+        if: steps.validation.outcome == 'success'
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          tar -czf "${RUNNER_TEMP}/calibrated-candidate.tgz" -C "${RUNNER_TEMP}" g11-wild4-calibrated-candidate
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 \
+            --output "${RUNNER_TEMP}/calibrated-candidate.tgz.gpg" "${RUNNER_TEMP}/calibrated-candidate.tgz"
+          exec 3<&-
+      - name: Preserve encrypted non-production candidate only
+        if: steps.preserve.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: g11-wild4-temperature-v3-candidate-encrypted-${{ github.run_id }}
+          path: ${{ runner.temp }}/calibrated-candidate.tgz.gpg
+          if-no-files-found: error
+          retention-days: 30
+      - name: Write sanitized execution status
+        if: always()
+        env:
+          SOURCE_OUTCOME: ${{ steps.source.outcome }}
+          ARTIFACT_OUTCOME: ${{ steps.artifact.outcome }}
+          DECRYPT_OUTCOME: ${{ steps.decrypt.outcome }}
+          VALIDATION_OUTCOME: ${{ steps.validation.outcome }}
+          PRESERVE_OUTCOME: ${{ steps.preserve.outcome }}
+        run: |
+          python3 - <<'PY'
+          import os,json,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'safe-results';root.mkdir(exist_ok=True)
+          fields=['SOURCE_OUTCOME','ARTIFACT_OUTCOME','DECRYPT_OUTCOME','VALIDATION_OUTCOME','PRESERVE_OUTCOME']
+          result={k:os.environ.get(k,'unknown') for k in fields}
+          result.update(RUN_ID=os.environ['GITHUB_RUN_ID'],SOURCE_COMMIT=os.environ['GITHUB_SHA'],
+              PRODUCTION_MUTATED=False,PRODUCTION_ADOPTED=False,MODEL_WEIGHT_TRAINING=False)
+          (root/'runtime-status.json').write_text(json.dumps(result,sort_keys=True,indent=2)+'\n')
+          PY
+      - name: Upload aggregate evidence and hashes only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g11-wild4-temperature-v3-validation-results-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/safe-results/safe-summary.json
+            ${{ runner.temp }}/safe-results/calibration-parameters.json
+            ${{ runner.temp }}/safe-results/runtime-status.json
+            ${{ runner.temp }}/safe-results/validation-failure.json
           if-no-files-found: error
           retention-days: 30
