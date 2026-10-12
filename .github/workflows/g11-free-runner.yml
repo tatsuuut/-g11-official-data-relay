@@ -845,6 +845,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: g11/canonical/deme_discovery.py
           sparse-checkout-cone-mode: false
+      # Optional receipt follows normal morning/live transport; candidate pushes remain NIGHT-only.
       - name: Update P3 shadow discovery in retained research state
         if: steps.deme-source.outcome == 'success'
         continue-on-error: true
