@@ -194,7 +194,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 928deb5e874e3001b2afa49e604b9a4908e9c90e
+          ref: 1490ec4e11095a3016842432f3b4b986a615d9f2
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -417,7 +417,10 @@ jobs:
               generation=saved.get('generations',{}).get(active,{})
               q=generation.get('qualification',{})
               cached=(q.get('state')=='VERIFIED' and q.get('through')==previous and q.get('contract')==life.GENERATION_CONTRACT
-                  and (q.get('valid_races',0)<1000 or generation.get('first_adoption')))
+                  and (q.get('valid_races',0)<1000 or generation.get('first_adoption'))
+                  and saved.get('specialty',{}).get('schema')==life.SPECIALTY_REVISION
+                  and saved.get('specialty',{}).get('through')==previous
+                  and not saved.get('specialty',{}).get('last_error'))
               if not cached:
                   generation_evidence,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=goripan-generation&generation='+active+'&through='+previous)
           except Exception:
@@ -805,7 +808,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 928deb5e874e3001b2afa49e604b9a4908e9c90e
+          ref: 1490ec4e11095a3016842432f3b4b986a615d9f2
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -884,5 +887,6 @@ jobs:
           print('GORIPAN_SOURCE_LOCK_MUTATION=0')
           print('GORIPAN_UNVERIFIED_CANDIDATE_PROMOTION=false')
           PY
+
 
 
