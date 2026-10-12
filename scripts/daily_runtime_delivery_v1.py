@@ -157,7 +157,7 @@ def send_morning(feed_path, feed, authority, origin, token):
     with tempfile.TemporaryDirectory() as directory:
         projected = Path(directory) / "morning.json"
         projected.write_bytes(feed_path.read_bytes())
-        hot.project_morning_base(projected)
+        hot.project_morning_base(projected, optional_deme_projection(feed["operational_date_jst"]))
         data = projected.read_bytes()
         response = Path(directory) / "response.json"
         result = subprocess.run(["curl", "--silent", "--show-error", "--max-time", "45",
@@ -210,7 +210,7 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
             elif phase == "MORNING":
                 ack, headers, raw = send_morning(feed_path, feed, authority, origin, token)
             elif phase == "PREDEADLINE":
-                hot.publish(feed_path, origin)
+                hot.publish(feed_path, origin, optional_deme_projection(day))
                 readback, headers, raw = hot.fetch(origin + "/api/g11-feed?date=" + day)
                 identity(readback, authority, "PREDEADLINE")
                 ack = {"payload_sha256": headers["x-g11-source-feed-sha256"]}
@@ -581,3 +581,4 @@ if __name__ == "__main__":
     parser.add_argument("--origin", required=True)
     args = parser.parse_args()
     deliver(args.state_root, args.feed, args.origin)
+
