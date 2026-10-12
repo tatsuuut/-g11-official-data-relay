@@ -184,6 +184,18 @@ class DailyDeliveryTests(unittest.TestCase):
         path.write_bytes(hot.compact(feed))
         hot.project_morning_base(path)
         self.assertEqual(json.loads(path.read_bytes())["daily_runtime"], feed["daily_runtime"])
+        baseline = json.loads(path.read_bytes())
+        receipt = {"schema": "G11_P3_DEME_DISCOVERY_V1", "available": True,
+                   "counts": {"discovery": 0, "validating": 0, "review": 0},
+                   "candidates": [], "production_mutated": False}
+        path.write_bytes(hot.compact(feed))
+        hot.project_morning_base(path, receipt)
+        projected = json.loads(path.read_bytes())
+        self.assertEqual(projected.pop("deme_discovery"), receipt)
+        self.assertEqual(projected, baseline)
+        path.write_bytes(hot.compact(feed))
+        hot.project_morning_base(path, {"oversized": "x" * 1_600_000})
+        self.assertEqual(json.loads(path.read_bytes()), baseline)
 
     def test_manifest_binds_full_canonical_checkpoint_sha(self):
         site = StagedSite(self.s)
@@ -380,3 +392,4 @@ class RescueTransportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
