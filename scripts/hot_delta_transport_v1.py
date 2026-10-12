@@ -229,7 +229,7 @@ def includes(actual: object, expected: object) -> bool:
     return actual == expected
 
 
-def project_morning_base(path: Path) -> None:
+def project_morning_base(path: Path, research_projection: dict | None = None) -> None:
     source = path.read_bytes()
     feed = json.loads(source)
     if feed.get("stage") != "MORNING" or not isinstance(feed.get("races"), list):
@@ -243,6 +243,12 @@ def project_morning_base(path: Path) -> None:
     # encrypted canonical state; only an identity of the source is published.
     base["hot_reference"] = {"schema": "G11_SITE_HOT_BASE_V1",
         "source_feed_sha256": hash_bytes(source), "status": "COLD_RESEARCH_RETAINED"}
+    if research_projection is not None:
+        enriched = {**base, "deme_discovery": research_projection}
+        if len(compact(enriched)) < min(BASE_BUDGET, 1_500_000):
+            base = enriched
+        else:
+            print("G11_DEME_PUBLIC=HELD_MORNING_BUDGET")
     data = compact(base)
     print("G11_HOT_BASE_BYTES=" + str(len(data)))
     if len(data) > BASE_BUDGET:
@@ -318,10 +324,10 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
         top["daily_runtime"] = incoming["daily_runtime"]
     if incoming["stage"] == "NIGHT":
         top.update({key: incoming[key] for key in NIGHT_TOP if key in incoming})
-        # Optional shadow projection; immutable canonical feed/checkpoint bytes
-        # remain untouched. The normal transaction hashes cover this section.
-        if research_projection is not None:
-            top["deme_discovery"] = research_projection
+    # Optional metadata from the retained research consumer. No race, BET or
+    # checkpoint bytes change; candidate pushes remain NIGHT-only on the Site.
+    if research_projection is not None:
+        top["deme_discovery"] = research_projection
     fingerprint = hash_bytes(compact({"stage": incoming["stage"], "day": day, "top": top, "races": changes}))
     changed = Counter(field for race in changes for field in race["CHANGED_FIELDS"])
     print("G11_HOT_DELTA_FIELD_COUNTS=" + json.dumps(changed, sort_keys=True))
@@ -481,14 +487,18 @@ def publish_night_transaction(delta: dict, incoming: dict, origin: str, token: s
     return result
 
 
-def publish(feed_path: Path, origin: str) -> None:
+def publish(feed_path: Path, origin: str, research_projection: dict | None = None) -> None:
     incoming = json.loads(feed_path.read_text(encoding="utf-8"))
     day = incoming["operational_date_jst"]
     url = f"{origin}/api/g11-feed?date={day}"
     accepted, headers, _ = fetch(url)
     base_sha = headers["x-g11-source-feed-sha256"]
-    delta = create_delta(incoming, accepted, base_sha)
+    delta = create_delta(incoming, accepted, base_sha, research_projection)
     data = compact(delta)
+    if research_projection is not None and len(data) > BUDGET and incoming["stage"] != "NIGHT":
+        print("G11_DEME_PUBLIC=HELD_PREDEADLINE_BUDGET")
+        delta = create_delta(incoming, accepted, base_sha)
+        data = compact(delta)
     print("G11_HOT_DELTA_BYTES=" + str(len(data)))
     print("G11_HOT_DELTA_RACES=" + str(len(delta["RACES"])))
     if len(data) > BUDGET and incoming["stage"] != "NIGHT":
@@ -577,4 +587,5 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
+
 
