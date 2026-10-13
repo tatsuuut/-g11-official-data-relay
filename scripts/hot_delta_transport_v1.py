@@ -328,6 +328,13 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
     # checkpoint bytes change; candidate pushes remain NIGHT-only on the Site.
     if research_projection is not None:
         top["deme_discovery"] = research_projection
+    if incoming["stage"] == "PREDEADLINE" and not changes:
+        # A research-only update must not advance production timestamps, source,
+        # daily authority, counts, or saved race fields. The Site admits this
+        # exact single-field shape under the existing authenticated CAS route.
+        top = ({"deme_discovery": research_projection}
+               if research_projection is not None and
+               research_projection != accepted.get("deme_discovery") else {})
     fingerprint = hash_bytes(compact({"stage": incoming["stage"], "day": day, "top": top, "races": changes}))
     changed = Counter(field for race in changes for field in race["CHANGED_FIELDS"])
     print("G11_HOT_DELTA_FIELD_COUNTS=" + json.dumps(changed, sort_keys=True))
@@ -503,7 +510,9 @@ def publish(feed_path: Path, origin: str, research_projection: dict | None = Non
     print("G11_HOT_DELTA_RACES=" + str(len(delta["RACES"])))
     if len(data) > BUDGET and incoming["stage"] != "NIGHT":
         raise RuntimeError("HOT_DELTA_OVER_BUDGET:" + str(len(data)))
-    if incoming["stage"] == "PREDEADLINE" and not delta["RACES"]:
+    research_only = (incoming["stage"] == "PREDEADLINE" and not delta["RACES"] and
+                     set(delta["TOP_LEVEL"]) == {"deme_discovery"})
+    if incoming["stage"] == "PREDEADLINE" and not delta["RACES"] and not research_only:
         print("G11_HOT_DELTA_NO_CHANGE=PASS")
         Path(".relay-output/hot-delta-accepted").write_text(base_sha + "\n")
         Path(os.environ["GITHUB_OUTPUT"]).open("a").write("feed_sha=" + base_sha + "\n")
@@ -554,6 +563,12 @@ def publish(feed_path: Path, origin: str, research_projection: dict | None = Non
     readback, next_headers, raw = fetch(url)
     if next_headers.get("x-g11-source-feed-sha256") != body.get("payload_sha256"):
         raise RuntimeError("HOT_DELTA_SOURCE_SHA")
+    if research_only:
+        protected = lambda feed: {k: v for k, v in feed.items()
+                                  if k not in {"deme_discovery", "transport"}}
+        if protected(readback) != protected(accepted):
+            raise RuntimeError("HOT_DELTA_RESEARCH_PRODUCTION_CHANGED")
+        print("G11_HOT_DELTA_RESEARCH_ONLY=PASS")
     for field, value in delta["TOP_LEVEL"].items():
         if field not in readback or not includes(readback[field], value):
             raise RuntimeError("HOT_DELTA_READBACK_TOP:" + field)
@@ -587,5 +602,6 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
+
 
 
