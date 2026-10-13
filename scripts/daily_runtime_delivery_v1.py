@@ -24,6 +24,7 @@ MAX_ATTEMPTS = 3
 N13_DAY = "2026-10-13"
 N13_FEED_SHA = "1fa0607c1ce74b41ccc829790fa1b04bac5cb6b074031413a110616a449ae8e6"
 N13_CHECKPOINT_SHA = "900da7bc8d5e7d2fefefecfe31c49222ea2a126e112e138900496539f4b21d68"
+N13_CHECKPOINT_FILE_SHA = "208e8a84c35444ecfbdfcd49bcd1ba2224e61ca0d33185ba1c9c521e9b7db7a3"
 N13_CREATED = "2026-10-14T02:20:52.268957+09:00"
 
 
@@ -32,9 +33,15 @@ def n13_transport_only():
 
 
 def check_saved_n13(implementation, state, feed_path):
-    checkpoint = implementation.read_checkpoint(state, N13_DAY)
-    require(checkpoint["checkpoint_sha256"] == N13_CHECKPOINT_SHA
+    root = implementation.day_root(state, N13_DAY)
+    # Historical transport is bound to the already verified revision bytes,
+    # not mutable current-day RAW pointers. Do not invoke NIGHT or settlement.
+    checkpoint_path = root / "night-checkpoint.json"
+    checkpoint = implementation.json_file(checkpoint_path)
+    require(hot.hash_bytes(checkpoint_path.read_bytes()) == N13_CHECKPOINT_FILE_SHA
+            and checkpoint["checkpoint_sha256"] == N13_CHECKPOINT_SHA
             and checkpoint["feed_sha256"] == N13_FEED_SHA
+            and hot.hash_bytes((root / "night-feed.json").read_bytes()) == N13_FEED_SHA
             and hot.hash_bytes(feed_path.read_bytes()) == N13_FEED_SHA,
             "N13_SAVED_CANONICAL_HASH")
     return checkpoint
@@ -295,12 +302,14 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     feed = implementation.json_file(feed_path)
     phase = feed["stage"]
     identity(feed, authority, phase)
-    implementation.verify_locks(state, day, "MORNING", exact=True)
-    implementation.verify_locks(state, day, "PREDEADLINE", exact=True)
+    if not n13_transport_only():
+        implementation.verify_locks(state, day, "MORNING", exact=True)
+        implementation.verify_locks(state, day, "PREDEADLINE", exact=True)
     token = os.environ["G11_SYNC_OIDC"]
     checkpoint = None
     if phase == "NIGHT":
-        checkpoint = implementation.read_checkpoint(state, day)
+        checkpoint = (check_saved_n13(implementation, state, feed_path) if n13_transport_only()
+                      else implementation.read_checkpoint(state, day))
         require(hot.hash_bytes(feed_path.read_bytes()) == checkpoint["feed_sha256"], "NIGHT_DELIVERY_CANONICAL_FEED_CHANGED")
     if n13_transport_only():
         require(day == N13_DAY and phase == "NIGHT", "N13_TRANSPORT_SCOPE")
@@ -310,10 +319,14 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     for attempt in range(attempts):
         # Integrity failures stop before network, including between retries.
         implementation.load(state, day)
-        implementation.verify_locks(state, day, "MORNING", exact=True)
-        implementation.verify_locks(state, day, "PREDEADLINE", exact=True)
+        if not n13_transport_only():
+            implementation.verify_locks(state, day, "MORNING", exact=True)
+            implementation.verify_locks(state, day, "PREDEADLINE", exact=True)
         if checkpoint:
-            implementation.read_checkpoint(state, day)
+            if n13_transport_only():
+                check_saved_n13(implementation, state, feed_path)
+            else:
+                implementation.read_checkpoint(state, day)
         try:
             if phase == "NIGHT":
                 ack, headers, raw, manifest = send_night(state, day, feed, checkpoint, authority, implementation, origin, token)
@@ -357,8 +370,9 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
                         "daily_operation_complete": "PASS"})
         # The immutable phase bindings, not a live research version or an
         # optional earlier delivery receipt, establish the previous phases.
-        for previous in ("MORNING", "PREDEADLINE"):
-            implementation.verify_locks(state, day, previous, exact=True)
+        if not n13_transport_only():
+            for previous in ("MORNING", "PREDEADLINE"):
+                implementation.verify_locks(state, day, previous, exact=True)
         receipt["completion_gate"] = {
             "DAILY_AUTHORITY_READBACK": "PASS", "MORNING_AUTHORITY_MATCH": "PASS",
             "PREDEADLINE_AUTHORITY_MATCH": "PASS", "NIGHT_AUTHORITY_MATCH": "PASS",

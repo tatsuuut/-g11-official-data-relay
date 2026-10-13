@@ -58,7 +58,7 @@ class SavedTransportTimestampTests(unittest.TestCase):
                 read_checkpoint=lambda *a: {"feed_sha256": hot.hash_bytes(feed.read_bytes())}, day_root=lambda *a: state)
             with patch.dict(os.environ, {"G11_N13T": "true", "G11_SYNC_OIDC": "mock"}), \
                  patch.object(delivery, "retained_module", return_value=implementation), \
-                 patch.object(delivery, "identity"), patch.object(delivery, "check_saved_n13"), \
+                 patch.object(delivery, "identity"), patch.object(delivery, "check_saved_n13", return_value={"feed_sha256": hot.hash_bytes(feed.read_bytes())}), \
                  patch.object(delivery, "saved_n13_plan"), \
                  patch.object(delivery, "send_night", side_effect=RuntimeError("NIGHT_TRANSACTION_REJECTED:HTTP409")) as send, \
                  patch.object(delivery.time, "sleep") as wait:
@@ -73,10 +73,30 @@ class SavedTransportTimestampTests(unittest.TestCase):
                 delivery.emit_saved_n13(Path("unused"), Path("unused"))
         with tempfile.TemporaryDirectory() as temp:
             p = Path(temp) / "feed.json"; p.write_text("tampered")
-            impl = SimpleNamespace(read_checkpoint=lambda *a: {"checkpoint_sha256": delivery.N13_CHECKPOINT_SHA,
-                "feed_sha256": delivery.N13_FEED_SHA})
+            (Path(temp) / "night-checkpoint.json").write_text("{}")
+            impl = SimpleNamespace(day_root=lambda *a: Path(temp), json_file=lambda p: json.loads(p.read_bytes()))
             with self.assertRaisesRegex(RuntimeError, "N13_SAVED_CANONICAL_HASH"):
                 delivery.check_saved_n13(impl, Path(temp), p)
+
+
+    def test_pinned_saved_revision_never_reads_current_day_raw(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            feed = root / "night-feed.json"; feed.write_bytes(b'{"saved":true}')
+            feed_sha = hot.hash_bytes(feed.read_bytes())
+            checkpoint = {"checkpoint_sha256": delivery.N13_CHECKPOINT_SHA, "feed_sha256": feed_sha}
+            cp = root / "night-checkpoint.json"; cp.write_text(json.dumps(checkpoint))
+            def forbidden(*a, **kw):
+                raise AssertionError("mutable current-day lookup")
+            impl = SimpleNamespace(day_root=lambda *a: root, json_file=lambda p: json.loads(p.read_bytes()),
+                                   read_checkpoint=forbidden, verify_locks=forbidden)
+            before = cp.read_bytes()
+            with patch.object(delivery, "N13_FEED_SHA", feed_sha), patch.object(delivery, "N13_CHECKPOINT_FILE_SHA", hot.hash_bytes(cp.read_bytes())):
+                self.assertEqual(delivery.check_saved_n13(impl, root, feed), checkpoint)
+                feed.write_bytes(b'{"saved":false}')
+                with self.assertRaisesRegex(RuntimeError, "N13_SAVED_CANONICAL_HASH"):
+                    delivery.check_saved_n13(impl, root, feed)
+            self.assertEqual(cp.read_bytes(), before)
 
 
 class TransportScratchTests(unittest.TestCase):
