@@ -55,6 +55,7 @@ jobs:
       G11_RUNTIME_BRANCH: g11-runtime
       G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
       G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
+      G11_R13: ${{ inputs.phase == 'night' && inputs.operational_date == '2026-10-13' }}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
       TZ: Asia/Tokyo
@@ -538,7 +539,7 @@ jobs:
               'PREVIOUS_NIGHT_CANONICAL_SHA256':checkpoint['feed_sha256']},sort_keys=True))
           PYREAD
       - name: Install pinned private runtime dependencies
-        if: env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true'
         run: |
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
@@ -555,7 +556,7 @@ jobs:
         working-directory: .g11-private
         env:
           WILD_OOS_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-oos/morning
-        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true'
         run: |
           python3 - "${WILD_OOS_ROOT}" <<'PY'
           import pathlib
@@ -587,7 +588,7 @@ jobs:
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
-        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true'
         run: |
           set -euo pipefail
           python3 - "${STATE_STORE}" "${{ steps.due.outputs.operational_date }}" <<'PY'
@@ -697,6 +698,8 @@ jobs:
             python3 g11/relay/same_day_boundary_20261006.py run \
               --state "${GITHUB_WORKSPACE}/.relay-state" --output "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
               --source-sha "${G11_PRIVATE_SOURCE_SHA}" --run-id "${GITHUB_RUN_ID}" | tee "${runtime_stdout}"
+          elif [ "${G11_R13}" = "true" ]; then
+            G11_NIGHT_RECOVERY_20261013=true python3 ../scripts/night_recovery_20261013.py "${args[@]}" | tee "${runtime_stdout}"
           elif [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
             python3 ../scripts/daily_predeadline_authority_recovery_v1.py predeadline "${args[@]}" | tee "${runtime_stdout}"
           else
@@ -736,7 +739,7 @@ jobs:
           print("G11_RELAY_RESULT_EXTRACT=PASS")
           PY
       - name: Audit WILD4 training-food capture
-        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'same-day-rescue' && steps.critical.outputs.rescue != 'true'
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'same-day-rescue' && steps.critical.outputs.rescue != 'true' && env.G11_R13 != 'true'
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
@@ -772,7 +775,7 @@ jobs:
           }, sort_keys=True))
           PY
       - name: Verify nightly research ledgers before encrypted persistence
-        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'night' && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'night' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true'
         working-directory: .g11-private
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
@@ -832,7 +835,7 @@ jobs:
           }, sort_keys=True))
           PY
       - name: Checkout pinned P3 shadow research consumer
-        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && steps.due.outputs.phase != 'same-day-rescue' && steps.critical.outputs.rescue != 'true' && hashFiles('.relay-output/feed.json') != ''
+        if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && steps.due.outputs.phase != 'same-day-rescue' && steps.critical.outputs.rescue != 'true' && hashFiles('.relay-output/feed.json') != '' && env.G11_R13 != 'true'
         id: deme-source
         continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

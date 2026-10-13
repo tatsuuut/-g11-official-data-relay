@@ -263,7 +263,8 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     try:
         from selective_alert_input_v1 import deliver_optional
         sys.path.insert(0, str(Path(".g11-private").resolve()))
-        deliver_optional(state / "store", feed, origin, token=token)
+        if os.environ.get("G11_R13") != "true":
+            deliver_optional(state / "store", feed, origin, token=token)
     except Exception:
         print("G11_SELECTIVE_INPUT=HELD_OPTIONAL_READER_UNAVAILABLE")
     if os.environ.get("GITHUB_OUTPUT"):
