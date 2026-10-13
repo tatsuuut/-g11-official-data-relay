@@ -952,8 +952,14 @@ jobs:
                  | length)
             }' "${FEED}"
           fi
+      - name: Persist complete state before publication
+        id: publication-state-verified
+        if: steps.encrypt-state.outputs.ready == 'true' && steps.night-ready.outputs.allowed == 'true'
+        uses: ./.github/actions/g11-publication-checkpoint
+        with:
+          cache-key: g11-state-v4-published-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-${{ github.run_attempt }}-checkpoint
       - name: Publish a newly verified feed through OIDC
-        if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != '' && steps.night-ready.outputs.allowed == 'true'
+        if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != '' && steps.night-ready.outputs.allowed == 'true' && (env.G11_NIGHT_TRANSPORT_ONLY == 'true' || steps.publication-state-verified.outputs.ready == 'true')
         id: publish
         env:
           FEED: .relay-output/feed.json
