@@ -4,7 +4,30 @@ import json
 import os
 from pathlib import Path
 import unittest
-from night_recovery_20261013 import correct_feed, KEY
+from unittest.mock import patch
+from night_recovery_20261013 import correct_feed, fetch_accepted, KEY
+
+
+class TransportScratchTests(unittest.TestCase):
+    def test_relative_transport_output_exists_and_cwd_is_restored(self):
+        original = Path.cwd()
+        visited = []
+        def read(url):
+            visited.append(Path.cwd())
+            self.assertNotEqual(Path.cwd(), original)
+            Path(".relay-output/hot-get-body.json").write_text("{}")
+            return {}, {}, b"{}"
+        with patch("night_recovery_20261013.hot.fetch", read):
+            self.assertEqual(fetch_accepted("https://example.invalid"), ({}, {}, b"{}"))
+        self.assertEqual(Path.cwd(), original)
+        self.assertFalse(visited[0].exists())
+
+    def test_failed_read_restores_cwd_without_production_write(self):
+        original = Path.cwd()
+        with patch("night_recovery_20261013.hot.fetch", side_effect=RuntimeError("FETCH_FAILED")):
+            with self.assertRaisesRegex(RuntimeError, "FETCH_FAILED"):
+                fetch_accepted("https://example.invalid")
+        self.assertEqual(Path.cwd(), original)
 
 
 @unittest.skipUnless(os.environ.get("G11_NIGHT_RECOVERY_FIXTURE_ROOT"), "saved incident evidence required")

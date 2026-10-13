@@ -133,6 +133,19 @@ def replace_bytes(path, data):
         Path(temp).unlink(missing_ok=True)
 
 
+def fetch_accepted(origin):
+    # The shared reader writes relative .relay-output files. This adapter runs
+    # from the frozen private checkout; keep transport scratch outside it.
+    previous = Path.cwd()
+    with tempfile.TemporaryDirectory(prefix="g11-night-readback-") as directory:
+        try:
+            os.chdir(directory)
+            Path(".relay-output").mkdir()
+            return hot.fetch(origin + "/api/g11-feed?date=" + DAY)
+        finally:
+            os.chdir(previous)
+
+
 def recover(state, output, source, run_id, origin):
     require(origin == "https://g11-race-lab.higatatsunori2.chatgpt.site", "ORIGIN")
     impl = retained_module(state, DAY)
@@ -158,7 +171,7 @@ def recover(state, output, source, run_id, origin):
                 "PREDICTION_RECALCULATION": 0, "REPAIRED_RACES": [KEY]}
     checkpoint = impl.read_checkpoint(state, DAY)
     require(checkpoint["checkpoint_sha256"] == OLD_CHECKPOINT, "CHECKPOINT_BASE_CHANGED")
-    accepted, headers, raw = hot.fetch(origin + "/api/g11-feed?date=" + DAY)
+    accepted, headers, raw = fetch_accepted(origin)
     require(impl.digest(raw) == headers.get("x-g11-source-feed-sha256") == BASE_SHA, "ACCEPTED_BASE_CHANGED")
     feed = impl.json_file(root / "night-feed.json")
     before_store = {p.relative_to(state / "store").as_posix(): impl.digest(p.read_bytes())
