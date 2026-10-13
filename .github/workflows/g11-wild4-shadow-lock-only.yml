@@ -285,6 +285,29 @@ jobs:
                       raise SystemExit('PRIOR_LOCKS_UNSAFE_ARCHIVE')
               archive.extractall(root,filter='data')
           out=root/'g11-wild4-future-locks'
+          if not (out/'batch-manifest.json').is_file():
+              # A verified pre-first-LOCK model checkpoint has no batch yet.
+              # Any saved race without its batch remains a hard failure.
+              pattern=re.compile(r'[0-9]{8}-[0-9]{2}-(?:0[1-9]|1[0-2])')
+              if any(pattern.fullmatch(p.stem) for p in out.rglob('*.json')):
+                  raise SystemExit('PRIOR_LOCKS_WITHOUT_MANIFEST')
+              import sys
+              sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'.g11-private'))
+              from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+              pin=life.read(out/'day-model-binding.json')
+              state=life.read(life.state_path(out))
+              if (pin.get('schema')!='G11_WILD4_DAY_MODEL_BINDING_V1'
+                  or pin.get('date')!=os.environ['OPERATIONAL_DATE']
+                  or pin.get('authority')!=life.AUTHORITY
+                  or state.get('schema')!='G11_WILD4_LIFECYCLE_V1'
+                  or state.get('authority')!=life.AUTHORITY
+                  or state.get('active')!=pin.get('model')
+                  or life.model_info(out/'model-registry/models'/pin['model']['identity'])!=pin['model']):
+                  raise SystemExit('PRIOR_MODEL_ONLY_BINDING')
+              print('WILD4_PRIOR_LEDGER=VERIFIED_MODEL_ONLY_CHECKPOINT')
+              print('WILD4_PRIOR_LOCKS=0')
+              print('WILD4_PRIOR_MODEL_IDENTITY='+pin['model']['identity'])
+              raise SystemExit(0)
           manifest=json.loads((out/'batch-manifest.json').read_text())
           value={key:item for key,item in manifest.items() if key!='CONTENT_SHA256'}
           canonical=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n'
