@@ -6,6 +6,77 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 from night_recovery_20261013 import correct_feed, fetch_accepted, KEY
+import daily_runtime_delivery_v1 as delivery
+import hot_delta_transport_v1 as hot
+import tempfile
+from types import SimpleNamespace
+
+
+class SavedTransportTimestampTests(unittest.TestCase):
+    def plan(self):
+        top = {"generated_at_jst": delivery.N13_CREATED, "source": {"projection_sha256": "a"*64},
+               "final_accounting": {"bets": ["1-2-3"], "profit": -900}}
+        delta = {"TOP_LEVEL": top, "RACES": [{"RACE_KEY": KEY, "EXPECTED_RACE_VERSION": "b"*64,
+                 "CHANGED_FIELDS": {"result_trifecta": "2-1-3"}}], "OPERATIONAL_DATE": delivery.N13_DAY,
+                 "BASE_FEED_SHA": "c"*64, "PATCH_CREATED_AT": delivery.N13_CREATED,
+                 "PATCH_SEQUENCE": 1, "PATCH_SHA256": "d"*64}
+        feed = {"source": top["source"], "races": [{"key": KEY}], "counts": {"races": 1, "results": 1, "pending": 0},
+                "daily_runtime": {"authority_sha256": "e"*64}}
+        checkpoint = {"operational_date_jst": delivery.N13_DAY, "pending": 0, "authority_sha256": "e"*64,
+                      "feed_sha256": delivery.N13_FEED_SHA, "checkpoint_sha256": delivery.N13_CHECKPOINT_SHA}
+        m, c = hot.night_chunks(delta, feed, checkpoint)
+        return {"checkpoint_sha256": delivery.N13_CHECKPOINT_SHA, "manifest": m, "chunks": c}
+
+    def test_only_wire_time_and_derived_hashes_change(self):
+        original = self.plan(); before = deepcopy(original)
+        fixed = delivery.seconds_only_n13_plan(original)
+        self.assertEqual(original, before)
+        self.assertEqual(fixed["manifest"]["PATCH_CREATED_AT"], "2026-10-14T02:20:52+09:00")
+        self.assertNotEqual(fixed["manifest"]["NIGHT_TRANSACTION_ID"], original["manifest"]["NIGHT_TRANSACTION_ID"])
+        for old, new in zip(original["chunks"], fixed["chunks"]):
+            self.assertEqual(old["RACES"], new["RACES"])
+            top = deepcopy(old["TOP_LEVEL"])
+            if "generated_at_jst" in top: top["generated_at_jst"] = "2026-10-14T02:20:52+09:00"
+            self.assertEqual(new["TOP_LEVEL"], top)
+        self.assertEqual(fixed["manifest"]["CANONICAL_FEED_SHA256"], delivery.N13_FEED_SHA)
+        self.assertEqual(fixed["manifest"]["EXPECTED_FINAL_ACCOUNTING_SHA"], original["manifest"]["EXPECTED_FINAL_ACCOUNTING_SHA"])
+        self.assertEqual(delivery.seconds_only_n13_plan(original), fixed)
+
+    def test_wrong_canonical_or_corrupt_chunk_stops_before_send(self):
+        bad = self.plan(); bad["manifest"]["CANONICAL_FEED_SHA256"] = "0"*64
+        with self.assertRaisesRegex(RuntimeError, "N13_PLAN_SCOPE"):
+            delivery.seconds_only_n13_plan(bad)
+        bad = self.plan(); bad["chunks"][0]["TOP_LEVEL"]["generated_at_jst"] = "tampered"
+        with self.assertRaisesRegex(RuntimeError, "N13_PRIOR_CHUNK_HASH"):
+            delivery.seconds_only_n13_plan(bad)
+
+    def test_http_rejection_is_never_retried(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp); feed = state / "feed.json"
+            feed.write_text(json.dumps({"operational_date_jst": delivery.N13_DAY, "stage": "NIGHT"}))
+            implementation = SimpleNamespace(load=lambda *a: {}, json_file=lambda p: json.loads(p.read_bytes()), verify_locks=lambda *a, **k: None,
+                read_checkpoint=lambda *a: {"feed_sha256": hot.hash_bytes(feed.read_bytes())}, day_root=lambda *a: state)
+            with patch.dict(os.environ, {"G11_N13T": "true", "G11_SYNC_OIDC": "mock"}), \
+                 patch.object(delivery, "retained_module", return_value=implementation), \
+                 patch.object(delivery, "identity"), patch.object(delivery, "check_saved_n13"), \
+                 patch.object(delivery, "saved_n13_plan"), \
+                 patch.object(delivery, "send_night", side_effect=RuntimeError("NIGHT_TRANSACTION_REJECTED:HTTP409")) as send, \
+                 patch.object(delivery.time, "sleep") as wait:
+                with self.assertRaisesRegex(RuntimeError, "HTTP409"):
+                    delivery.deliver(state, feed, delivery.ORIGIN, pause=wait)
+                self.assertEqual(send.call_count, 1)
+                wait.assert_not_called()
+
+    def test_emit_requires_scope_and_exact_saved_hash(self):
+        with patch.dict(os.environ, {"G11_N13T": "false"}):
+            with self.assertRaisesRegex(RuntimeError, "N13_TRANSPORT_SCOPE"):
+                delivery.emit_saved_n13(Path("unused"), Path("unused"))
+        with tempfile.TemporaryDirectory() as temp:
+            p = Path(temp) / "feed.json"; p.write_text("tampered")
+            impl = SimpleNamespace(read_checkpoint=lambda *a: {"checkpoint_sha256": delivery.N13_CHECKPOINT_SHA,
+                "feed_sha256": delivery.N13_FEED_SHA})
+            with self.assertRaisesRegex(RuntimeError, "N13_SAVED_CANONICAL_HASH"):
+                delivery.check_saved_n13(impl, Path(temp), p)
 
 
 class TransportScratchTests(unittest.TestCase):

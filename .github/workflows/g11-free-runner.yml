@@ -1,5 +1,5 @@
 name: runtime sync
-run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
+run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
 on:
   push:
     branches:
@@ -19,6 +19,7 @@ on:
           - morning
           - predeadline
           - night
+          - night-transport
           - same-day-rescue
           - repair-20260928
       operational_date:
@@ -37,11 +38,11 @@ permissions:
   contents: read
   id-token: write
 concurrency:
-  group: ${{ ((github.event_name == 'push' && contains(github.event.head_commit.message, '[daily-runtime-freeze]')) || (github.event_name == 'workflow_dispatch' && inputs.phase == 'dry-run')) && 'g11-free-official-data-validation' || 'g11-free-official-data-runner' }}
+  group: ${{ ((github.event_name == 'push' && contains(github.event.head_commit.message, '[daily-runtime-freeze]')) || (github.event_name == 'workflow_dispatch' && (inputs.phase == 'dry-run' || inputs.phase == 'night-transport'))) && 'g11-free-official-data-validation' || 'g11-free-official-data-runner' }}
   cancel-in-progress: false
 jobs:
   run-private-runtime:
-    name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || 'runtime' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || 'runtime' }}
     if: >-
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
@@ -55,7 +56,8 @@ jobs:
       G11_RUNTIME_BRANCH: g11-runtime
       G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
       G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
-      G11_R13: ${{ inputs.phase == 'night' && inputs.operational_date == '2026-10-13' }}
+      G11_R13: ${{ (inputs.phase == 'night' || inputs.phase == 'night-transport') && inputs.operational_date == '2026-10-13' }}
+      G11_N13T: ${{ inputs.phase == 'night-transport' && inputs.operational_date == '2026-10-13' }}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
       TZ: Asia/Tokyo
@@ -146,6 +148,10 @@ jobs:
           fi
           if [ "${SCHEDULE_EXPRESSION}" = "0-10/5 12 * * *" ] && [[ "${operational_date}" < "2026-09-29" ]]; then
             phase="dry-run"
+          fi
+          if [ "${phase}" = "night-transport" ]; then
+            test "${operational_date}" = "2026-10-13"
+            phase="night"
           fi
           python3 - "${operational_date}" "${phase}" <<'PY'
           import datetime as dt
@@ -698,6 +704,10 @@ jobs:
             python3 g11/relay/same_day_boundary_20261006.py run \
               --state "${GITHUB_WORKSPACE}/.relay-state" --output "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
               --source-sha "${G11_PRIVATE_SOURCE_SHA}" --run-id "${GITHUB_RUN_ID}" | tee "${runtime_stdout}"
+          elif [ "${G11_N13T}" = "true" ]; then
+            python3 ../scripts/daily_runtime_delivery_v1.py --emit-saved-n13 \
+              --state-root "${GITHUB_WORKSPACE}/.relay-state" --feed "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
+              --origin "${G11_APP_ORIGIN}" | tee "${runtime_stdout}"
           elif [ "${G11_R13}" = "true" ]; then
             G11_NIGHT_RECOVERY_20261013=true python3 ../scripts/night_recovery_20261013.py "${args[@]}" | tee "${runtime_stdout}"
           elif [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then

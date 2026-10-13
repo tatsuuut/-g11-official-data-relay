@@ -4,6 +4,7 @@ No private runner, acquisition, prediction or settlement is imported here.
 NIGHT retries use exactly the immutable checkpoint bytes and transaction plan.
 """
 from __future__ import annotations
+from copy import deepcopy
 import argparse
 import hashlib
 import json
@@ -20,6 +21,102 @@ import hot_delta_transport_v1 as hot
 
 ORIGIN = "https://g11-race-lab.higatatsunori2.chatgpt.site"
 MAX_ATTEMPTS = 3
+N13_DAY = "2026-10-13"
+N13_FEED_SHA = "1fa0607c1ce74b41ccc829790fa1b04bac5cb6b074031413a110616a449ae8e6"
+N13_CHECKPOINT_SHA = "900da7bc8d5e7d2fefefecfe31c49222ea2a126e112e138900496539f4b21d68"
+N13_CREATED = "2026-10-14T02:20:52.268957+09:00"
+
+
+def n13_transport_only():
+    return os.environ.get("G11_N13T") == "true"
+
+
+def check_saved_n13(implementation, state, feed_path):
+    checkpoint = implementation.read_checkpoint(state, N13_DAY)
+    require(checkpoint["checkpoint_sha256"] == N13_CHECKPOINT_SHA
+            and checkpoint["feed_sha256"] == N13_FEED_SHA
+            and hot.hash_bytes(feed_path.read_bytes()) == N13_FEED_SHA,
+            "N13_SAVED_CANONICAL_HASH")
+    return checkpoint
+
+
+def emit_saved_n13(state, output):
+    require(n13_transport_only(), "N13_TRANSPORT_SCOPE")
+    implementation = retained_module(state, N13_DAY)
+    root = implementation.day_root(state, N13_DAY)
+    checkpoint = check_saved_n13(implementation, state, root / "night-feed.json")
+    # Byte copy only: no private NIGHT runner, settlement, or recovery import.
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes((root / "night-feed.json").read_bytes())
+    check_saved_n13(implementation, state, output)
+    saved_n13_plan(root, implementation)
+    print(json.dumps({"STATUS": "SAVED_NIGHT_TRANSPORT_ONLY", "PHASE": "NIGHT",
+        "OPERATIONAL_DATE_JST": N13_DAY, "FEED_EMITTED": True,
+        "CHECKPOINT_SHA256": checkpoint["checkpoint_sha256"],
+        "CANONICAL_FEED_SHA256": N13_FEED_SHA, "PREDICTION_RECALCULATION": 0,
+        "SETTLEMENT_EXECUTIONS": 0}, sort_keys=True))
+
+
+def seconds_only_n13_plan(plan):
+    """Keep the failed plan and all accounting; change wire timestamps only."""
+    previous = deepcopy(plan)
+    manifest = previous["manifest"]
+    require(previous["checkpoint_sha256"] == N13_CHECKPOINT_SHA
+            and manifest["CANONICAL_FEED_SHA256"] == N13_FEED_SHA
+            and manifest["CHECKPOINT_SHA256"] == N13_CHECKPOINT_SHA
+            and manifest["OPERATIONAL_DATE"] == N13_DAY
+            and manifest["PATCH_CREATED_AT"] == N13_CREATED, "N13_PLAN_SCOPE")
+    chunks = previous["chunks"]
+    top, races = {}, []
+    def merge(base, patch):
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(base.get(key), dict):
+                merge(base[key], value)
+            else:
+                base[key] = deepcopy(value)
+    for index, chunk in enumerate(chunks):
+        require(chunk["CHUNK_INDEX"] == index and chunk["CHUNK_SHA256"] ==
+                hot.site_hash({"TOP_LEVEL": chunk["TOP_LEVEL"], "RACES": chunk["RACES"]}),
+                "N13_PRIOR_CHUNK_HASH")
+        merge(top, chunk["TOP_LEVEL"])
+        races.extend(chunk["RACES"])
+    require(top["generated_at_jst"] == N13_CREATED and hot.site_hash(top) ==
+            manifest["EXPECTED_TOP_LEVEL_SHA"], "N13_PRIOR_TOP_HASH")
+    stamp = datetime.fromisoformat(N13_CREATED).isoformat(timespec="seconds")
+    top["generated_at_jst"] = stamp
+    for chunk in chunks:
+        if "generated_at_jst" in chunk["TOP_LEVEL"]:
+            chunk["TOP_LEVEL"]["generated_at_jst"] = stamp
+        chunk["CHUNK_SHA256"] = hot.site_hash({"TOP_LEVEL": chunk["TOP_LEVEL"], "RACES": chunk["RACES"]})
+    manifest["PATCH_CREATED_AT"] = stamp
+    manifest["PATCH_SHA256"] = hot.hash_bytes(hot.compact({"stage": "NIGHT", "day": N13_DAY,
+                                                         "top": top, "races": races}))
+    manifest["EXPECTED_TOP_LEVEL_SHA"] = hot.site_hash(top)
+    manifest["CHUNK_SHA256"] = [c["CHUNK_SHA256"] for c in chunks]
+    manifest["NIGHT_TRANSACTION_ID"] = hot.hash_bytes(hot.compact([N13_DAY,
+        manifest["BASE_FEED_SHA"], manifest["SOURCE_NIGHT_SHA"], manifest["CHUNK_SHA256"]]))
+    manifest.pop("MANIFEST_SHA256")
+    manifest["MANIFEST_SHA256"] = hot.hash_bytes(hot.compact(manifest))
+    for chunk in chunks:
+        chunk["NIGHT_TRANSACTION_ID"] = manifest["NIGHT_TRANSACTION_ID"]
+        chunk["MANIFEST_SHA256"] = manifest["MANIFEST_SHA256"]
+    result = {"checkpoint_sha256": N13_CHECKPOINT_SHA, "manifest": manifest, "chunks": chunks}
+    result["plan_sha256"] = hot.hash_bytes(json.dumps(result, ensure_ascii=False, sort_keys=True,
+                                                   separators=(",", ":"), allow_nan=False).encode())
+    return result
+
+
+def saved_n13_plan(root, implementation):
+    prior_path = root / "night-transport-plan.json"
+    prior = implementation.json_file(prior_path)
+    unsigned = dict(prior)
+    expected = unsigned.pop("plan_sha256", None)
+    require(expected == implementation.digest(implementation.canonical(unsigned)), "N13_PRIOR_PLAN_HASH")
+    fixed = seconds_only_n13_plan(prior)
+    path = root / "night-transport-plan-jst-seconds.json"
+    implementation.immutable(path, hot.compact(fixed))
+    require(implementation.json_file(path) == fixed, "N13_TRANSPORT_PLAN_READBACK")
+    return path
 
 
 def require(value, code):
@@ -67,6 +164,9 @@ def verify_night_readback(feed, readback, headers, checkpoint, authority):
     for field in hot.NIGHT_TOP:
         if field in feed:
             require(hot.includes(readback.get(field), feed[field]), "DAILY_SITE_TOP_READBACK:" + field)
+    if n13_transport_only():
+        require(feed["generated_at_jst"] == N13_CREATED and readback["generated_at_jst"] ==
+                datetime.fromisoformat(N13_CREATED).isoformat(timespec="seconds"), "N13_WIRE_TIME_READBACK")
 
 
 def commit_request(manifest):
@@ -103,6 +203,9 @@ def send_night(state, day, feed, checkpoint, authority, implementation, origin, 
     identity(accepted, authority, accepted["stage"])
     root = implementation.day_root(state, day)
     plan_path = root / "night-transport-plan.json"
+    if n13_transport_only():
+        require(day == N13_DAY, "N13_TRANSPORT_SCOPE")
+        plan_path = saved_n13_plan(root, implementation)
     if accepted["stage"] == "NIGHT":
         # ACK/readback may have been lost after an atomic commit. Repeat only
         # COMMIT against the server's original immutable manifest.
@@ -174,6 +277,8 @@ def send_morning(feed_path, feed, authority, origin, token):
 
 
 def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS, pause=time.sleep):
+    if n13_transport_only():
+        attempts = 1
     require(origin == ORIGIN and 1 <= attempts <= MAX_ATTEMPTS, "DAILY_DELIVERY_CONFIGURATION")
     Path(".relay-output").mkdir(exist_ok=True)
     incoming = json.loads(feed_path.read_bytes())
@@ -197,6 +302,11 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     if phase == "NIGHT":
         checkpoint = implementation.read_checkpoint(state, day)
         require(hot.hash_bytes(feed_path.read_bytes()) == checkpoint["feed_sha256"], "NIGHT_DELIVERY_CANONICAL_FEED_CHANGED")
+    if n13_transport_only():
+        require(day == N13_DAY and phase == "NIGHT", "N13_TRANSPORT_SCOPE")
+        check_saved_n13(implementation, state, feed_path)
+        saved_n13_plan(implementation.day_root(state, day), implementation)
+        print("G11_N13_CANONICAL_BEFORE_SEND=PASS SHA256=" + N13_FEED_SHA)
     for attempt in range(attempts):
         # Integrity failures stop before network, including between retries.
         implementation.load(state, day)
@@ -232,6 +342,9 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
             pause((2, 5)[attempt])
     Path(".relay-output/hot-delta-accepted").write_text(ack["payload_sha256"] + "\n")
     Path(".relay-output/hot-delta-readback.json").write_bytes(raw)
+    if n13_transport_only():
+        check_saved_n13(implementation, state, feed_path)
+        print("G11_N13_CANONICAL_AFTER_READBACK=PASS SHA256=" + N13_FEED_SHA)
     receipt = {"schema": "G11_DAILY_SITE_DELIVERY_RECEIPT_V1", "operational_date_jst": day,
                "phase": phase, "authority_sha256": authority["authority_sha256"],
                "runtime_source_sha": authority["runtime_source_sha"],
@@ -588,7 +701,11 @@ if __name__ == "__main__":
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--feed", type=Path, required=True)
     parser.add_argument("--origin", required=True)
+    parser.add_argument("--emit-saved-n13", action="store_true")
     args = parser.parse_args()
-    deliver(args.state_root, args.feed, args.origin)
+    if args.emit_saved_n13:
+        emit_saved_n13(args.state_root, args.feed)
+    else:
+        deliver(args.state_root, args.feed, args.origin)
 
 

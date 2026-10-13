@@ -371,6 +371,10 @@ def post(origin: str, token: str, payload: dict, endpoint: str) -> dict:
     body = json.loads(response_path.read_text())
     print("G11_NIGHT_TRANSACTION_HTTP=" + str(status) + " ACTION=" + payload["ACTION"])
     if not 200 <= status < 300 or body.get("status") != "PASS":
+        if os.environ.get("G11_N13T") == "true":
+            print("G11_N13_REJECTION=" + json.dumps({"http_status": status,
+                "action": payload["ACTION"], **{k: body[k] for k in
+                    ("error", "reason", "field", "code", "mismatch") if k in body}}, ensure_ascii=False))
         raise RuntimeError("NIGHT_TRANSACTION_REJECTED:" + str(body.get("error")))
     return body
 
@@ -602,6 +606,7 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
+
 
 
 
