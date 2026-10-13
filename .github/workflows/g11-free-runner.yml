@@ -538,7 +538,7 @@ jobs:
               'PREVIOUS_NIGHT_CANONICAL_SHA256':checkpoint['feed_sha256']},sort_keys=True))
           PYREAD
       - name: Install pinned private runtime dependencies
-        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true'
+        if: env.G11_NIGHT_TRANSPORT_ONLY != 'true'
         run: |
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
