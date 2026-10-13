@@ -178,5 +178,20 @@ class RescueBootstrapTests(unittest.TestCase):
         self.assertEqual(result["frozen"], "true")
         self.assertNotIn("rescue_bootstrap", result)
 
+
+class PredeadlineDependencyTests(unittest.TestCase):
+    def test_frozen_predeadline_installs_bet_dependencies_after_critical_checkpoint(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/g11-free-runner.yml").read_text()
+        names = ["Capture and lock dependency-free PREDEADLINE critical lane",
+                 "Save early encrypted critical checkpoint",
+                 "Keep the predeadline relay alive between delayed cron starts",
+                 "Install pinned private runtime dependencies", "Run the private fail-closed relay"]
+        positions = [workflow.index("      - name: " + name) for name in names]
+        self.assertEqual(positions, sorted(positions))
+        step = workflow.split("      - name: Install pinned private runtime dependencies\n", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("if: env.G11_NIGHT_TRANSPORT_ONLY != 'true'", step)
+        self.assertIn("'catboost==1.2.8'", step)
+        self.assertIn("import catboost", step)
+
 if __name__ == "__main__":
     unittest.main()
