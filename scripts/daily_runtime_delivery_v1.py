@@ -258,6 +258,14 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
         target = implementation.day_root(state, day) / "delivery" / phase / (ack["payload_sha256"] + ".json")
     receipt["receipt_sha256"] = implementation.digest(implementation.canonical(receipt))
     implementation.immutable(target, implementation.canonical(receipt) + b"\n")
+    # Optional saved-input evidence only, after canonical delivery/readback.
+    # No prediction pin, authority, notification candidate or delivery changes.
+    try:
+        from selective_alert_input_v1 import deliver_optional
+        sys.path.insert(0, str(Path(".g11-private").resolve()))
+        deliver_optional(state / "store", feed, origin, token=token)
+    except Exception:
+        print("G11_SELECTIVE_INPUT=HELD_OPTIONAL_READER_UNAVAILABLE")
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             output.write("feed_sha=" + ack["payload_sha256"] + "\n")
@@ -581,4 +589,5 @@ if __name__ == "__main__":
     parser.add_argument("--origin", required=True)
     args = parser.parse_args()
     deliver(args.state_root, args.feed, args.origin)
+
 
