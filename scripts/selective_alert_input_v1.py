@@ -34,7 +34,8 @@ def sha(value):
 def read_official(store_path, race_key):
     # Existing byte/receipt/RAW-reparse/120-combination/window verifier.
     from g11.canonical.official_pipeline import OfficialArtifactStore, CanonicalRunner
-    store = OfficialArtifactStore(store_path)
+    # Preserve symlink rejection in the existing verifier; resolve() would erase it.
+    store = OfficialArtifactStore(Path(os.path.abspath(store_path)))
     morning = store.load_verified_snapshot("morning", "official-day-input")
     saved = store.load_verified_snapshot("predeadline", "odds3t-" + race_key)
     odds = CanonicalRunner._validated_odds_only_market(SimpleNamespace(store=store), morning, saved, race_key)

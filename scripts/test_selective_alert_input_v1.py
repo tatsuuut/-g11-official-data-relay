@@ -1,5 +1,9 @@
 import copy
 import json
+import os
+import sys
+import tempfile
+import types
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -44,5 +48,34 @@ class EvidenceTest(unittest.TestCase):
     def test_wire_budget_prevents_network(self):
         with patch.object(m.subprocess,'run',side_effect=AssertionError('network forbidden')):
             with self.assertRaises(ValueError):m.post_batch(m.ORIGIN,'mock',{'date':'2026-10-13','records':['x'*m.WIRE_LIMIT]})
+
+    def test_relative_saved_store_and_symlink_boundary(self):
+        # Real files and the existing verifier's canonical-path requirement.
+        class Store:
+            def __init__(self, root): self.root=root
+            def load_verified_snapshot(self, stage, name):
+                path=self.root/'snapshots'/stage/(name+'.json')
+                if not path.is_file() or path.is_symlink() or path.resolve(strict=True)!=path:
+                    raise ValueError('VERIFIED_SNAPSHOT_FILE')
+                return json.loads(path.read_text())
+        class Runner:
+            @staticmethod
+            def _validated_odds_only_market(owner, morning, saved, key):
+                return saved['ODDS']
+        module=types.ModuleType('g11.canonical.official_pipeline')
+        module.OfficialArtifactStore=Store;module.CanonicalRunner=Runner
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/'store'
+            for stage,name,value in [('morning','official-day-input',{}),('predeadline','odds3t-'+self.row['race_key'],{'SNAPSHOT':{'SOURCE_RECEIPTS':[self.receipt]},'ODDS':self.odds})]:
+                path=root/'snapshots'/stage/(name+'.json');path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value))
+            relative=Path(os.path.relpath(root))
+            with self.assertRaisesRegex(ValueError,'VERIFIED_SNAPSHOT_FILE'):
+                Store(relative).load_verified_snapshot('morning','official-day-input')
+            with patch.dict(sys.modules,{'g11.canonical.official_pipeline':module}):
+                saved,receipt,odds=m.read_official(relative,self.row['race_key'])
+                self.assertEqual(receipt,self.receipt);self.assertEqual(odds,self.odds)
+                link=Path(temp)/'linked-store';link.symlink_to(root,target_is_directory=True)
+                with self.assertRaisesRegex(ValueError,'VERIFIED_SNAPSHOT_FILE'):
+                    m.read_official(link,self.row['race_key'])
 
 if __name__=='__main__':unittest.main()
