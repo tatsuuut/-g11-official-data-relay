@@ -911,5 +911,29 @@ jobs:
           print('GORIPAN_UNVERIFIED_CANDIDATE_PROMOTION=false')
           PY
 
+      - name: Checkout notification input reader only
+        if: steps.public-projection.outputs.ready == 'true'
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/-g11-official-data-relay
+          ref: main
+          path: .g11-input-reader
+          sparse-checkout: scripts/selective_alert_input_v1.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Append saved WILD4 input evidence with selection and delivery disabled
+        if: steps.public-projection.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.g11-public-projection
+        run: |
+          python3 .g11-input-reader/scripts/selective_alert_input_v1.py \
+            --store "${GITHUB_WORKSPACE}/${{ steps.decrypted.outputs.store }}" \
+            --projection "${RUNNER_TEMP}/goripan-public-projection.json" \
+            --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json"
+
+
 
 
