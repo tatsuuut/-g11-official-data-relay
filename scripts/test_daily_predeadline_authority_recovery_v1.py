@@ -193,5 +193,33 @@ class PredeadlineDependencyTests(unittest.TestCase):
         self.assertIn("'catboost==1.2.8'", step)
         self.assertIn("import catboost", step)
 
+
+class PredeadlineQueueIsolationTests(unittest.TestCase):
+    def test_read_only_validation_cannot_displace_production_waiting_job(self):
+        import types
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/g11-free-runner.yml").read_text()
+        block = workflow.split("\nconcurrency:\n", 1)[1].split("\njobs:", 1)[0]
+        expression = block.split("group: ", 1)[1].split("\n", 1)[0].strip()
+        self.assertTrue(expression.startswith("${{") and expression.endswith("}}"))
+        expression = expression[3:-2].replace("&&", " and ").replace("||", " or ")
+        def group(event, phase="", message=""):
+            github = types.SimpleNamespace(event_name=event,
+                event=types.SimpleNamespace(head_commit=types.SimpleNamespace(message=message)))
+            return eval(expression, {"__builtins__": {}},
+                        {"github": github, "inputs": types.SimpleNamespace(phase=phase),
+                         "contains": lambda value, part: part in value})
+        production = group("workflow_dispatch", "predeadline")
+        self.assertEqual(production, "g11-free-official-data-runner")
+        for event, phase, message in [
+            ("schedule", "", ""), ("workflow_dispatch", "night", ""),
+            ("workflow_dispatch", "morning", ""), ("workflow_dispatch", "same-day-rescue", ""),
+            ("push", "", "[night-transport-only]"), ("push", "", "ordinary runtime update")]:
+            self.assertEqual(group(event, phase, message), production)
+        for event, phase, message in [
+            ("push", "", "[daily-runtime-freeze] regression check"),
+            ("workflow_dispatch", "dry-run", "")]:
+            self.assertNotEqual(group(event, phase, message), production)
+        self.assertIn("cancel-in-progress: false", block)
+
 if __name__ == "__main__":
     unittest.main()
