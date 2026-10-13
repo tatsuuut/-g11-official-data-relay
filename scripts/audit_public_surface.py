@@ -23,6 +23,8 @@ ALLOWED_FILES = {
     "scripts/hot_delta_transport_v1.py",
     "scripts/daily_runtime_bootstrap_v1.py",
     "scripts/daily_runtime_delivery_v1.py",
+    "scripts/selective_alert_input_v1.py",
+    "scripts/test_selective_alert_input_v1.py",
     "scripts/test_daily_runtime_delivery_v1.py",
     "scripts/daily_predeadline_authority_recovery_v1.py",
     "scripts/test_daily_predeadline_authority_recovery_v1.py",
