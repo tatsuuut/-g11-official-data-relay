@@ -37,7 +37,7 @@ permissions:
   contents: read
   id-token: write
 concurrency:
-  group: g11-free-official-data-runner
+  group: ${{ ((github.event_name == 'push' && contains(github.event.head_commit.message, '[daily-runtime-freeze]')) || (github.event_name == 'workflow_dispatch' && inputs.phase == 'dry-run')) && 'g11-free-official-data-validation' || 'g11-free-official-data-runner' }}
   cancel-in-progress: false
 jobs:
   run-private-runtime:
