@@ -1947,6 +1947,7 @@ jobs:
               main(*sys.argv[1:])
           PY
       - name: Verify existing immutable night readback
+        id: immutable-readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night == 'true'
         env:
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
@@ -2125,11 +2126,16 @@ jobs:
           [ "${active}" -le 1 ] || exit 0
           gh workflow run g11-free-runner.yml -f phase=predeadline -f operational_date=2026-10-06
       - name: WILD4 shadow
-        if: steps.runtime.outcome == 'success' && contains('predeadline,night', steps.due.outputs.phase)
+        if: steps.runtime.outcome == 'success' && (steps.due.outputs.phase == 'predeadline' || (steps.due.outputs.phase == 'night' && steps.night-ready.outputs.allowed == 'true' && steps.publication-state-verified.outputs.ready == 'true' && (steps.readback.outcome == 'success' || steps.immutable-readback.outcome == 'success')))
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run 364923281 -f mode=${{ steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4' }} -f operational_date=${{ steps.due.outputs.operational_date }}
+        run: |
+          args=()
+          if [ '${{ steps.due.outputs.phase }}' = night ]; then
+            args=(-f night_checkpoint_key=g11-state-v4-published-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-${{ github.run_attempt }}-checkpoint)
+          fi
+          gh workflow run 364923281 -f mode=${{ steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4' }} -f operational_date=${{ steps.due.outputs.operational_date }} "${args[@]}"
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
     if: >-
@@ -2205,3 +2211,4 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
+
