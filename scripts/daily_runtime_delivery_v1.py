@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 import subprocess
@@ -188,9 +189,22 @@ def optional_deme_projection(day):
         return None
     try:
         raw = path.read_bytes()
-        if len(raw) > 180_000:
+        if len(raw) > 256_000:
             raise ValueError("BUDGET")
         value = json.loads(raw)
+        packed = value.get("high_payout_packed") if isinstance(value, dict) else None
+        base = {k:v for k,v in value.items() if k != "high_payout_packed"} if isinstance(value,dict) else value
+        if len(json.dumps(base,ensure_ascii=False,separators=(",", ":")).encode()) > 180_000:
+            raise ValueError("BASE_BUDGET")
+        if packed is not None and (not isinstance(packed,dict)
+                or packed.get("schema") != "G11_DEME_HIGH_PAYOUT_PACKED_V1"
+                or packed.get("encoding") != "gzip-base64"
+                or not isinstance(packed.get("data"),str) or len(packed["data"]) > 75_000
+                or re.fullmatch(r"[A-Za-z0-9+/]*={0,2}",packed["data"]) is None
+                or re.fullmatch(r"[a-f0-9]{64}",str(packed.get("sha256"))) is None
+                or type(packed.get("uncompressed_bytes")) is not int
+                or not 0 < packed["uncompressed_bytes"] <= 1_000_000):
+            raise ValueError("HIGH_PAYOUT_BUDGET")
         if (not isinstance(value, dict) or value.get("schema") != "G11_P3_DEME_DISCOVERY_V1"
                 or value.get("production_mutated") is not False
                 or not isinstance(value.get("available"), bool)
@@ -721,5 +735,6 @@ if __name__ == "__main__":
         emit_saved_n13(args.state_root, args.feed)
     else:
         deliver(args.state_root, args.feed, args.origin)
+
 
 
