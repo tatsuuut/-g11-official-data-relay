@@ -20,6 +20,7 @@ on:
           - settle
           - wild4
           - wild4-settle
+          - wild4-recover-20261013
       operational_date:
         description: YYYY-MM-DD; defaults to current JST date
         required: false
@@ -43,7 +44,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
+  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-recover-20261013')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
   cancel-in-progress: false
 
 jobs:
@@ -67,6 +68,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Resolve research mode and operational date
+        if: inputs.mode != 'wild4-recover-20261013'
         id: mode
         shell: bash
         env:
@@ -101,11 +103,13 @@ jobs:
           echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
 
       - name: Require private repository credential
+        if: inputs.mode != 'wild4-recover-20261013'
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: test -n "${G11_PRIVATE_REPO_TOKEN}"
 
       - name: Checkout private detector source
+        if: inputs.mode != 'wild4-recover-20261013'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
@@ -115,6 +119,7 @@ jobs:
           fetch-depth: 1
 
       - name: Checkout private append-only research history
+        if: inputs.mode != 'wild4-recover-20261013'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
@@ -124,9 +129,11 @@ jobs:
           fetch-depth: 1
 
       - name: Install pinned official HTML parser dependency
+        if: inputs.mode != 'wild4-recover-20261013'
         run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
 
       - name: Fetch current verified app feed read-only
+        if: inputs.mode != 'wild4-recover-20261013'
         id: feed
         shell: bash
         env:
@@ -180,7 +187,7 @@ jobs:
 
       - name: Require a formal MORNING research scope
         id: scope
-        if: steps.mode.outputs.mode == 'capture' && steps.feed.outputs.ready == 'true'
+        if: inputs.mode != 'wild4-recover-20261013' && (steps.mode.outputs.mode == 'capture' && steps.feed.outputs.ready == 'true')
         shell: bash
         run: |
           set -euo pipefail
@@ -198,7 +205,7 @@ jobs:
           fi
 
       - name: Capture earliest complete MORNING exact-120 odds
-        if: steps.mode.outputs.mode == 'capture' && steps.feed.outputs.ready == 'true' && steps.scope.outputs.capture == 'true'
+        if: inputs.mode != 'wild4-recover-20261013' && (steps.mode.outputs.mode == 'capture' && steps.feed.outputs.ready == 'true' && steps.scope.outputs.capture == 'true')
         shell: bash
         env:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
@@ -214,7 +221,7 @@ jobs:
           jq -c . .shadow-work/run-summary.json
 
       - name: Settle only already-locked footprint research
-        if: steps.mode.outputs.mode == 'settle' && steps.feed.outputs.ready == 'true'
+        if: inputs.mode != 'wild4-recover-20261013' && (steps.mode.outputs.mode == 'settle' && steps.feed.outputs.ready == 'true')
         shell: bash
         env:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
@@ -233,6 +240,7 @@ jobs:
           jq -c . .shadow-work/run-summary.json
 
       - name: Assert production isolation
+        if: inputs.mode != 'wild4-recover-20261013'
         shell: bash
         env:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
@@ -254,6 +262,7 @@ jobs:
           fi
 
       - name: Persist only research-history path
+        if: inputs.mode != 'wild4-recover-20261013'
         working-directory: .g11-history
         shell: bash
         env:
@@ -277,6 +286,108 @@ jobs:
           git fetch origin g11-runtime
           git rebase origin/g11-runtime
           git push origin HEAD:g11-runtime
+
+      # One-time 2026-10-13 recovery inside the existing job. The normal
+      # WILD4 reusable workflow, date gate and model pins remain unchanged.
+      - name: Require explicitly scoped WILD4 recovery
+        if: inputs.mode == 'wild4-recover-20261013'
+        env:
+          REQUESTED_DATE: ${{ inputs.operational_date }}
+        run: |
+          test "${GITHUB_EVENT_NAME}" = workflow_dispatch
+          test "${GITHUB_REF}" = refs/heads/main
+          test "${REQUESTED_DATE}" = 2026-10-13
+      - name: Restore exact saved October 13 NIGHT checkpoint
+        if: inputs.mode == 'wild4-recover-20261013'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-10-13-38437856530-1-checkpoint
+          fail-on-cache-miss: true
+      - name: Restore exact saved October 13 WILD4 LOCK artifact
+        if: inputs.mode == 'wild4-recover-20261013'
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-wild4-20261013-future-oos-locks-encrypted
+          run-id: 38409076971
+          github-token: ${{ github.token }}
+          path: .recovery-locks
+      - name: Checkout pinned pure WILD4 accounting functions
+        if: inputs.mode == 'wild4-recover-20261013'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 1cafd75c34216bd67592ed0e914b9298d3c9521a
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .recovery-private
+          persist-credentials: false
+      - name: Checkout pinned immutable settlement contract
+        if: inputs.mode == 'wild4-recover-20261013'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: efd476cac11dc3ee8753b5a5001c42271be41974
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .recovery-settlement
+          persist-credentials: false
+      - name: Validate 96R dry difference before appending missing settlements
+        if: inputs.mode == 'wild4-recover-20261013'
+        env:
+          RECOVERY_MODE: ${{ inputs.mode }}
+          RECOVERY_DATE: ${{ inputs.operational_date }}
+          GH_TOKEN: ${{ github.token }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          python3 scripts/wild4_night_recovery_20261013.py prepare \
+            --work "${RUNNER_TEMP}/wild4-recovery" \
+            --private "${GITHUB_WORKSPACE}/.recovery-private" \
+            --settlement "${GITHUB_WORKSPACE}/.recovery-settlement" \
+            --state-archive "${GITHUB_WORKSPACE}/.relay-cache/state.tgz.gpg" \
+            --lock-archive "${GITHUB_WORKSPACE}/.recovery-locks/future-locks.tgz.gpg"
+      - name: Encrypt existing WILD4 ledger with verified settlement append
+        if: inputs.mode == 'wild4-recover-20261013'
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          tar -czf "${RUNNER_TEMP}/wild4-recovery/future-locks.tgz" \
+            -C "${RUNNER_TEMP}/wild4-recovery/restored" g11-wild4-future-locks
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 \
+            --output "${RUNNER_TEMP}/wild4-recovery/future-locks.tgz.gpg" "${RUNNER_TEMP}/wild4-recovery/future-locks.tgz"
+          exec 3<&-
+      - name: Save through existing encrypted WILD4 canonical artifact
+        if: inputs.mode == 'wild4-recover-20261013'
+        uses: actions/upload-artifact@v4
+        with:
+          name: g11-wild4-20261013-future-oos-locks-encrypted
+          path: ${{ runner.temp }}/wild4-recovery/future-locks.tgz.gpg
+          if-no-files-found: error
+          retention-days: 30
+      - name: Read back the artifact before publication
+        if: inputs.mode == 'wild4-recover-20261013'
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-wild4-20261013-future-oos-locks-encrypted
+          path: .recovery-saved-readback
+      - name: Prove persisted ledger hash equality
+        if: inputs.mode == 'wild4-recover-20261013'
+        env:
+          RECOVERY_MODE: ${{ inputs.mode }}
+          RECOVERY_DATE: ${{ inputs.operational_date }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          python3 scripts/wild4_night_recovery_20261013.py verify-saved \
+            --work "${RUNNER_TEMP}/wild4-recovery" \
+            --lock-archive "${GITHUB_WORKSPACE}/.recovery-saved-readback/future-locks.tgz.gpg"
+      - name: Publish only WILD4 settlement references and verify exact GET
+        if: inputs.mode == 'wild4-recover-20261013'
+        env:
+          RECOVERY_MODE: ${{ inputs.mode }}
+          RECOVERY_DATE: ${{ inputs.operational_date }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/wild4_night_recovery_20261013.py publish --work "${RUNNER_TEMP}/wild4-recovery"
 
   wild4-prospective:
     name: Goripan WILD4 prospective observation
