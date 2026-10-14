@@ -8,6 +8,11 @@ on:
       - .github/workflows/g11-wild4-shadow-lock-only.yml
   workflow_call:
     inputs:
+      night_checkpoint_key:
+        description: Exact saved and read-back NIGHT checkpoint; no fallback when supplied
+        type: string
+        required: false
+        default: ""
       lineage_readback_date:
         description: Read-only promotion readback of existing 2026-10-07 lineage
         type: string
@@ -44,6 +49,7 @@ jobs:
           REQUESTED_DAY: ${{ github.event.inputs.operational_date }}
           REQUESTED_MODE: ${{ github.event.inputs.mode }}
           LINEAGE_READBACK_DATE: ${{ inputs.lineage_readback_date }}
+          NIGHT_CHECKPOINT_KEY: ${{ inputs.night_checkpoint_key }}
         run: |
           python3 - <<'PY'
           import os, re
@@ -77,6 +83,10 @@ jobs:
               and day==(now_jst.date()-timedelta(days=1)).isoformat())
           if not readback and day!=now_jst.date().isoformat() and not night_rollover:
               raise SystemExit('NON_CURRENT_OPERATIONAL_DATE')
+          checkpoint=os.environ.get('NIGHT_CHECKPOINT_KEY','')
+          if checkpoint and (os.environ.get('REQUESTED_MODE')!='wild4-settle' or readback
+              or re.fullmatch(r'g11-state-v4-published-'+re.escape(day)+r'-[0-9]+-[0-9]+-checkpoint',checkpoint) is None):
+              raise SystemExit('NIGHT_CHECKPOINT_IDENTITY')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
               output.write('night_rollover='+str(night_rollover).lower()+'\n')
@@ -85,15 +95,19 @@ jobs:
           print('WILD4_SHADOW_OPERATIONAL_DATE='+day)
           PY
       - name: Restore current encrypted canonical state
+        id: canonical-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-${{ steps.day.outputs.day }}-isolated-shadow-no-exact-match
-          restore-keys: |
-            g11-state-v4-published-${{ steps.day.outputs.day }}-
+          key: ${{ inputs.night_checkpoint_key || format('g11-state-v4-{0}-isolated-shadow-no-exact-match', steps.day.outputs.day) }}
+          restore-keys: ${{ inputs.night_checkpoint_key == '' && format('g11-state-v4-published-{0}-', steps.day.outputs.day) || '' }}
       - name: Verify current canonical state availability
         id: state-ready
         run: |
+          if [ -n '${{ inputs.night_checkpoint_key }}' ] && [ '${{ steps.canonical-cache.outputs.cache-hit }}' != true ]; then
+            echo 'WILD4_NIGHT_CHECKPOINT_MISSING' >&2
+            exit 1
+          fi
           if [ -s .relay-cache/state.tgz.gpg ]; then
             echo 'ready=true' >> "${GITHUB_OUTPUT}"
           else
@@ -728,6 +742,7 @@ jobs:
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          NIGHT_CHECKPOINT_KEY: ${{ inputs.night_checkpoint_key }}
         run: |
           set -euo pipefail
           export PYTHONPATH="${GITHUB_WORKSPACE}/.g11-private"
@@ -741,9 +756,14 @@ jobs:
           module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
           ledger = temp/'g11-wild4-future-locks'
           previous = module.verify_prior(ledger)
+          lock_keys = {p.stem for p in ledger.glob('*.json') if module.KEY.fullmatch(p.stem)}
+          complete = False
           source = workspace/'.relay-state/store/snapshots/night/workbook-ledger-projection.json'
           if not source.is_file():
+              if os.environ.get('NIGHT_CHECKPOINT_KEY'):
+                  raise SystemExit('WILD4_VERIFIED_NIGHT_PROJECTION_MISSING')
               print('WILD4_OFFICIAL_NIGHT=AWAITING_VERIFIED_PROJECTION')
+              print('::warning::WILD4 settlement pending verified NIGHT; not completed')
               print('WILD4_PRIOR_SETTLED='+str(len(previous)))
               new = 0
           else:
@@ -751,6 +771,10 @@ jobs:
               verified = store.load_verified_snapshot('night', 'workbook-ledger-projection')
               direct = store.load_verified_snapshot('night', 'official-day-results')
               summary = module.settle_day(ledger, verified, day, direct)
+              settled = module.verify_prior(ledger)
+              if set(settled) != lock_keys or summary['total'] != len(lock_keys):
+                  raise SystemExit('WILD4_UNSETTLED_LOCKS_REMAIN')
+              complete = bool(lock_keys)
               new = summary['new']
               print('WILD4_OFFICIAL_SETTLEMENT_NEW='+str(new))
               print('WILD4_OFFICIAL_SETTLEMENT_TOTAL='+str(summary['total']))
@@ -758,10 +782,15 @@ jobs:
               print('WILD4_OFFICIAL_SOURCE_SHA256='+verified['SNAPSHOT_SHA256'])
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write('new='+str(new)+'\n')
+              output.write('complete='+str(complete).lower()+'\n')
+          status = 'COMPLETE' if complete else 'NO_SAVED_LOCKS' if source.is_file() else 'PENDING_VERIFIED_NIGHT'
+          print('WILD4_SETTLEMENT_STATUS='+status)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write('WILD4 settlement: '+status+'; saved LOCKs='+str(len(lock_keys))+'; new='+str(new)+'\n')
           PY
       - name: Continue existing BET learning after completed NIGHT
         id: growth
-        if: steps.settlement.outcome == 'success' && steps.day.outputs.lifecycle_enabled == 'true'
+        if: steps.settlement.outputs.complete == 'true' && steps.day.outputs.lifecycle_enabled == 'true'
         continue-on-error: true
         timeout-minutes: 17
         working-directory: .g11-private
@@ -933,6 +962,15 @@ jobs:
             --store "${GITHUB_WORKSPACE}/${{ steps.decrypted.outputs.store }}" \
             --projection "${RUNNER_TEMP}/goripan-public-projection.json" \
             --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json"
+
+      - name: Require completion for verified NIGHT handoff
+        if: always() && !cancelled() && inputs.night_checkpoint_key != ''
+        run: |
+          if [ '${{ steps.settlement.outputs.complete }}' != true ]; then
+            echo 'WILD4_POST_NIGHT_SETTLEMENT_INCOMPLETE' >&2
+            exit 1
+          fi
+
 
 
 
