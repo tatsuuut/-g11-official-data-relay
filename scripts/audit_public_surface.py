@@ -9,6 +9,8 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/wild4_night_recovery_20261013.py",
+    "scripts/test_wild4_night_recovery_20261013.py",
     "scripts/night_recovery_20261013.py",
     "scripts/test_night_recovery_20261013.py",
     ".github/actions/g11-publication-checkpoint/action.yml",
