@@ -297,12 +297,15 @@ jobs:
           test "${GITHUB_EVENT_NAME}" = workflow_dispatch
           test "${GITHUB_REF}" = refs/heads/main
           test "${REQUESTED_DATE}" = 2026-10-13
-      - name: Restore exact saved October 13 NIGHT checkpoint
+      - name: Restore existing archive carrying immutable October 13 inputs
         if: inputs.mode == 'wild4-recover-20261013'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-published-2026-10-13-38437856530-1-checkpoint
+          # Historical cache entries were evicted. Read retained October 13
+          # files from this already-published archive; all original hash gates
+          # remain mandatory, and no October 14 file can be changed or saved.
+          key: g11-state-v4-published-2026-10-14-38490097791
           fail-on-cache-miss: true
       - name: Restore exact saved October 13 WILD4 LOCK artifact
         if: inputs.mode == 'wild4-recover-20261013'
