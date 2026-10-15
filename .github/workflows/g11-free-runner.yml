@@ -244,8 +244,8 @@ jobs:
                       json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n",
                       encoding="utf-8",
                   )
-          print("G11_RETAINED_MORNING",len(list((state_root/"store/snapshots/morning").glob("*.json"))))
-          print("G11_RELAY_STATE",metadata if metadata_path.is_file() else None)
+          print("G11_RETAINED_MORNING",len(list(state_root.glob("store/snapshots/morning/*.json"))))
+          for p in state_root.glob("store/responses/*/receipt.json"): print("G11_RAW_RECEIPT",p.read_text())
           PY
       - name: Restore the immutable daily source before any private imports
         id: authority
