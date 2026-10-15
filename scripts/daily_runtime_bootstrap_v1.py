@@ -14,6 +14,8 @@ import re
 import tarfile
 import tempfile
 import shutil
+import subprocess
+import sys
 from datetime import date, datetime, timedelta, timezone
 
 EFFECTIVE_FROM = "2026-10-04"
@@ -74,7 +76,9 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
         if day < "2026-10-16":
             raise RuntimeError("RESCUE_EFFECTIVE_DATE")
         retained_module(state, day).load(state, day)
-        return {"checkout_candidate":"true", "frozen":"true", "source_sha":"11379c5169569310182245b4274b94d644a54ecc"}
+        boundary = state / "rescue/boundary.json"
+        source_sha = json.loads(boundary.read_bytes())["runtime_source_sha"] if boundary.exists() else "fa55ff3b0d8b039394681d0e0f9bf7f3673e6f8d"
+        return {"checkout_candidate":"true", "frozen":"true", "source_sha":source_sha}
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
     path = state / "daily-runtime" / day / "authority.json"
@@ -97,9 +101,31 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
             "authority_sha256": authority["authority_sha256"]}
 
 
+def recovery_route(state, day, phase, now=None):
+    now = now or datetime.now(timezone(timedelta(hours=9)))
+    result = {"operational_date":day, "phase":phase, "recovery_route":"UNCHANGED"}
+    if day < "2026-10-17" or day != now.date().isoformat() or now.hour < 8 or phase not in {"morning","predeadline","auto"}:
+        return result
+    path = state / "relay-state.json"
+    if not path.is_file():
+        return {**result,"recovery_route":"NO_SAVED_DAY_AUTHORITY"}
+    metadata = json.loads(path.read_bytes())
+    if metadata.get("OPERATIONAL_DATE_JST") != day or metadata.get("MORNING_COMPLETE") is True:
+        return result
+    if (state / "rescue/feed.json").is_file():
+        return {**result,"recovery_route":"ALREADY_SAVED_NO_REGENERATION"}
+    if any((state / "store/snapshots/morning").glob("*.json")):
+        return {**result,"recovery_route":"PARTIAL_CANONICAL_LOCK_REQUIRES_REVIEW"}
+    if len(list((state / "recovery-failures" / day).glob("*.json"))) >= 2:
+        return {**result,"recovery_route":"BOUNDED_ATTEMPTS_EXHAUSTED"}
+    if not (state / "daily-runtime" / day / "authority.json").is_file():
+        return {**result,"recovery_route":"NO_SAVED_DAY_AUTHORITY"}
+    return {**result,"phase":"same-day-rescue","recovery_route":"MISSING_MORNING_AFTER_NORMAL_WINDOW"}
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("prepare", "freeze", "checkpoint-export", "candidate-dry-run"))
+    parser.add_argument("action", choices=("prepare", "freeze", "checkpoint-export", "candidate-dry-run", "route"))
     parser.add_argument("--state-root", required=True, type=Path)
     parser.add_argument("--operational-date", required=True)
     parser.add_argument("--phase", default="morning")
@@ -107,7 +133,9 @@ def main():
     parser.add_argument("--source-sha")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    if args.action == "prepare":
+    if args.action == "route":
+        value = recovery_route(args.state_root, args.operational_date, args.phase)
+    elif args.action == "prepare":
         value = prepare(args.state_root, args.operational_date, args.phase, args.source_root)
     elif args.action == "freeze":
         if args.phase == "same-day-rescue" and args.operational_date >= "2026-10-16":
@@ -144,6 +172,11 @@ def main():
                      "abeken_v53_version": authority["abeken_v53"]["version"],
                      "source_file_count": len(authority["source_files"]), "model_file_count": len(authority["model_files"]),
                      "production_state_mutated": False, "prediction_executed": False, "site_write": False}
+        if (args.state_root / "rescue/feed.json").exists():
+            subprocess.run([sys.executable, "-m", "g11.relay.delayed_morning_recovery_v1", "--audit-only",
+                "--state", str(args.state_root.resolve()), "--date", args.operational_date,
+                "--source-sha", args.source_sha, "--output", str(args.state_root.resolve() / "unused-audit-output"),
+                "--run-id", "0"], check=True)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_bytes(canonical(value) + b"\n")

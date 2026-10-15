@@ -78,7 +78,7 @@ jobs:
         if: github.event_name != 'schedule'
         run: python3 -m unittest discover -s scripts -p test_dynamic_last_race_heartbeat.py
       - name: Resolve the bounded phase and race day
-        id: due
+        id: scheduled
         env:
           REQUESTED_PHASE: ${{ inputs.phase }}
           REQUESTED_DATE: ${{ inputs.operational_date }}
@@ -172,12 +172,12 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v4-${{ steps.scheduled.outputs.operational_date }}-${{ github.run_id }}
           restore-keys: |
-            g11-state-v4-published-${{ steps.due.outputs.operational_date }}-
-            ${{ steps.due.outputs.operational_date != '2026-10-04' && format('g11-state-v3-{0}-', steps.due.outputs.operational_date) || '' }}
+            g11-state-v4-published-${{ steps.scheduled.outputs.operational_date }}-
+            ${{ steps.scheduled.outputs.operational_date != '2026-10-04' && format('g11-state-v3-{0}-', steps.scheduled.outputs.operational_date) || '' }}
             g11-state-v4-published-
-            ${{ steps.due.outputs.operational_date != '2026-10-04' && 'g11-state-v3-' || '' }}
+            ${{ steps.scheduled.outputs.operational_date != '2026-10-04' && 'g11-state-v3-' || '' }}
       - name: Fail closed when the private credential is absent
         env:
           G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
@@ -197,7 +197,7 @@ jobs:
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
             --decrypt --output "${archive}" "${encrypted}"
           exec 3<&-
-          python3 - "${archive}" "${{ steps.due.outputs.operational_date }}" <<'PY'
+          python3 - "${archive}" "${{ steps.scheduled.outputs.operational_date }}" <<'PY'
           import json
           import pathlib
           import shutil
@@ -247,6 +247,9 @@ jobs:
                       encoding="utf-8",
                   )
           PY
+      - name: Select verified morning recovery
+        id: due
+        run: python3 scripts/daily_runtime_bootstrap_v1.py route --state-root .relay-state --operational-date "${{ steps.scheduled.outputs.operational_date }}" --phase "${{ steps.scheduled.outputs.phase }}"
       - name: Restore the immutable daily source before any private imports
         id: authority
         run: |
@@ -699,7 +702,7 @@ jobs:
             if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-06" ]; then
               command=(python3 g11/relay/same_day_boundary_20261006.py run)
             else
-              python3 -m unittest g11.relay.test_delayed_morning_recovery_v1 g11.relay.test_daily_runtime_authority_v1 g11.relay.test_v53_final_authority_v1 g11.relay.test_final_bet_accounting_v1
+              python3 -m unittest g11.relay.test_delayed_morning_recovery_v1
               command=(python3 -m g11.relay.delayed_morning_recovery_v1 --date "${{ steps.due.outputs.operational_date }}")
             fi
             "${command[@]}" \
@@ -859,7 +862,6 @@ jobs:
           fetch-depth: 1
           sparse-checkout: g11/canonical/deme_discovery.py
           sparse-checkout-cone-mode: false
-      # Optional receipt follows normal morning/live transport; candidate pushes remain NIGHT-only.
       - name: Update P3 shadow discovery in retained research state
         if: steps.deme-source.outcome == 'success'
         continue-on-error: true

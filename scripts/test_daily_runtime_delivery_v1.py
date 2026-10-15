@@ -459,3 +459,43 @@ class ResearchDeltaTest(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+
+class DelayedRecoveryRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = Path(self.tmp.name)
+        self.day = "2026-10-17"
+        (self.state / "daily-runtime" / self.day).mkdir(parents=True)
+        (self.state / "daily-runtime" / self.day / "authority.json").write_text("{}")
+        self.metadata = self.state / "relay-state.json"
+        self.metadata.write_text(json.dumps({"OPERATIONAL_DATE_JST": self.day, "MORNING_COMPLETE":False}))
+    def route(self, time="08:00:00", phase="predeadline"):
+        return bootstrap.recovery_route(self.state, self.day, phase, _rescue_datetime.fromisoformat(self.day + "T" + time + "+09:00"))
+    def test_normal_0215_and_before_eight_stay_normal(self):
+        for time in ("02:15:00", "07:59:59"):
+            self.assertEqual(self.route(time, "morning")["phase"], "morning")
+    def test_after_eight_missing_morning_uses_isolated_lane(self):
+        self.assertEqual(self.route()["phase"], "same-day-rescue")
+    def test_success_never_runs_rescue(self):
+        self.metadata.write_text(json.dumps({"OPERATIONAL_DATE_JST":self.day,"MORNING_COMPLETE":True}))
+        self.assertEqual(self.route()["phase"], "predeadline")
+    def test_existing_partial_locks_are_not_overwritten(self):
+        p=self.state / "store/snapshots/morning/prediction-race.json";p.parent.mkdir(parents=True);p.write_text("locked")
+        self.assertEqual(self.route()["recovery_route"], "PARTIAL_CANONICAL_LOCK_REQUIRES_REVIEW")
+        self.assertEqual(p.read_text(), "locked")
+    def test_saved_recovery_is_not_regenerated(self):
+        p=self.state / "rescue/feed.json";p.parent.mkdir();p.write_text("saved")
+        self.assertEqual(self.route()["recovery_route"], "ALREADY_SAVED_NO_REGENERATION")
+    def test_retry_budget_is_bounded(self):
+        p=self.state / "recovery-failures" / self.day;p.mkdir(parents=True)
+        (p / "1.json").write_text("{}");self.assertEqual(self.route()["phase"], "same-day-rescue")
+        (p / "2.json").write_text("{}");self.assertEqual(self.route()["recovery_route"], "BOUNDED_ATTEMPTS_EXHAUSTED")
+    def test_night_and_past_dates_are_unchanged(self):
+        self.assertEqual(self.route(phase="night")["phase"], "night")
+        self.assertEqual(bootstrap.recovery_route(self.state, "2026-10-16", "predeadline", _rescue_datetime.fromisoformat("2026-10-17T09:00:00+09:00"))["phase"], "predeadline")
+    def test_missing_authority_never_attempts_recovery(self):
+        (self.state / "daily-runtime" / self.day / "authority.json").unlink()
+        self.assertEqual(self.route()["recovery_route"], "NO_SAVED_DAY_AUTHORITY")
