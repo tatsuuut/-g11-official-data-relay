@@ -14,7 +14,7 @@ import re
 import tarfile
 import tempfile
 import shutil
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 EFFECTIVE_FROM = "2026-10-04"
 MODULE_PATH = "g11/relay/daily_runtime_authority_v1.py"
@@ -66,6 +66,15 @@ def retained_module(state, day):
 
 
 def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
+    if phase == "same-day-rescue":
+        if day != datetime.now(timezone(timedelta(hours=9))).date().isoformat():
+            raise RuntimeError("RESCUE_CURRENT_DAY_ONLY")
+        if day == "2026-10-06":
+            return {"checkout_candidate":"true", "frozen":"false", "source_sha":"cd7fdb3133e2d57c7443973eb6bd5f67cc8e4344"}
+        if day < "2026-10-16":
+            raise RuntimeError("RESCUE_EFFECTIVE_DATE")
+        retained_module(state, day).load(state, day)
+        return {"checkout_candidate":"true", "frozen":"true", "source_sha":"11379c5169569310182245b4274b94d644a54ecc"}
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
     path = state / "daily-runtime" / day / "authority.json"
@@ -101,7 +110,9 @@ def main():
     if args.action == "prepare":
         value = prepare(args.state_root, args.operational_date, args.phase, args.source_root)
     elif args.action == "freeze":
-        if args.operational_date < EFFECTIVE_FROM or args.phase == "dry-run":
+        if args.phase == "same-day-rescue" and args.operational_date >= "2026-10-16":
+            value = {"status":"DELAYED_RECOVERY_FREEZE_IN_ISOLATED_RUNTIME"}
+        elif args.operational_date < EFFECTIVE_FROM or args.phase == "dry-run":
             value = {"status": "PRE_ACTIVATION_UNCHANGED"}
         else:
             implementation = module(args.source_root / MODULE_PATH)

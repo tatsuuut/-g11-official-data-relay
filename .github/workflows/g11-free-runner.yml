@@ -112,7 +112,9 @@ jobs:
                 ;;
             esac
           elif [ "${EVENT_NAME}" = "push" ]; then
-            if [[ "${COMMIT_MESSAGE}" == *"[rescue-20261006]"* ]]; then
+            if [[ "${COMMIT_MESSAGE}" == *"[delayed-recovery-current]"* ]]; then
+              phase="same-day-rescue"
+            elif [[ "${COMMIT_MESSAGE}" == *"[rescue-20261006]"* ]]; then
               phase="same-day-rescue"
               operational_date="2026-10-06"
             elif [[ "${COMMIT_MESSAGE}" == *"[daily-runtime-freeze]"* ]]; then
@@ -244,19 +246,10 @@ jobs:
                       json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n",
                       encoding="utf-8",
                   )
-          print("G11_RETAINED_MORNING",len(list(state_root.glob("store/snapshots/morning/*.json"))))
-          for p in state_root.glob("store/responses/*/receipt.json"): print("G11_RAW_RECEIPT",p.read_text())
           PY
       - name: Restore the immutable daily source before any private imports
         id: authority
         run: |
-          if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ]; then
-            test "${{ steps.due.outputs.operational_date }}" = "2026-10-06"
-            test "$(date +%F)" = "2026-10-06"
-            echo 'checkout_candidate=true' >> "${GITHUB_OUTPUT}"
-            echo 'frozen=false' >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
           python3 scripts/daily_runtime_bootstrap_v1.py prepare \
             --state-root .relay-state \
             --operational-date "${{ steps.due.outputs.operational_date }}" \
@@ -267,7 +260,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ env.G11_PRIVATE_REPOSITORY }}
-          ref: ${{ steps.authority.outputs.rescue_bootstrap == 'true' && steps.authority.outputs.source_sha || steps.due.outputs.phase == 'same-day-rescue' && 'cd7fdb3133e2d57c7443973eb6bd5f67cc8e4344' || env.G11_PRIVATE_RUNTIME_REF }}
+          ref: ${{ steps.authority.outputs.source_sha || env.G11_PRIVATE_RUNTIME_REF }}
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -498,7 +491,7 @@ jobs:
         if: steps.due.outputs.phase != 'predeadline' && steps.authority.outputs.rescue_bootstrap != 'true'
         id: freeze
         run: |
-          if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ]; then
+          if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ] && [ "${{ steps.due.outputs.operational_date }}" = "2026-10-06" ]; then
             python3 .g11-private/g11/relay/same_day_boundary_20261006.py freeze \
               --state .relay-state --source-sha "${{ steps.source.outputs.source_sha }}"
             exit 0
@@ -703,7 +696,13 @@ jobs:
           )
           runtime_stdout=../.relay-output/runtime.stdout
           if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ]; then
-            python3 g11/relay/same_day_boundary_20261006.py run \
+            if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-06" ]; then
+              command=(python3 g11/relay/same_day_boundary_20261006.py run)
+            else
+              python3 -m unittest g11.relay.test_delayed_morning_recovery_v1 g11.relay.test_daily_runtime_authority_v1 g11.relay.test_v53_final_authority_v1 g11.relay.test_final_bet_accounting_v1
+              command=(python3 -m g11.relay.delayed_morning_recovery_v1 --date "${{ steps.due.outputs.operational_date }}")
+            fi
+            "${command[@]}" \
               --state "${GITHUB_WORKSPACE}/.relay-state" --output "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
               --source-sha "${G11_PRIVATE_SOURCE_SHA}" --run-id "${GITHUB_RUN_ID}" | tee "${runtime_stdout}"
           elif [ "${G11_N13T}" = "true" ]; then

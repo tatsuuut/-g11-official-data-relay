@@ -660,12 +660,20 @@ def deliver_rescue(state, feed_path, origin, attempts, pause):
     cert = json.loads(boundary_path.read_bytes())
     unsigned = dict(cert)
     authority_sha = unsigned.pop('authority_sha256', None)
-    require(cert.get('schema') == 'G11_SAME_DAY_RESCUE_BOUNDARY_V1'
-            and cert.get('operational_date_jst') == '2026-10-06'
+    day = cert.get('operational_date_jst', '')
+    delayed = cert.get('schema') == 'G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1' and day >= '2026-10-16'
+    if delayed:
+        parent = json.loads((state / 'daily-runtime' / day / 'authority.json').read_bytes())
+        require(parent['authority_sha256'] == cert.get('parent_authority_sha256')
+                and cert.get('canonical_morning_promoted') is False
+                and cert.get('research_eligible') is False
+                and cert.get('same_day_results_used') is False
+                and cert.get('safety_margin_seconds') == 300, 'DELAYED_RECOVERY_PARENT')
+    require((delayed or (cert.get('schema') == 'G11_SAME_DAY_RESCUE_BOUNDARY_V1' and day == '2026-10-06'))
             and authority_sha == hashlib.sha256(json.dumps(unsigned, ensure_ascii=False, sort_keys=True,
                 separators=(',', ':'), allow_nan=False).encode()).hexdigest(), 'RESCUE_BOUNDARY_INVALID')
     feed = json.loads(feed_path.read_bytes())
-    require(feed['operational_date_jst'] == '2026-10-06' and feed['stage'] == 'MORNING'
+    require(feed['operational_date_jst'] == day and feed['stage'] == 'MORNING'
             and feed['same_day_rescue']['authority_sha256'] == cert['authority_sha256']
             and feed.get('daily_runtime') is None and feed['counts']['formal'] == 0
             and feed['counts']['research_samples'] == 0, 'RESCUE_TRANSPORT_IDENTITY')
@@ -699,7 +707,7 @@ def deliver_rescue(state, feed_path, origin, attempts, pause):
             if code < 500 or attempt + 1 == attempts:
                 raise RuntimeError('RESCUE_SITE_REJECTED:' + str(ack.get('error')))
             pause((2, 5)[attempt])
-        readback, headers, raw = hot.fetch(origin + '/api/g11-feed?date=2026-10-06')
+        readback, headers, raw = hot.fetch(origin + '/api/g11-feed?date=' + day)
         require(readback.get('same_day_rescue') == projected['same_day_rescue']
                 and readback.get('SNAPSHOT_CLASS') == 'SAME_DAY_RESCUE_BOUNDARY'
                 and headers.get('x-g11-source-feed-sha256') == hot.hash_bytes(data) == ack.get('payload_sha256'),
@@ -712,7 +720,7 @@ def deliver_rescue(state, feed_path, origin, attempts, pause):
         Path('.relay-output/hot-delta-accepted').write_text(ack['payload_sha256'] + '\n')
         Path('.relay-output/hot-delta-readback.json').write_bytes(raw)
         receipt = {'schema': 'G11_SAME_DAY_RESCUE_DELIVERY_V1', 'status': 'PASS',
-            'operational_date_jst': '2026-10-06', 'site_get_readback': 'PASS',
+            'operational_date_jst': day, 'site_get_readback': 'PASS',
             'rescued_race_count': feed['same_day_rescue']['rescued_race_count'],
             'excluded_past_deadline_race_count': feed['same_day_rescue']['excluded_past_deadline_race_count'],
             'authority_sha256': cert['authority_sha256'], 'site_payload_sha256': ack['payload_sha256']}
@@ -735,6 +743,7 @@ if __name__ == "__main__":
         emit_saved_n13(args.state_root, args.feed)
     else:
         deliver(args.state_root, args.feed, args.origin)
+
 
 
 
