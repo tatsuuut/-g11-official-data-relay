@@ -77,7 +77,7 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
             raise RuntimeError("RESCUE_EFFECTIVE_DATE")
         retained_module(state, day).load(state, day)
         boundary = state / "rescue/boundary.json"
-        source_sha = json.loads(boundary.read_bytes())["runtime_source_sha"] if boundary.exists() else "fa55ff3b0d8b039394681d0e0f9bf7f3673e6f8d"
+        source_sha = json.loads(boundary.read_bytes())["runtime_source_sha"] if boundary.exists() else "e508a0be5267349beb0d1bda425de9d828671d47"
         return {"checkout_candidate":"true", "frozen":"true", "source_sha":source_sha}
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
@@ -151,6 +151,7 @@ def main():
             value = {"status": "PASS", "source_sha": authority["runtime_source_sha"],
                      "authority_sha256": authority["authority_sha256"]}
     elif args.action == "candidate-dry-run":
+        subprocess.run([sys.executable, "-m", "unittest", "g11.relay.test_delayed_morning_recovery_v1"], check=True)
         implementation = module(args.source_root / MODULE_PATH)
         candidate_day = (date.fromisoformat(args.operational_date) + timedelta(days=1)).isoformat()
         with tempfile.TemporaryDirectory(prefix="g11-next-morning-") as directory:
@@ -177,6 +178,15 @@ def main():
                 "--state", str(args.state_root.resolve()), "--date", args.operational_date,
                 "--source-sha", args.source_sha, "--output", str(args.state_root.resolve() / "unused-audit-output"),
                 "--run-id", "0"], check=True)
+            if args.operational_date == "2026-10-16":
+                from hot_delta_transport_v1 import fetch
+                prior, _, _ = fetch("https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-15")
+                expected = "8232632c377913f1ee674e4b0f441d75e8807b4baa8ca2d79a20a3aae3fcb5c2"
+                if not (prior["stage"] == "NIGHT" and prior["counts"]["results"] == prior["counts"]["races"] == 156
+                        and prior["transport"]["canonical_feed_sha256"] == expected):
+                    raise RuntimeError("PREVIOUS_NIGHT_READBACK_CHANGED")
+                print(json.dumps({"PREVIOUS_NIGHT_READBACK":"PASS", "date":"2026-10-15", "races":156,
+                    "canonical_feed_sha256":expected, "site_write":False}, sort_keys=True))
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_bytes(canonical(value) + b"\n")
