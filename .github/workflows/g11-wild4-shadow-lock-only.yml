@@ -37,6 +37,30 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
       TZ: Asia/Tokyo
     steps:
+      - name: Prepare pinned WILD4 dependency before state acquisition
+        if: inputs.lineage_readback_date == ''
+        run: |
+          python3 - <<'PYDEPENDENCY'
+          import importlib.metadata, subprocess, sys, time
+          from datetime import datetime, timezone
+          started=time.monotonic()
+          print('WILD4_DEPENDENCY_PREP_STARTED_AT='+datetime.now(timezone.utc).isoformat(),flush=True)
+          try:
+              installed=importlib.metadata.version('catboost')
+          except importlib.metadata.PackageNotFoundError:
+              installed=None
+          if installed != '1.2.8':
+              subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--no-input','catboost==1.2.8'],check=True,timeout=180)
+              action='INSTALLED_PINNED'
+          else:
+              action='REUSED_PINNED'
+          if importlib.metadata.version('catboost') != '1.2.8':
+              raise SystemExit('WILD4_DEPENDENCY_VERSION_MISMATCH')
+          from catboost import CatBoostClassifier
+          print('WILD4_DEPENDENCY_PREP_ACTION='+action)
+          print('WILD4_DEPENDENCY_PREP_READY_AT='+datetime.now(timezone.utc).isoformat())
+          print('WILD4_DEPENDENCY_PREP_SECONDS='+format(time.monotonic()-started,'.3f'))
+          PYDEPENDENCY
       - name: Checkout isolated research branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -474,6 +498,20 @@ jobs:
           print('WILD4_GENERATION_GATE='+life.public_status(temp/'g11-wild4-future-locks')['generation_gate']['status'])
           print('WILD4_MODEL_ADOPTION_BOUNDARY='+day)
           PYBIND
+      - name: Verify frozen WILD4 inference runtime
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
+        working-directory: .g11-private
+        run: |
+          python3 - <<'PYREADY'
+          import os, pathlib
+          from datetime import datetime, timezone
+          from catboost import CatBoostClassifier
+          from g11.wild_pack.v1 import wild_bet_future_oos_v1 as future
+          binding,registry,path=future.verified_candidate(pathlib.Path(os.environ['WILD4_CANDIDATE_ROOT']))
+          model=CatBoostClassifier(); model.load_model(str(path))
+          print('WILD4_RUNTIME_READY_AT='+datetime.now(timezone.utc).isoformat())
+          print('WILD4_RUNTIME_READY=PASS MODEL_SHA256='+binding['MODEL_SHA256'])
+          PYREADY
       - name: Check for a matching unexpired official odds packet
         if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         id: availability
@@ -552,20 +590,8 @@ jobs:
               output.write('due='+('true' if due else 'false')+'\n')
           print('WILD4_ODDS_DAY_CONSIDERED='+str(len(records)))
           print('WILD4_MATCHING_UNEXPIRED='+str(len(due)))
+          print('WILD4_INPUT_VERIFIED_AT='+now.isoformat())
           PY
-      - name: Verify frozen WILD4 inference runtime
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
-        working-directory: .g11-private
-        run: |
-          python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
-          python3 - <<'PYREADY'
-          import os, pathlib
-          from catboost import CatBoostClassifier
-          from g11.wild_pack.v1 import wild_bet_future_oos_v1 as future
-          binding,registry,path=future.verified_candidate(pathlib.Path(os.environ['WILD4_CANDIDATE_ROOT']))
-          model=CatBoostClassifier(); model.load_model(str(path))
-          print('WILD4_RUNTIME_READY=PASS MODEL_SHA256='+binding['MODEL_SHA256'])
-          PYREADY
       - name: Lock future races before deadline without any production write
         if: inputs.lineage_readback_date == '' && steps.day.outputs.night_rollover != 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
         env:
@@ -612,6 +638,8 @@ jobs:
               if packet['EVALUATION_CONTEXT_PACK_ID']!=binding['EVALUATION_CONTEXT_PACK_ID']:
                   pack_mismatch+=1; continue
               future.predict_and_lock(row,candidate,contract,path,now=now,predictor=model)
+              saved=b.load_json(path)
+              print('WILD4_SAVED_TIMING='+json.dumps({'race_key':row['STANDARD_RACE_KEY'],'odds_captured_at':row['ODDS_CAPTURED_AT'],'decision_started_at':now.isoformat(),'locked_at':saved['LOCKED_AT'],'save_readback_at':datetime.now(timezone.utc).isoformat(),'deadline_at':packet['RACE_DEADLINE_AT'],'buy_count':saved['BUY_COUNT']},sort_keys=True))
               try:
                   life.observe_challenger(out,row,contract,now)
               except Exception as exc:
