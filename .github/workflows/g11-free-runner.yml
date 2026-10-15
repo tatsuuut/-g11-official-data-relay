@@ -504,7 +504,7 @@ jobs:
             --source-sha "${{ steps.source.outputs.source_sha }}" \
             --operational-date "${{ steps.due.outputs.operational_date }}" \
             --phase "${{ steps.due.outputs.phase }}"
-      - name: Verify daily freeze, recovery isolation, and transport
+      - name: Verify recovery isolation and preserved NIGHT
         if: steps.due.outputs.phase == 'dry-run'
         env:
           PYTHONPATH: .g11-private:scripts

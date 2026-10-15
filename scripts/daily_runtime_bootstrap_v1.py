@@ -180,6 +180,7 @@ def main():
                 "--run-id", "0"], check=True)
             if args.operational_date == "2026-10-16":
                 from hot_delta_transport_v1 import fetch
+                Path(".relay-output").mkdir(parents=True, exist_ok=True)
                 prior, _, _ = fetch("https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-15")
                 expected = "8232632c377913f1ee674e4b0f441d75e8807b4baa8ca2d79a20a3aae3fcb5c2"
                 if not (prior["stage"] == "NIGHT" and prior["counts"]["results"] == prior["counts"]["races"] == 156
