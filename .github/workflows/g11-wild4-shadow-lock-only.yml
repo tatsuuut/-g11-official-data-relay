@@ -54,9 +54,10 @@ jobs:
               action='INSTALLED_PINNED'
           else:
               action='REUSED_PINNED'
-          if importlib.metadata.version('catboost') != '1.2.8':
-              raise SystemExit('WILD4_DEPENDENCY_VERSION_MISMATCH')
-          from catboost import CatBoostClassifier
+          # Re-enter Python after installation: a newly created user site is
+          # not on the already-running interpreter's sys.path.
+          subprocess.run([sys.executable,'-c',
+              "import importlib.metadata; assert importlib.metadata.version('catboost') == '1.2.8'; from catboost import CatBoostClassifier"],check=True,timeout=30)
           print('WILD4_DEPENDENCY_PREP_ACTION='+action)
           print('WILD4_DEPENDENCY_PREP_READY_AT='+datetime.now(timezone.utc).isoformat())
           print('WILD4_DEPENDENCY_PREP_SECONDS='+format(time.monotonic()-started,'.3f'))
