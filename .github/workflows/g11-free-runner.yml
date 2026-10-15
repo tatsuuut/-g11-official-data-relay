@@ -245,6 +245,46 @@ jobs:
                       encoding="utf-8",
                   )
           PY
+      - name: Inspect retained MORNING evidence without mutation
+        if: steps.due.outputs.phase == 'dry-run'
+        run: |
+          python3 - <<'PY'
+          import datetime, hashlib, json
+          from pathlib import Path
+          root = Path('.relay-state')
+          day = '${{ steps.due.outputs.operational_date }}'
+          store = root / 'store'
+          def read(path):
+              return json.loads(path.read_bytes()) if path.is_file() else None
+          def sha(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+          morning = store / 'snapshots/morning'
+          names = sorted(p.name for p in morning.glob('*.json') if p.is_file())
+          metadata = read(root / 'relay-state.json') or {}
+          authority = read(root / 'daily-runtime' / day / 'authority.json') or {}
+          receipts = []
+          for path in sorted((store / 'responses').rglob('*.json')):
+              item = read(path)
+              if isinstance(item, dict) and ('racelist' in str(item.get('SOURCE_ID', '')) or 'schedule' in str(item.get('SOURCE_ID', ''))):
+                  receipts.append({k:item.get(k) for k in ('SOURCE_ID','CAPTURED_AT_JST','SHA256','URL','HTTP_STATUS')})
+          prior = (datetime.date.fromisoformat(day) - datetime.timedelta(days=1)).isoformat()
+          print(json.dumps({
+              'SCHEMA':'G11_READONLY_RETAINED_MORNING_INSPECTION_V1',
+              'OPERATIONAL_DATE_JST':day,
+              'INSPECTED_AT_UTC':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'MORNING_COMPLETE':metadata.get('MORNING_COMPLETE'),
+              'METADATA_DAY':metadata.get('OPERATIONAL_DATE_JST'),
+              'MORNING_SNAPSHOT_COUNT':len(names),
+              'MORNING_P3_PREDICTION_COUNT':sum(n.startswith('prediction-'+day.replace('-','')) for n in names),
+              'MORNING_SNAPSHOT_NAMES':names,
+              'SCOPE':read(store / 'scope.json'),
+              'OFFICIAL_RECEIPTS':receipts,
+              'AUTHORITY':{k:authority.get(k) for k in ('authority_sha256','runtime_source_sha','created_at_jst','model_set_sha256')},
+              'PREVIOUS_NIGHT_CHECKPOINT_SHA256':sha(root / 'daily-runtime' / prior / 'night-checkpoint.json'),
+              'PREVIOUS_NIGHT_FEED_SHA256':sha(root / 'daily-runtime' / prior / 'night-feed.json'),
+              'PREDICTION_EXECUTED':False,'STATE_WRITE':False,
+          },ensure_ascii=False,sort_keys=True))
+          PY
       - name: Restore the immutable daily source before any private imports
         id: authority
         run: |
@@ -2211,4 +2251,5 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
+
 
