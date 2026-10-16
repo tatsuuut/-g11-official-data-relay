@@ -408,6 +408,10 @@ def main():
     sys.argv = [sys.argv[0], *sys.argv[2:]]
     _require("--operational-date" in sys.argv, "PREDEADLINE_RECOVERY_DAY_MISSING")
     day = sys.argv[sys.argv.index("--operational-date") + 1]
+    if mode == "night" and day == "2026-10-16":
+        state = Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve()
+        run_delayed_night(state, day, Path(sys.argv[sys.argv.index("--feed-output") + 1]), sys.argv[sys.argv.index("--app-origin") + 1])
+        return 0
     if mode == "predeadline" and day == "2026-10-16" and "--state-root" in sys.argv:
         state = Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve()
         if (state / "rescue/feed.json").is_file():
@@ -476,8 +480,10 @@ def clock():
     require(not os.environ.get("G11_RELAY_NOW_JST"), "CLOCK_OVERRIDE")
     return datetime.now(JST)
 
-def certificate(state, day, now=None):
-    require(day == DELAYED_DAY == (now or clock()).date().isoformat(), "CURRENT_DAY_ONLY")
+def certificate(state, day, now=None, *, allow_night_rollover=False):
+    current = now or clock()
+    date_ok = current.date().isoformat() == day or (allow_night_rollover and current.date().isoformat() == "2026-10-17" and current.hour < 2)
+    require(day == DELAYED_DAY and date_ok, "CURRENT_DAY_ONLY")
     path = state / "rescue/boundary.json"
     require(path.is_file() and not path.is_symlink(), "BOUNDARY_MISSING")
     cert = json.loads(path.read_bytes())
@@ -742,6 +748,170 @@ def deliver(state, feed_path, origin):
     print(json.dumps(receipt, sort_keys=True))
     return receipt
 
+
+def night_overlay(accepted, results, now):
+    """Result-only projection; every prediction/LOCK/research field is retained."""
+    require(accepted.get('operational_date_jst') == DELAYED_DAY
+            and accepted.get('SNAPSHOT_CLASS') == 'SAME_DAY_RESCUE_BOUNDARY'
+            and accepted.get('counts', {}).get('formal') == 0, 'NIGHT_ACCEPTED_SCOPE')
+    rows = accepted['races']
+    keys = [r['key'] for r in rows]
+    require(len(set(keys)) == len(keys) and all(k.startswith('20261016-') for k in keys), 'NIGHT_DUPLICATE_OR_DAY')
+    by_key = {r.race_key: r for r in results}
+    require(len(by_key) == len(results) and set(by_key) == set(keys), 'NIGHT_RESULT_SCOPE')
+    require(all(datetime.fromisoformat(r['deadline_jst']) < now for r in rows), 'NIGHT_BEFORE_DEADLINE')
+    out = deepcopy(accepted)
+    for row in out['races']:
+        result = by_key[row['key']]
+        require(result.operational_date == DELAYED_DAY and result.venue_code == row['venue_code']
+                and result.race_no == row['race'], 'NIGHT_RESULT_IDENTITY')
+        meta = deepcopy(row['result_meta'])
+        meta.update(trifecta_popularity=result.trifecta_popularity, winning_technique=result.winning_method,
+            result_status=result.race_status, dead_heat=len(result.trifecta_settlements)>1,
+            trifecta_settlements=[{'trifecta':s.combination,'payout':s.payout,'popularity':s.popularity}
+                                  for s in result.trifecta_settlements])
+        require(result.race_status in {'ESTABLISHED','TRIFECTA_NOT_ESTABLISHED'}, 'NIGHT_RESULT_STATUS')
+        if row.get('result_trifecta') is not None or accepted.get('stage') == 'NIGHT':
+            require(row['result_trifecta'] == result.trifecta_combination and row['payout'] == result.trifecta_payout
+                    and row['result_meta'] == meta, 'NIGHT_EXISTING_RESULT_CONFLICT')
+        row['result_trifecta'], row['payout'], row['result_meta'] = result.trifecta_combination,result.trifecta_payout,meta
+        # No formal or research finance is generated for a rescue day.
+    out['stage']='NIGHT';out['status']='PASS'
+    if accepted.get('stage') != 'NIGHT': out['generated_at_jst']=now.replace(microsecond=0).isoformat()
+    out['counts']={**out['counts'],'results':len(rows),'pending':0}
+    return out
+
+
+def night_scores(feed, results):
+    """Separate rescue audit, never a formal BET or research ledger."""
+    official={r.race_key:r for r in results};audit={}
+    for row in feed['races']:
+        r=official[row['key']]; proof=row.get('same_day_rescue_lock') or {}
+        v4=(row.get('abeken_shadow') or {}).get('v53') or {}
+        lock=(row.get('pre_race_v2') or {}).get('final') or {}
+        selections={'p3_rescue':(row.get('practical_bets'),proof.get('p3_locked_at_jst')),
+          'abeken_rescue':((v4.get('morning') or {}).get('practical_bets'),proof.get('v4_locked_at_jst')),
+          'p3_live':((row.get('predeadline') or {}).get('practical_bets'),lock.get('locked_at_jst')),
+          'abeken_live':((v4.get('live') or {}).get('practical_bets'),(v4.get('live') or {}).get('locked_at_jst'))}
+        entries={}
+        for system,(bets,at) in selections.items():
+            if not bets or not at:
+                entries[system]={'status':'NO_FIXED_PREDICTION'};continue
+            require(len(set(bets))==len(bets) and datetime.fromisoformat(at)<datetime.fromisoformat(row['deadline_jst']), 'NIGHT_FIXED_PROOF')
+            require(all(re.fullmatch(r'[1-6]-[1-6]-[1-6]',b) and len(set(b.split('-')))==3 for b in bets), 'NIGHT_BETS')
+            gross=100*len(bets);refund=100*sum(bool(set(map(int,b.split('-')))&set(r.refund_boats)) for b in bets)
+            payout=sum(s.payout for s in r.trifecta_settlements if s.combination in bets)
+            entries[system]={'status':'SETTLED','fixed_at':at,'bets':bets,'hit':any(s.combination in bets for s in r.trifecta_settlements),
+              'virtual_investment':gross,'virtual_refund':refund,'virtual_payout':payout,'virtual_profit':payout+refund-gross}
+        entries['goripan']={'status':'NO_FIXED_BET_NO_BACKFILL'}
+        audit[row['key']]={'official_result':r.trifecta_combination,'official_payout':r.trifecta_payout,'engines':entries}
+    return audit
+
+
+def run_delayed_night(state, day, output, origin):
+    cert=certificate(state, day, allow_night_rollover=True)
+    original_argv=sys.argv
+    try:
+        sys.argv=[sys.argv[0]]
+        from g11.relay import daily_runtime_authority_v1 as daily
+        from g11.relay import delayed_morning_recovery_v1 as recovery
+        from g11.canonical.official_pipeline import CanonicalRunner,OfficialArtifactStore,result_url,parse_result_text,decode_cp932,_serializable
+    finally:sys.argv=original_argv
+    import hot_delta_transport_v1 as hot
+    recovery.verify_boundary(state/'rescue',day)
+    require(daily.source_inventory(Path.cwd()) == cert['source_files'], 'NIGHT_SOURCE_CHANGED')
+    protected_roots=[state/'store',state/'daily-runtime',state/'rescue/store/snapshots/morning',state/'rescue/store/snapshots/predeadline']
+    before=[inventory(p) for p in protected_roots]
+    boundary_bytes=(state/'rescue/boundary.json').read_bytes();baseline_bytes=(state/'rescue/feed.json').read_bytes()
+    accepted,headers,raw=hot.fetch(origin+'/api/g11-feed?date='+day)
+    require(accepted.get('same_day_rescue',{}).get('authority_sha256') == cert['authority_sha256'], 'NIGHT_BOUNDARY')
+    root=state/'rescue'; saved=root/'night-feed.json';report=root/'night-audit.json'
+    if saved.exists():
+        out=json.loads(saved.read_bytes());a=json.loads(report.read_bytes())
+        require(a['feed_sha256']==sha(saved.read_bytes()) and a['protected_sha256']==sha(canonical(before)), 'NIGHT_REPLAY_BINDING')
+        require(out['same_day_rescue']==accepted['same_day_rescue'], 'NIGHT_REPLAY_BOUNDARY')
+        output.write_bytes(saved.read_bytes())
+        print(json.dumps(a['runtime_result'],sort_keys=True));return
+    class ResultsOnlyStore(OfficialArtifactStore):
+        def commit_snapshot(self,stage,name,value,source_receipts):
+            require(stage=='night' and name=='official-day-results','NIGHT_ONLY_OFFICIAL_RESULTS_WRITE')
+            return super().commit_snapshot(stage,name,value,source_receipts)
+    store=ResultsOnlyStore(root/'store');runner=CanonicalRunner(store)
+    target=datetime.fromisoformat(day).date();url=result_url(target)
+    morning=store.load_verified_snapshot('morning','official-day-input')['SNAPSHOT']['PAYLOAD']
+    require(morning['OPERATIONAL_DATE_JST']==day,'NIGHT_MORNING_DAY')
+    expected={r['operational_date'].replace('-','')+f"-{r['venue_code']}-{r['race_no']:02d}" for r in morning['RACES']}
+    require(expected=={r['key'] for r in accepted['races']},'NIGHT_INPUT_SCOPE')
+    def parse(raw):
+        results=parse_result_text(decode_cp932(runner.extractor.extract_one(raw,runner._archive_member(url))),target,require_full_races=False)
+        require(len(results)==len(expected) and {r.race_key for r in results}==expected,'NIGHT_OFFICIAL_INCOMPLETE')
+        return results
+    receipt,results=runner.client.fetch_validated_once(f'result-k-{target:%Y%m%d}',url,parse)
+    store.commit_snapshot('night','official-day-results',{'STATUS':'NIGHT_RESULTS_COMPLETE','OPERATIONAL_DATE_JST':day,
+      'EXPECTED_RESULT_COUNT':len(expected),'PENDING_RESULT_COUNT':0,'PENDING_RACE_KEYS':[],
+      'RESULTS':[_serializable(r) for r in results]},[receipt])
+    # Existing accepted forecasts must still be backed by the immutable rescue baseline.
+    baseline=json.loads(baseline_bytes);base_rows={r['key']:r for r in baseline['races']}
+    for row in accepted['races']:
+        for field in ('same_day_rescue_lock','practical_bets','p3_production_bets','p3_snapshot_sha256'):
+            require(row.get(field)==base_rows[row['key']].get(field),'NIGHT_BASELINE_CHANGED')
+        proof=row.get('same_day_rescue_lock')
+        if proof:
+            require(proof['p3_snapshot_sha256'] in before[2].values() and proof['v4_snapshot_sha256'] in before[2].values(),'NIGHT_MORNING_SNAPSHOT')
+        for obj in [row.get('predeadline'),((row.get('abeken_shadow') or {}).get('v53') or {}).get('live')]:
+            if obj:require(obj.get('snapshot_sha256') in before[3].values(),'NIGHT_LIVE_SNAPSHOT')
+        require(not ((row.get('wild_pack') or {}).get('wild4') or {}).get('production_bet') and not (row.get('wild_pack') or {}).get('morning') and not (row.get('wild_pack') or {}).get('pre_race'),'NIGHT_UNEXPECTED_WILD_BET')
+    out=night_overlay(accepted,results,clock());scores=night_scores(out,results)
+    require(before==[inventory(p) for p in protected_roots] and boundary_bytes==(root/'boundary.json').read_bytes()
+        and baseline_bytes==(root/'feed.json').read_bytes(),'NIGHT_PROTECTED_MUTATION')
+    recovery.verify_boundary(root,day)
+    result={'STATUS':'SAME_DAY_RESCUE_NIGHT_RESULTS_COMPLETE','PHASE':'NIGHT','OPERATIONAL_DATE_JST':day,
+        'RESULTS':len(results),'RACES':len(expected),'PENDING':0,'PREDICTION_RECALCULATION':0,
+        'CANONICAL_MORNING_PROMOTED':False,'NIGHT_RESEARCH_CONNECTED':False,
+        'SETTLED_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='SETTLED' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
+        'GORIPAN':'NO_FIXED_BET_NO_BACKFILL','PROTECTED_UNCHANGED':True}
+    data=canonical(out)+b'\n'
+    require(len(data)<=2097152,'NIGHT_DELIVERY_SIZE')
+    atomic(saved,data);atomic(report,canonical({'runtime_result':result,'official_url':url,
+        'official_receipt':_serializable(receipt),'feed_sha256':sha(data),'accepted_feed_sha256':sha(raw),
+        'protected_sha256':sha(canonical(before)),'by_race':scores})+b'\n')
+    output.write_bytes(data);print(json.dumps(result,sort_keys=True))
+
+
+def deliver_delayed_night(state,feed_path,origin):
+    import hot_delta_transport_v1 as hot
+    import subprocess,tempfile
+    certificate(state,DELAYED_DAY,allow_night_rollover=True)
+    data=feed_path.read_bytes();out=json.loads(data)
+    require(data==(state/'rescue/night-feed.json').read_bytes(),'NIGHT_SAVED_OUTPUT')
+    accepted,headers,raw=hot.fetch(origin+'/api/g11-feed?date='+DELAYED_DAY)
+    def without_results(f):
+        v=deepcopy(f)
+        for k in ('stage','status','generated_at_jst'):v.pop(k,None)
+        for k in ('results','pending'):v['counts'].pop(k,None)
+        for row in v['races']:
+            for k in ('result_trifecta','payout','result_meta'):row.pop(k,None)
+        return v
+    require(without_results(accepted)==without_results(out),'NIGHT_PREDICTION_OR_RESEARCH_MUTATION')
+    require(out['stage']=='NIGHT' and out['counts']['results']==len(out['races']) and out['counts']['pending']==0,'NIGHT_INCOMPLETE')
+    if accepted['stage']=='NIGHT':require(accepted==out,'NIGHT_ALREADY_SETTLED_CONFLICT')
+    else:
+        with tempfile.TemporaryDirectory() as directory:
+            p=Path(directory)/'feed.json';resp=Path(directory)/'response.json';p.write_bytes(data)
+            r=subprocess.run(['curl','--silent','--show-error','--max-time','45','-X','POST',origin+'/api/g11-sync',
+              '-H','Authorization: Bearer '+os.environ['G11_SYNC_OIDC'],'-H','Content-Type: application/json',
+              '-H','x-g11-feed-sha256: '+sha(data),'--data-binary','@'+str(p),'--output',str(resp),'--write-out','%{http_code}'],capture_output=True,text=True,check=True)
+            ack=json.loads(resp.read_bytes())
+            require(200<=int(r.stdout)<300 and ack.get('status')=='PASS','NIGHT_SITE_REJECTED:'+str(ack.get('error')))
+    actual,headers,raw=hot.fetch(origin+'/api/g11-feed?date='+DELAYED_DAY)
+    require(actual==out and headers.get('x-g11-source-feed-sha256')==sha(data),'NIGHT_SITE_READBACK')
+    Path('.relay-output/hot-delta-accepted').write_text(sha(data)+'\n')
+    Path('.relay-output/hot-delta-readback.json').write_bytes(raw)
+    if os.environ.get('GITHUB_OUTPUT'):
+        with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('feed_sha='+sha(data)+'\n')
+    receipt={'schema':'G11_DELAYED_RESCUE_NIGHT_DELIVERY_V1','status':'PASS','operational_date_jst':DELAYED_DAY,
+        'results':len(out['races']),'pending':0,'site_get_readback':'PASS','site_payload_sha256':sha(data),'protected_unchanged':True}
+    atomic(state/'rescue/night-delivery.json',canonical(receipt)+b'\n');print(json.dumps(receipt,sort_keys=True));return receipt
 
 if __name__ == "__main__":
     raise SystemExit(main())
