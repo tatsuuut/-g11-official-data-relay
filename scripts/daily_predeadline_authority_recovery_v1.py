@@ -810,6 +810,8 @@ def night_scores(feed, results):
 
 
 def run_delayed_night(state, day, output, origin):
+    Path(".relay-output").mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     cert=certificate(state, day, allow_night_rollover=True)
     original_argv=sys.argv
     try:
@@ -907,6 +909,7 @@ def run_delayed_night(state, day, output, origin):
 
 
 def deliver_delayed_night(state,feed_path,origin):
+    Path(".relay-output").mkdir(parents=True, exist_ok=True)
     import hot_delta_transport_v1 as hot
     import subprocess,tempfile
     certificate(state,DELAYED_DAY,allow_night_rollover=True)
