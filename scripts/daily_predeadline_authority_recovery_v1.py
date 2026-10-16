@@ -405,6 +405,8 @@ def _run_same_day_rescue_night(day):
 
 def main():
     mode = sys.argv[1]
+    if mode == "night-baseline":
+        restore_night_baseline(Path(sys.argv[2]).resolve(),Path(sys.argv[3]));return 0
     sys.argv = [sys.argv[0], *sys.argv[2:]]
     _require("--operational-date" in sys.argv, "PREDEADLINE_RECOVERY_DAY_MISSING")
     day = sys.argv[sys.argv.index("--operational-date") + 1]
@@ -809,6 +811,37 @@ def night_scores(feed, results):
     return audit
 
 
+def restore_night_baseline(state, archive):
+    """Read an exact pre-incident checkpoint; restore only a derived status timestamp."""
+    import tarfile
+    roots=['store','daily-runtime','rescue/store/snapshots/morning','rescue/store/snapshots/predeadline']
+    baseline=[{} for _ in roots];old_status=None
+    target='store/g11/wild-pack-oos/morning/bet-status.json'
+    with tarfile.open(archive,'r:gz') as tar:
+        for member in tar:
+            name=member.name.removeprefix('./')
+            if not member.isfile():continue
+            for i,root in enumerate(roots):
+                if name.startswith(root+'/'):
+                    data=tar.extractfile(member).read();baseline[i][name[len(root)+1:]]=sha(data)
+                    if name==target:old_status=data
+    require(all(baseline) and old_status is not None,'NIGHT_BASELINE_MISSING')
+    current=[inventory(state/root) for root in roots]
+    changes=[roots[i]+'/'+k for i in range(len(roots)) for k in set(current[i])|set(baseline[i]) if current[i].get(k)!=baseline[i].get(k)]
+    require(set(changes)<= {target},'NIGHT_BASELINE_UNEXPECTED_CHANGES:'+','.join(changes[:8]))
+    if changes:
+        old=json.loads(old_status);now=json.loads((state/target).read_bytes())
+        for value in (old,now):
+            value.pop('UPDATED_AT_UTC',None);value.pop('CONTENT_SHA256',None)
+        require(old==now,'NIGHT_BASELINE_STATUS_CONTENT_CHANGED')
+        atomic(state/target,old_status)
+    require([inventory(state/root) for root in roots]==baseline,'NIGHT_BASELINE_READBACK')
+    proof={'schema':'G11_NIGHT_PREINCIDENT_PRESERVATION_V1','cache_key':'g11-state-v4-published-2026-10-16-38911423461',
+        'protected_sha256':sha(canonical(baseline)),'restored_derived_status_only':bool(changes)}
+    atomic(state/'rescue/night-preservation.json',canonical(proof)+b'\n')
+    print(json.dumps({'NIGHT_PREINCIDENT_READBACK':'PASS','RESTORED_DERIVED_STATUS_ONLY':bool(changes)}))
+
+
 def run_delayed_night(state, day, output, origin):
     Path(".relay-output").mkdir(parents=True, exist_ok=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -831,7 +864,9 @@ def run_delayed_night(state, day, output, origin):
     root=state/'rescue'; saved=root/'night-feed.json';report=root/'night-audit.json'
     if saved.exists():
         out=json.loads(saved.read_bytes());a=json.loads(report.read_bytes())
-        require(a['feed_sha256']==sha(saved.read_bytes()) and a['protected_sha256']==sha(canonical(before)), 'NIGHT_REPLAY_BINDING')
+        proof=json.loads((root/'night-preservation.json').read_bytes())
+        require(a['feed_sha256']==sha(saved.read_bytes()) and proof.get('cache_key')=='g11-state-v4-published-2026-10-16-38911423461'
+            and proof['protected_sha256']==sha(canonical(before)), 'NIGHT_REPLAY_BINDING')
         require(out['same_day_rescue']==accepted['same_day_rescue'], 'NIGHT_REPLAY_BOUNDARY')
         output.write_bytes(saved.read_bytes())
         print(json.dumps(a['runtime_result'],sort_keys=True));return
@@ -925,13 +960,19 @@ def deliver_delayed_night(state,feed_path,origin):
         return v
     require(without_results(accepted)==without_results(out),'NIGHT_PREDICTION_OR_RESEARCH_MUTATION')
     require(out['stage']=='NIGHT' and out['counts']['results']==len(out['races']) and out['counts']['pending']==0,'NIGHT_INCOMPLETE')
+    base_sha=headers.get('x-g11-source-feed-sha256')
+    require(base_sha==sha(raw),'NIGHT_BASE_SHA')
+    audit_sha=sha((state/'rescue/night-audit.json').read_bytes())
+    checkpoint_sha=sha(('\n'.join(['G11_DELAYED_RESCUE_NIGHT_COMMIT_V1',DELAYED_DAY,base_sha,sha(data),
+        out['same_day_rescue']['authority_sha256'],audit_sha])).encode())
     if accepted['stage']=='NIGHT':require(accepted==out,'NIGHT_ALREADY_SETTLED_CONFLICT')
     else:
         with tempfile.TemporaryDirectory() as directory:
             p=Path(directory)/'feed.json';resp=Path(directory)/'response.json';p.write_bytes(data)
             r=subprocess.run(['curl','--silent','--show-error','--max-time','45','-X','POST',origin+'/api/g11-sync',
               '-H','Authorization: Bearer '+os.environ['G11_SYNC_OIDC'],'-H','Content-Type: application/json',
-              '-H','x-g11-feed-sha256: '+sha(data),'--data-binary','@'+str(p),'--output',str(resp),'--write-out','%{http_code}'],capture_output=True,text=True,check=True)
+              '-H','x-g11-feed-sha256: '+sha(data),'-H','x-g11-rescue-night-base-sha256: '+base_sha,
+              '-H','x-g11-rescue-night-audit-sha256: '+audit_sha,'-H','x-g11-rescue-night-checkpoint-sha256: '+checkpoint_sha,'--data-binary','@'+str(p),'--output',str(resp),'--write-out','%{http_code}'],capture_output=True,text=True,check=True)
             ack=json.loads(resp.read_bytes())
             require(200<=int(r.stdout)<300 and ack.get('status')=='PASS','NIGHT_SITE_REJECTED:'+str(ack.get('error')))
     actual,headers,raw=hot.fetch(origin+'/api/g11-feed?date='+DELAYED_DAY)
@@ -941,7 +982,7 @@ def deliver_delayed_night(state,feed_path,origin):
     if os.environ.get('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('feed_sha='+sha(data)+'\n')
     receipt={'schema':'G11_DELAYED_RESCUE_NIGHT_DELIVERY_V1','status':'PASS','operational_date_jst':DELAYED_DAY,
-        'results':len(out['races']),'pending':0,'site_get_readback':'PASS','site_payload_sha256':sha(data),'protected_unchanged':True}
+        'results':len(out['races']),'pending':0,'audit_sha256':audit_sha,'checkpoint_sha256':checkpoint_sha,'site_get_readback':'PASS','site_payload_sha256':sha(data),'protected_unchanged':True}
     atomic(state/'rescue/night-delivery.json',canonical(receipt)+b'\n');print(json.dumps(receipt,sort_keys=True));return receipt
 
 if __name__ == "__main__":
