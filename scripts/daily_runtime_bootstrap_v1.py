@@ -81,9 +81,9 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
         return {"checkout_candidate":"true", "frozen":"true", "source_sha":source_sha}
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
-    if phase == "predeadline" and day == "2026-10-16" and (state / "rescue/feed.json").is_file():
+    if phase in {"predeadline", "night"} and day == "2026-10-16" and (state / "rescue/feed.json").is_file():
         from daily_predeadline_authority_recovery_v1 import certificate
-        cert = certificate(state, day)
+        cert = certificate(state, day, allow_night_rollover=(phase == "night"))
         return {"checkout_candidate": "true", "frozen": "true", "rescue_bootstrap": "true",
                 "d16": "true", "source_sha": cert["runtime_source_sha"]}
     path = state / "daily-runtime" / day / "authority.json"
@@ -209,3 +209,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
