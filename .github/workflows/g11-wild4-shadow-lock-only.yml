@@ -385,22 +385,37 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         run: |
           python3 - <<'PYCARRY'
-          import os,json,urllib.request,urllib.error,subprocess,pathlib,tarfile,shutil,zipfile,io
+          import os,json,urllib.request,urllib.error,subprocess,pathlib,tarfile,shutil,zipfile,io,hashlib,sys
           from datetime import date,timedelta
           base='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']
           headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
           def get(path):
               with urllib.request.urlopen(urllib.request.Request(base+path,headers=headers),timeout=45) as r: return r.read()
-          previous=(date.fromisoformat(os.environ['OPERATIONAL_DATE'])-timedelta(days=1)).isoformat()
-          name='g11-wild4-'+previous.replace('-','')+'-future-oos-locks-encrypted'
-          items=json.loads(get('/actions/artifacts?name='+name+'&per_page=100'))['artifacts']
-          valid=[]
-          for a in items:
-              if a['name']!=name or a['expired']: continue
-              run=json.loads(get('/actions/runs/'+str(a['workflow_run']['id'])))
-              if run['path']=='.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml' and run['head_branch']=='main' and run['conclusion']=='success': valid.append(a)
-          if not valid: raise SystemExit('PREVIOUS_DAY_MODEL_REGISTRY_UNAVAILABLE')
-          selected=max(valid,key=lambda a:a['created_at'])
+          # A missing prediction day must not erase the last verified model registry.
+          # Do not skip an existing but unverified registry, or import any old race LOCK.
+          selected=None
+          for gap_days in range(1,8):
+              previous=(date.fromisoformat(os.environ['OPERATIONAL_DATE'])-timedelta(days=gap_days)).isoformat()
+              name='g11-wild4-'+previous.replace('-','')+'-future-oos-locks-encrypted'
+              items=json.loads(get('/actions/artifacts?name='+name+'&per_page=100'))['artifacts']
+              matching=[a for a in items if a['name']==name]
+              if not matching: continue
+              valid=[]
+              for a in matching:
+                  if a['expired']: continue
+                  run=json.loads(get('/actions/runs/'+str(a['workflow_run']['id'])))
+                  if (run['path']=='.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml'
+                      and run['head_branch']=='main' and run['conclusion']=='success'
+                      and a['workflow_run']['repository_id']==int(os.environ['GITHUB_REPOSITORY_ID'])
+                      and a['workflow_run']['head_repository_id']==int(os.environ['GITHUB_REPOSITORY_ID'])):
+                      valid.append(a)
+              if not valid: raise SystemExit('MODEL_REGISTRY_HISTORY_UNVERIFIED')
+              selected=max(valid,key=lambda a:(a['created_at'],a['id']))
+              break
+          if selected is None: raise SystemExit('PREVIOUS_DAY_MODEL_REGISTRY_UNAVAILABLE')
+          print('WILD4_MODEL_REGISTRY_CARRY_SOURCE='+json.dumps({
+              'source_day':previous,'artifact_id':selected['id'],'run_id':selected['workflow_run']['id'],
+              'missing_days':gap_days-1,'digest':selected.get('digest')},sort_keys=True))
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self,*args,**kwargs): return None
           try:
@@ -412,6 +427,8 @@ jobs:
           if not location.startswith('https://'): raise SystemExit('ARTIFACT_DOWNLOAD_SCHEME')
           # Never forward GitHub Authorization to the signed artifact host.
           with urllib.request.urlopen(location,timeout=60) as response: raw=response.read()
+          if selected.get('digest')!='sha256:'+hashlib.sha256(raw).hexdigest():
+              raise SystemExit('MODEL_REGISTRY_ARTIFACT_DIGEST')
           with zipfile.ZipFile(io.BytesIO(raw)) as z:
               if z.namelist()!=['future-locks.tgz.gpg']: raise SystemExit('REGISTRY_ARCHIVE_SHAPE')
               encrypted=z.read(z.namelist()[0])
@@ -425,11 +442,26 @@ jobs:
                   q=pathlib.PurePosixPath(m.name)
                   if q.is_absolute() or '..' in q.parts or m.issym() or m.islnk() or not (m.isfile() or m.isdir()): raise SystemExit('UNSAFE_REGISTRY_ARCHIVE')
               a.extractall(dest,filter='data')
-          source=dest/'g11-wild4-future-locks/model-registry'
+          source_root=dest/'g11-wild4-future-locks'
+          source=source_root/'model-registry'
           if not source.is_dir(): raise SystemExit('PREVIOUS_MODEL_REGISTRY_NOT_CONNECTED')
+          sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'.g11-private'))
+          from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+          pin=life.read(source_root/'day-model-binding.json')
+          state=life.read(life.state_path(source_root))
+          if (pin.get('schema')!='G11_WILD4_DAY_MODEL_BINDING_V1'
+              or pin.get('date')!=previous or pin.get('authority')!=life.AUTHORITY
+              or state.get('schema')!='G11_WILD4_LIFECYCLE_V1'
+              or state.get('authority')!=life.AUTHORITY or state.get('active')!=pin.get('model')
+              or life.model_info(source/'models'/pin['model']['identity'])!=pin['model']):
+              raise SystemExit('CARRIED_MODEL_REGISTRY_BINDING')
           ledger=temp/'g11-wild4-future-locks';ledger.mkdir(exist_ok=True)
           shutil.copytree(source,ledger/'model-registry')
+          if gap_days>1:
+              with open(os.environ['GITHUB_ENV'],'a') as env:
+                  env.write('WILD4_RECOVERED_MODEL_IDENTITY='+pin['model']['identity']+'\n')
           print('WILD4_PRIOR_MODEL_REGISTRY=VERIFIED_SOURCE')
+          print('WILD4_CARRIED_MODEL_IDENTITY='+pin['model']['identity'])
           PYCARRY
       - name: Bind one model for the operational day
         if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
@@ -490,6 +522,8 @@ jobs:
           selected=life.bind_day(temp/'g11-wild4-future-locks',temp/'g11-wild4-candidate',
               temp/'g11-wild4-calibrated-candidate',day,previous_night_complete=prior_complete,now=datetime.now(timezone.utc),generation_evidence=generation_evidence)
           info=life.model_info(selected)
+          if os.environ.get('WILD4_RECOVERED_MODEL_IDENTITY') and info['identity']!=os.environ['WILD4_RECOVERED_MODEL_IDENTITY']:
+              raise SystemExit('RECOVERED_MODEL_CHANGED')
           # The legacy audit keeps its complete original input artifact.
           if info['identity']==life.BASE and (temp/'g11-wild4-candidate/model.cbm').is_file(): selected=temp/'g11-wild4-candidate'
           with open(os.environ['GITHUB_ENV'],'a') as out:
