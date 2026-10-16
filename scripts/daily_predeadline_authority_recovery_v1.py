@@ -409,6 +409,7 @@ def main():
     _require("--operational-date" in sys.argv, "PREDEADLINE_RECOVERY_DAY_MISSING")
     day = sys.argv[sys.argv.index("--operational-date") + 1]
     if mode == "night" and day == "2026-10-16":
+        sys.path.insert(0, str(Path.cwd()))
         state = Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve()
         run_delayed_night(state, day, Path(sys.argv[sys.argv.index("--feed-output") + 1]), sys.argv[sys.argv.index("--app-origin") + 1])
         return 0
