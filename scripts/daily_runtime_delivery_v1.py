@@ -306,6 +306,9 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     day = incoming["operational_date_jst"]
     rescue_class = incoming.get("SNAPSHOT_CLASS")
     if rescue_class == "SAME_DAY_RESCUE_BOUNDARY":
+        if day == "2026-10-16" and incoming.get("stage") == "NIGHT":
+            from daily_predeadline_authority_recovery_v1 import deliver_delayed_night
+            return deliver_delayed_night(state, feed_path, origin)
         if (incoming.get("operational_date_jst") == "2026-10-16"
                 and (state / "rescue/predeadline-audit.json").is_file()):
             from daily_predeadline_authority_recovery_v1 import deliver as deliver_delayed_live
@@ -747,6 +750,7 @@ if __name__ == "__main__":
         emit_saved_n13(args.state_root, args.feed)
     else:
         deliver(args.state_root, args.feed, args.origin)
+
 
 
 
