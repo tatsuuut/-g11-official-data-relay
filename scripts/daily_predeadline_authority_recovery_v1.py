@@ -862,7 +862,34 @@ def run_delayed_night(state, day, output, origin):
         for obj in [row.get('predeadline'),((row.get('abeken_shadow') or {}).get('v53') or {}).get('live')]:
             if obj:require(obj.get('snapshot_sha256') in before[3].values(),'NIGHT_LIVE_SNAPSHOT')
         require(not ((row.get('wild_pack') or {}).get('wild4') or {}).get('production_bet') and not (row.get('wild_pack') or {}).get('morning') and not (row.get('wild_pack') or {}).get('pre_race'),'NIGHT_UNEXPECTED_WILD_BET')
-    out=night_overlay(accepted,results,clock());scores=night_scores(out,results)
+    out=night_overlay(accepted,results,clock())
+    # Audit also includes already-fixed LIVE snapshots withheld by a failed
+    # predeadline publication. They are never appended to the public forecast.
+    from g11.growth_p3.v1_1 import current_runtime_v1 as p3
+    from g11.canonical import public_app_feed as feedlib
+    rescued={r['key'] for r in accepted['races'] if r.get('same_day_rescue_lock')}
+    p3_rows,_=p3.load_public_live_projection(store,sorted(rescued))
+    _,v4_rows=feedlib._abeken_public_projection(root,'PREDEADLINE',day,rescued)
+    receipts=json.loads((root/'live-write-receipts.json').read_bytes())
+    audit_feed=deepcopy(out);unpublished=[]
+    for row in audit_feed['races']:
+        key=row['key']
+        if key not in rescued:continue
+        for engine,live,name in [('p3',p3_rows.get(key),p3.live_snapshot_name(key)),
+              ('abeken',(v4_rows.get(key,{}).get('v53') or {}).get('live'),CanonicalRunner._abeken_v53_live_name(key))]:
+            if not live:continue
+            receipt_live=receipts[name];at=receipt_live['saved_at_jst']
+            require(receipt_live['snapshot_sha256']==live['snapshot_sha256']
+                and live['snapshot_sha256'] in before[3].values()
+                and datetime.fromisoformat(live['captured_at_jst'])<=datetime.fromisoformat(at)<datetime.fromisoformat(row['deadline_jst']), 'NIGHT_STORED_LIVE_PROOF')
+            published=row.get('predeadline') if engine=='p3' else row['abeken_shadow']['v53'].get('live')
+            if published:require(published['snapshot_sha256']==live['snapshot_sha256'],'NIGHT_PUBLIC_LIVE_CONFLICT')
+            else:unpublished.append(key+':'+engine)
+            if engine=='p3':
+                row['predeadline']=deepcopy(live);row['pre_race_v2']={'final':{'locked_at_jst':at}}
+            else:
+                row['abeken_shadow']['v53']['live']={**deepcopy(live),'locked_at_jst':at}
+    scores=night_scores(audit_feed,results)
     require(before==[inventory(p) for p in protected_roots] and boundary_bytes==(root/'boundary.json').read_bytes()
         and baseline_bytes==(root/'feed.json').read_bytes(),'NIGHT_PROTECTED_MUTATION')
     recovery.verify_boundary(root,day)
@@ -870,7 +897,7 @@ def run_delayed_night(state, day, output, origin):
         'RESULTS':len(results),'RACES':len(expected),'PENDING':0,'PREDICTION_RECALCULATION':0,
         'CANONICAL_MORNING_PROMOTED':False,'NIGHT_RESEARCH_CONNECTED':False,
         'SETTLED_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='SETTLED' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
-        'GORIPAN':'NO_FIXED_BET_NO_BACKFILL','PROTECTED_UNCHANGED':True}
+        'GORIPAN':'NO_FIXED_BET_NO_BACKFILL','PROTECTED_UNCHANGED':True,'FIXED_BUT_NOT_PUBLISHED_LIVE':unpublished}
     data=canonical(out)+b'\n'
     require(len(data)<=2097152,'NIGHT_DELIVERY_SIZE')
     atomic(saved,data);atomic(report,canonical({'runtime_result':result,'official_url':url,
