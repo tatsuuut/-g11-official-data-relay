@@ -1,5 +1,5 @@
 name: runtime sync
-run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow }}
+run-name: ${{github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
     branches:
@@ -38,11 +38,11 @@ permissions:
   contents: read
   id-token: write
 concurrency:
-  group: ${{ ((github.event_name == 'push' && contains(github.event.head_commit.message, '[daily-runtime-freeze]')) || (github.event_name == 'workflow_dispatch' && (inputs.phase == 'dry-run' || inputs.phase == 'night-transport'))) && 'g11-free-official-data-validation' || 'g11-free-official-data-runner' }}
+  group: ${{((github.event_name == 'push' && contains(github.event.head_commit.message, '[daily-runtime-freeze]')) || (github.event_name == 'workflow_dispatch' && (inputs.phase == 'dry-run' || inputs.phase == 'night-transport'))) && 'g11-free-official-data-validation' || 'g11-free-official-data-runner'}}
   cancel-in-progress: false
 jobs:
   run-private-runtime:
-    name: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || 'runtime' }}
+    name: ${{github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || 'runtime'}}
     if: >-
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
@@ -51,17 +51,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      G11_PRIVATE_REPOSITORY: ${{ secrets.PRIVATE_SOURCE_REPO }}
+      G11_PRIVATE_REPOSITORY: ${{secrets.PRIVATE_SOURCE_REPO}}
       G11_PRIVATE_RUNTIME_REF: g11-daily-runtime-approved
       G11_RUNTIME_BRANCH: g11-runtime
-      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
-      G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
-      G11_R13: ${{ (inputs.phase == 'night' || inputs.phase == 'night-transport') && inputs.operational_date == '2026-10-13' }}
-      G11_N13T: ${{ inputs.phase == 'night-transport' && inputs.operational_date == '2026-10-13' }}
+      G11_APP_ORIGIN: ${{secrets.APP_ENDPOINT}}
+      G11_OIDC_AUDIENCE: ${{secrets.OIDC_AUD}}
+      G11_R13: ${{(inputs.phase == 'night' || inputs.phase == 'night-transport') && inputs.operational_date == '2026-10-13'}}
+      G11_N13T: ${{inputs.phase == 'night-transport' && inputs.operational_date == '2026-10-13'}}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
       TZ: Asia/Tokyo
-      G11_NIGHT_TRANSPORT_ONLY: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[night-transport-only]') && 'true' || 'false' }}
+      G11_NIGHT_TRANSPORT_ONLY: ${{github.event_name == 'push' && contains(github.event.head_commit.message, '[night-transport-only]') && 'true' || 'false'}}
     steps:
       - name: Check runtime configuration
         run: |
@@ -80,11 +80,11 @@ jobs:
       - name: Resolve the bounded phase and race day
         id: scheduled
         env:
-          REQUESTED_PHASE: ${{ inputs.phase }}
-          REQUESTED_DATE: ${{ inputs.operational_date }}
-          EVENT_NAME: ${{ github.event_name }}
-          SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          REQUESTED_PHASE: ${{inputs.phase}}
+          REQUESTED_DATE: ${{inputs.operational_date}}
+          EVENT_NAME: ${{github.event_name}}
+          SCHEDULE_EXPRESSION: ${{github.event.schedule}}
+          COMMIT_MESSAGE: ${{github.event.head_commit.message}}
         run: |
           set -euo pipefail
           now_hour="$(date +%H)"
@@ -172,19 +172,19 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-${{ steps.scheduled.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v4-${{steps.scheduled.outputs.operational_date}}-${{github.run_id}}
           restore-keys: |
-            g11-state-v4-published-${{ steps.scheduled.outputs.operational_date }}-
-            ${{ steps.scheduled.outputs.operational_date != '2026-10-04' && format('g11-state-v3-{0}-', steps.scheduled.outputs.operational_date) || '' }}
+            g11-state-v4-published-${{steps.scheduled.outputs.operational_date}}-
+            ${{steps.scheduled.outputs.operational_date != '2026-10-04' && format('g11-state-v3-{0}-', steps.scheduled.outputs.operational_date) || ''}}
             g11-state-v4-published-
-            ${{ steps.scheduled.outputs.operational_date != '2026-10-04' && 'g11-state-v3-' || '' }}
+            ${{steps.scheduled.outputs.operational_date != '2026-10-04' && 'g11-state-v3-' || ''}}
       - name: Fail closed when the private credential is absent
         env:
-          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
         run: test -n "${G11_PRIVATE_REPO_TOKEN}"
       - name: Decrypt and validate restored state
         env:
-          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
         run: |
           set -euo pipefail
           mkdir -p .relay-state
@@ -197,7 +197,7 @@ jobs:
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
             --decrypt --output "${archive}" "${encrypted}"
           exec 3<&-
-          python3 - "${archive}" "${{ steps.scheduled.outputs.operational_date }}" <<'PY'
+          python3 - "${archive}" "${{steps.scheduled.outputs.operational_date}}" <<'PY'
           import json
           import pathlib
           import shutil
@@ -249,22 +249,22 @@ jobs:
           PY
       - name: Select verified morning recovery
         id: due
-        run: python3 scripts/daily_runtime_bootstrap_v1.py route --state-root .relay-state --operational-date "${{ steps.scheduled.outputs.operational_date }}" --phase "${{ steps.scheduled.outputs.phase }}"
+        run: python3 scripts/daily_runtime_bootstrap_v1.py route --state-root .relay-state --operational-date "${{steps.scheduled.outputs.operational_date}}" --phase "${{steps.scheduled.outputs.phase}}"
       - name: Restore the immutable daily source before any private imports
         id: authority
         run: |
           python3 scripts/daily_runtime_bootstrap_v1.py prepare \
             --state-root .relay-state \
-            --operational-date "${{ steps.due.outputs.operational_date }}" \
-            --phase "${{ steps.due.outputs.phase }}" --source-root .g11-private
+            --operational-date "${{steps.due.outputs.operational_date}}" \
+            --phase "${{steps.due.outputs.phase}}" --source-root .g11-private
       - name: Checkout private G11 runtime
         if: steps.authority.outputs.checkout_candidate == 'true'
         id: private-source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
-          ref: ${{ steps.authority.outputs.source_sha || env.G11_PRIVATE_RUNTIME_REF }}
-          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          repository: ${{env.G11_PRIVATE_REPOSITORY}}
+          ref: ${{steps.authority.outputs.source_sha || env.G11_PRIVATE_RUNTIME_REF}}
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .g11-private
           persist-credentials: false
           fetch-depth: 1
@@ -274,8 +274,8 @@ jobs:
           G11_PRIVATE_REPO_TOKEN: ""
         run: |
           set -euo pipefail
-          if [ "${{ steps.authority.outputs.frozen }}" = "true" ]; then
-            source_sha="${{ steps.authority.outputs.source_sha }}"
+          if [ "${{steps.authority.outputs.frozen}}" = "true" ]; then
+            source_sha="${{steps.authority.outputs.source_sha}}"
           else
             source_sha="$(git -C .g11-private rev-parse HEAD)"
           fi
@@ -294,20 +294,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../.relay-output
-          if [ "${{ steps.authority.outputs.rescue_bootstrap }}" = "true" ]; then
+          if [ "${{steps.authority.outputs.rescue_bootstrap}}" = "true" ]; then
             echo 'rescue=true' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           python3 -S ../scripts/daily_predeadline_authority_recovery_v1.py critical \
             --state-root "${GITHUB_WORKSPACE}/.relay-state" \
-            --operational-date "${{ steps.due.outputs.operational_date }}" \
+            --operational-date "${{steps.due.outputs.operational_date}}" \
             --run-id "${GITHUB_RUN_ID}" \
             --result "${GITHUB_WORKSPACE}/.relay-output/result.json"
       - name: Encrypt critical state before optional work
         if: steps.due.outputs.phase == 'predeadline' && steps.critical.outcome == 'success' && steps.critical.outputs.rescue != 'true'
         id: critical-encrypt
         env:
-          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
         run: |
           set -euo pipefail
           jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
@@ -327,12 +327,12 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-critical-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v4-critical-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       - name: Keep the predeadline relay alive between delayed cron starts
         if: always() && !cancelled() && steps.critical.outcome == 'success' && steps.critical-save.outcome == 'success' && steps.critical-encrypt.outputs.ready == 'true' && steps.due.outputs.phase == 'predeadline'
         env:
-          GH_TOKEN: ${{ github.token }}
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          GH_TOKEN: ${{github.token}}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
           set -euo pipefail
           heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
@@ -400,9 +400,9 @@ jobs:
         if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.authority.outputs.frozen != 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
-          ref: ${{ env.G11_RUNTIME_BRANCH }}
-          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          repository: ${{env.G11_PRIVATE_REPOSITORY}}
+          ref: ${{env.G11_RUNTIME_BRANCH}}
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .g11-model
           persist-credentials: false
           fetch-depth: 1
@@ -440,7 +440,7 @@ jobs:
               .g11-model/g11/wild-pack-oos/ \
               .relay-state/store/g11/wild-pack-oos/
           fi
-          day_root=".relay-state/store/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
+          day_root=".relay-state/store/g11/true-ai-history/${{steps.due.outputs.operational_date}}"
           if [ ! -f "${day_root}/morning-predictions.manifest.json" ]; then
             model_source=".g11-model/g11/true-ai-models"
             test -f "${model_source}/latest-research.json"
@@ -450,7 +450,7 @@ jobs:
       - name: Materialize hash-verified chunked WILD models
         working-directory: .g11-private
         env:
-          WILD_MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning
+          WILD_MODEL_ROOT: ${{github.workspace}}/.relay-state/store/g11/wild-pack-models/morning
         if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.authority.outputs.frozen != 'true'
         run: |
           python3 -m py_compile g11/relay/rescue_v1.py g11/relay/rescue_entry_v2.py
@@ -494,16 +494,16 @@ jobs:
         if: steps.due.outputs.phase != 'predeadline' && steps.authority.outputs.rescue_bootstrap != 'true'
         id: freeze
         run: |
-          if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ] && [ "${{ steps.due.outputs.operational_date }}" = "2026-10-06" ]; then
+          if [ "${{steps.due.outputs.phase}}" = "same-day-rescue" ] && [ "${{steps.due.outputs.operational_date}}" = "2026-10-06" ]; then
             python3 .g11-private/g11/relay/same_day_boundary_20261006.py freeze \
-              --state .relay-state --source-sha "${{ steps.source.outputs.source_sha }}"
+              --state .relay-state --source-sha "${{steps.source.outputs.source_sha}}"
             exit 0
           fi
           python3 scripts/daily_runtime_bootstrap_v1.py freeze \
             --state-root .relay-state --source-root .g11-private \
-            --source-sha "${{ steps.source.outputs.source_sha }}" \
-            --operational-date "${{ steps.due.outputs.operational_date }}" \
-            --phase "${{ steps.due.outputs.phase }}"
+            --source-sha "${{steps.source.outputs.source_sha}}" \
+            --operational-date "${{steps.due.outputs.operational_date}}" \
+            --phase "${{steps.due.outputs.phase}}"
       - name: Verify recovery isolation and preserved NIGHT
         if: steps.due.outputs.phase == 'dry-run'
         env:
@@ -514,8 +514,8 @@ jobs:
           python3 -m unittest discover -s scripts -p test_daily_runtime_delivery_v1.py
           python3 scripts/daily_runtime_bootstrap_v1.py candidate-dry-run \
             --state-root .relay-state --source-root .g11-private \
-            --source-sha "${{ steps.source.outputs.source_sha }}" \
-            --operational-date "${{ steps.due.outputs.operational_date }}" \
+            --source-sha "${{steps.source.outputs.source_sha}}" \
+            --operational-date "${{steps.due.outputs.operational_date}}" \
             --output .relay-output/next-morning-authority-dry-run.json
       - name: Read back rescue boundary and preserved previous NIGHT
         if: steps.due.outputs.phase == 'dry-run' && steps.due.outputs.operational_date == '2026-10-06'
@@ -547,7 +547,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
-          if [ "${{ steps.due.outputs.phase }}" != "dry-run" ]; then
+          if [ "${{steps.due.outputs.phase}}" != "dry-run" ]; then
             if ! python3 -c 'import catboost' >/dev/null 2>&1; then
               python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
             fi
@@ -559,7 +559,7 @@ jobs:
       - name: Read back verified WILD BET bootstrap evidence
         working-directory: .g11-private
         env:
-          WILD_OOS_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-oos/morning
+          WILD_OOS_ROOT: ${{github.workspace}}/.relay-state/store/g11/wild-pack-oos/morning
         if: (steps.due.outputs.phase!='predeadline'||steps.authority.outputs.frozen!='true')&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&env.G11_R13!='true'
         run: |
           python3 - "${WILD_OOS_ROOT}" <<'PY'
@@ -590,12 +590,12 @@ jobs:
       - name: Verify encrypted WILD CURRENT app projection
         working-directory: .g11-private
         env:
-          STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          STATE_STORE: ${{github.workspace}}/.relay-state/store
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         if: (steps.due.outputs.phase!='predeadline'||steps.authority.outputs.frozen!='true')&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&env.G11_R13!='true'
         run: |
           set -euo pipefail
-          python3 - "${STATE_STORE}" "${{ steps.due.outputs.operational_date }}" <<'PY'
+          python3 - "${STATE_STORE}" "${{steps.due.outputs.operational_date}}" <<'PY'
           import pathlib
           import sys
           from g11.canonical import public_app_feed
@@ -626,7 +626,7 @@ jobs:
         working-directory: .g11-private
         env:
           G11_PRIVATE_REPO_TOKEN: ""
-          WILD_MODEL_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-models/morning
+          WILD_MODEL_ROOT: ${{github.workspace}}/.relay-state/store/g11/wild-pack-models/morning
         run: |
           python3 - "${WILD_MODEL_ROOT}" <<'PY'
           import hashlib
@@ -672,23 +672,23 @@ jobs:
         working-directory: .g11-private
         env:
           G11_PRIVATE_REPO_TOKEN: ""
-          G11_PRIVATE_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
-          G11_BOUNDED_NIGHT_REPLAY: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[night-20260929]') && '2026-09-29' || '' }}
+          G11_PRIVATE_SOURCE_SHA: ${{steps.source.outputs.source_sha}}
+          G11_BOUNDED_NIGHT_REPLAY: ${{github.event_name == 'push' && contains(github.event.head_commit.message, '[night-20260929]') && '2026-09-29' || ''}}
         run: |
           set -euo pipefail
           mkdir -p ../.relay-output
-          if [ "${G11_NIGHT_TRANSPORT_ONLY}" = "true" ] && [[ "${{ steps.due.outputs.operational_date }}" < "2026-10-04" ]]; then
+          if [ "${G11_NIGHT_TRANSPORT_ONLY}" = "true" ] && [[ "${{steps.due.outputs.operational_date}}" < "2026-10-04" ]]; then
             PYTHONPATH=. python3 ../scripts/hot_delta_transport_v1.py --night-projection \
               "${GITHUB_WORKSPACE}/.relay-state/store" \
               "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
               "36871734245" "${G11_PRIVATE_SOURCE_SHA}" "${G11_PRIVATE_SOURCE_SHA}"
             printf '{"STATUS":"NIGHT_TRANSPORT_ONLY","PHASE":"NIGHT","OPERATIONAL_DATE_JST":"%s"}\n' \
-              "${{ steps.due.outputs.operational_date }}" > ../.relay-output/result.json
+              "${{steps.due.outputs.operational_date}}" > ../.relay-output/result.json
             exit 0
           fi
           args=(
-            --phase "${{ steps.due.outputs.phase }}"
-            --operational-date "${{ steps.due.outputs.operational_date }}"
+            --phase "${{steps.due.outputs.phase}}"
+            --operational-date "${{steps.due.outputs.operational_date}}"
             --state-root "${GITHUB_WORKSPACE}/.relay-state"
             --feed-output "${GITHUB_WORKSPACE}/.relay-output/feed.json"
             --public-repository "${GITHUB_REPOSITORY}"
@@ -698,12 +698,12 @@ jobs:
             --oidc-audience "${G11_OIDC_AUDIENCE}"
           )
           runtime_stdout=../.relay-output/runtime.stdout
-          if [ "${{ steps.due.outputs.phase }}" = "same-day-rescue" ]; then
-            if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-06" ]; then
+          if [ "${{steps.due.outputs.phase}}" = "same-day-rescue" ]; then
+            if [ "${{steps.due.outputs.operational_date}}" = "2026-10-06" ]; then
               command=(python3 g11/relay/same_day_boundary_20261006.py run)
             else
               python3 -m unittest g11.relay.test_delayed_morning_recovery_v1
-              command=(python3 -m g11.relay.delayed_morning_recovery_v1 --date "${{ steps.due.outputs.operational_date }}")
+              command=(python3 -m g11.relay.delayed_morning_recovery_v1 --date "${{steps.due.outputs.operational_date}}")
             fi
             "${command[@]}" \
               --state "${GITHUB_WORKSPACE}/.relay-state" --output "${GITHUB_WORKSPACE}/.relay-output/feed.json" \
@@ -714,10 +714,10 @@ jobs:
               --origin "${G11_APP_ORIGIN}" | tee "${runtime_stdout}"
           elif [ "${G11_R13}" = "true" ]; then
             G11_NIGHT_RECOVERY_20261013=true python3 ../scripts/night_recovery_20261013.py "${args[@]}" | tee "${runtime_stdout}"
-          elif [ "${{ steps.due.outputs.phase }}" = "predeadline" ]; then
+          elif [ "${{steps.due.outputs.phase}}" = "predeadline" ]; then
             python3 ../scripts/daily_predeadline_authority_recovery_v1.py predeadline "${args[@]}" | tee "${runtime_stdout}"
           else
-            if [ "${{ steps.due.outputs.operational_date }}" = "2026-10-04" ] || [ "${{ steps.due.outputs.operational_date }}" = "2026-10-06" ] || { [ "${{ steps.due.outputs.operational_date }}" = "2026-10-16" ] && [ "${{ steps.due.outputs.phase }}" = "night" ]; }; then
+            if [ "${{steps.due.outputs.operational_date}}" = "2026-10-04" ] || [ "${{steps.due.outputs.operational_date}}" = "2026-10-06" ] || { [ "${{steps.due.outputs.operational_date}}" = "2026-10-16" ] && [ "${{steps.due.outputs.phase}}" = "night" ]; }; then
               python3 ../scripts/daily_predeadline_authority_recovery_v1.py night "${args[@]}" | tee "${runtime_stdout}"
             else
               python3 -m g11.relay.v1 "${args[@]}" | tee "${runtime_stdout}"
@@ -752,14 +752,14 @@ jobs:
           )
           print("G11_RELAY_RESULT_EXTRACT=PASS")
           PY
-      - name: Audit WILD4 training-food capture
+      - name: WILD4 capture audit
         if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'same-day-rescue' && steps.critical.outputs.rescue != 'true' && env.G11_R13 != 'true' && !steps.authority.outputs.d16
         working-directory: .g11-private
         env:
-          STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          STATE_STORE: ${{github.workspace}}/.relay-state/store
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
-          python3 - "${STATE_STORE}" "${{ steps.due.outputs.operational_date }}" <<'PY'
+          python3 - "${STATE_STORE}" "${{steps.due.outputs.operational_date}}" <<'PY'
           import gzip
           import json
           import pathlib
@@ -788,16 +788,16 @@ jobs:
               "TODAY_SETTLED_ELIGIBLE": None if eligible is None else eligible["BET_ELIGIBLE_RACES"],
           }, sort_keys=True))
           PY
-      - name: Verify nightly research ledgers before encrypted persistence
+      - name: Verify research NIGHT ledgers
         if: steps.runtime.outcome == 'success' && steps.due.outputs.phase == 'night' && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true' && !steps.authority.outputs.d16
         working-directory: .g11-private
         env:
-          STATE_STORE: ${{ github.workspace }}/.relay-state/store
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          STATE_STORE: ${{github.workspace}}/.relay-state/store
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
           set -euo pipefail
           if [ -f ../.relay-output/result.json ] && \
-             jq -e --arg day "${{ steps.due.outputs.operational_date }}" '
+             jq -e --arg day "${{steps.due.outputs.operational_date}}" '
                .STATUS == "NIGHT_WAITING_OFFICIAL_RESULTS"
                and .PHASE == "NIGHT" and .OPERATIONAL_DATE_JST == $day
                and .FEED_EMITTED == false
@@ -811,8 +811,8 @@ jobs:
             echo "RESCUE_NIGHT_RESEARCH_LEDGER_CHECK=NOT_APPLICABLE"
             exit 0
           fi
-          true_source="${STATE_STORE}/g11/true-ai-history/${{ steps.due.outputs.operational_date }}"
-          wild_source="${STATE_STORE}/g11/wild-pack-history/${{ steps.due.outputs.operational_date }}"
+          true_source="${STATE_STORE}/g11/true-ai-history/${{steps.due.outputs.operational_date}}"
+          wild_source="${STATE_STORE}/g11/wild-pack-history/${{steps.due.outputs.operational_date}}"
           test -f "${true_source}/day-records.manifest.json"
           test -f "${wild_source}/factual-paths.manifest.json"
           python3 - "${STATE_STORE}" <<'PY'
@@ -848,21 +848,21 @@ jobs:
               "WILD_BET_ELIGIBLE_RACES": bet_status["BET_ELIGIBLE_RACES"],
           }, sort_keys=True))
           PY
-      - name: Checkout pinned P3 shadow research consumer
+      - name: Checkout P3 research
         if: steps.runtime.outcome == 'success' && steps.due.outputs.phase != 'dry-run' && steps.due.outputs.phase != 'same-day-rescue' && steps.critical.outputs.rescue != 'true' && hashFiles('.relay-output/feed.json') != '' && env.G11_R13 != 'true' && !steps.authority.outputs.d16
         id: deme-source
         continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+          repository: ${{env.G11_PRIVATE_REPOSITORY}}
           ref: df0a4d5b375dcdd0f2dff1f6ed9757087b1aafda
-          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .g11-deme-research
           persist-credentials: false
           fetch-depth: 1
           sparse-checkout: g11/canonical/deme_discovery*
           sparse-checkout-cone-mode: false
-      - name: Update existing P3 shadow research
+      - name: P3 research update
         if: steps.deme-source.outcome == 'success'
         continue-on-error: true
         env:
@@ -877,10 +877,10 @@ jobs:
         if: always() && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && steps.due.outputs.phase != 'dry-run'
         id: encrypt-state
         env:
-          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
         run: |
           set -euo pipefail
-          if [ ! -f .relay-state/relay-state.json ] && [ ! -f .relay-state/store/manifest.json ] && [ ! -f ".relay-state/daily-runtime/${{ steps.due.outputs.operational_date }}/authority.json" ]; then
+          if [ ! -f .relay-state/relay-state.json ] && [ ! -f .relay-state/store/manifest.json ] && [ ! -f ".relay-state/daily-runtime/${{steps.due.outputs.operational_date}}/authority.json" ]; then
             echo 'ready=false' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -903,17 +903,17 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v3-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v3-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       - name: Gate NIGHT publication on fully settled research
         id: night-ready
         if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != ''
         env:
           FEED: .relay-output/feed.json
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
-          RELAY_PHASE: ${{ steps.due.outputs.phase }}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
+          RELAY_PHASE: ${{steps.due.outputs.phase}}
         run: |
           set -euo pipefail
-          if [ "${{ steps.due.outputs.phase }}" != "night" ]; then
+          if [ "${{steps.due.outputs.phase}}" != "night" ]; then
             echo 'allowed=true' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -973,14 +973,14 @@ jobs:
         if: steps.encrypt-state.outputs.ready == 'true' && steps.night-ready.outputs.allowed == 'true'
         uses: ./.github/actions/g11-publication-checkpoint
         with:
-          cache-key: g11-state-v4-published-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-${{ github.run_attempt }}-checkpoint
+          cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint
       - name: Publish a newly verified feed through OIDC
         if: steps.runtime.outcome == 'success' && hashFiles('.relay-output/feed.json') != '' && steps.night-ready.outputs.allowed == 'true' && (env.G11_NIGHT_TRANSPORT_ONLY == 'true' || steps.publication-state-verified.outputs.ready == 'true')
         id: publish
         env:
           FEED: .relay-output/feed.json
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
-          RELAY_PHASE: ${{ steps.due.outputs.phase }}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
+          RELAY_PHASE: ${{steps.due.outputs.phase}}
         run: |
           set -euo pipefail
           if [[ "${OPERATIONAL_DATE}" > "2026-10-03" ]]; then
@@ -1716,16 +1716,16 @@ jobs:
             exit 1
           fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
-      - name: Persist authority checkpoint and delivery receipts
+      - name: Persist delivery receipts
         if: >-
           always() && !cancelled() && steps.due.outputs.phase != 'dry-run' &&
           (steps.due.outputs.phase != 'predeadline' || steps.publish.outcome == 'success')
         id: delivery-state
         env:
-          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
         run: |
           set -euo pipefail
-          if [ ! -f ".relay-state/daily-runtime/${{ steps.due.outputs.operational_date }}/authority.json" ] && [ ! -f .relay-state/rescue/boundary.json ]; then
+          if [ ! -f ".relay-state/daily-runtime/${{steps.due.outputs.operational_date}}/authority.json" ] && [ ! -f .relay-state/rescue/boundary.json ]; then
             echo 'ready=false' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -1738,22 +1738,22 @@ jobs:
           mv .relay-cache/state-delivery.tgz.gpg.tmp .relay-cache/state-delivery.tgz.gpg
           cp .relay-cache/state-delivery.tgz.gpg .relay-cache/state.tgz.gpg
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
-      - name: Save encrypted daily completion and transport retry state
+      - name: Save encrypted delivery state
         if: always() && steps.delivery-state.outputs.ready == 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-published-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}
+          key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       - name: Verify source identity and projected app readback
         id: readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true'
         env:
           FEED: .relay-output/feed.json
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --location \
-            "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${{steps.due.outputs.operational_date}}" \
             --dump-header .relay-output/readback.headers \
             -o .relay-output/readback.json
           header() {
@@ -1799,7 +1799,7 @@ jobs:
               exit 1
               ;;
           esac
-          jq -e --arg operational_date "${{ steps.due.outputs.operational_date }}" --slurpfile sent "${FEED}" '
+          jq -e --arg operational_date "${{steps.due.outputs.operational_date}}" --slurpfile sent "${FEED}" '
             .operational_date_jst == $operational_date
             and (.canonical_authorities | type == "object")
             and (.canonical_authorities.growth_p3 | type == "object")
@@ -1818,18 +1818,18 @@ jobs:
             }))
           ' .relay-output/readback.json >/dev/null
           echo 'G11_CURRENT_PRE_RACE_TRANSPORT_READBACK=PASS'
-          if [ "${{ steps.due.outputs.phase }}" = "night" ]; then
+          if [ "${{steps.due.outputs.phase}}" = "night" ]; then
             if jq -e '.counts.formal==0 and .counts.excluded==.counts.races and .research_db.available==false' .relay-output/readback.json >/dev/null; then
               echo G11_RESCUE_NIGHT_READBACK=PASS
             else
               python3 scripts/audit_three_phase_runtime_contract.py \
-                --night-ready .relay-output/readback.json --day "${{ steps.due.outputs.operational_date }}"
+                --night-ready .relay-output/readback.json --day "${{steps.due.outputs.operational_date}}"
             fi
           fi
       - name: Prove first formal V53 race from official snapshots and deployed readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night != 'true' && steps.due.outputs.phase != 'night' && steps.due.outputs.phase != 'same-day-rescue' && steps.readback.outcome == 'success' && steps.critical.outputs.rescue != 'true'
         env:
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
           set -euo pipefail
           PYTHONPATH=".g11-private" python3 - "${OPERATIONAL_DATE}" ".relay-state/store" ".relay-output/readback.json" <<'PY'
@@ -1953,13 +1953,13 @@ jobs:
         id: immutable-readback
         if: steps.publish.outcome == 'success' && steps.publish.outputs.immutable_night == 'true'
         env:
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --location \
-            "${G11_APP_ORIGIN}/api/g11-feed?date=${{ steps.due.outputs.operational_date }}" \
+            "${G11_APP_ORIGIN}/api/g11-feed?date=${{steps.due.outputs.operational_date}}" \
             -o .relay-output/readback-existing-night.json
-          jq -e --arg operational_date "${{ steps.due.outputs.operational_date }}" '
+          jq -e --arg operational_date "${{steps.due.outputs.operational_date}}" '
             .operational_date_jst == $operational_date
             and .stage == "NIGHT"
             and .status == "PASS"
@@ -1971,9 +1971,9 @@ jobs:
             echo G11_RESCUE_NIGHT_READBACK=PASS
           else
             python3 scripts/audit_three_phase_runtime_contract.py \
-              --night-ready .relay-output/readback-existing-night.json --day "${{ steps.due.outputs.operational_date }}"
+              --night-ready .relay-output/readback-existing-night.json --day "${{steps.due.outputs.operational_date}}"
           fi
-      - name: Continue bounded NIGHT after official last-race handoff
+      - name: Continue NIGHT after last race
         if: >-
           always() && !cancelled() &&
           env.G11_NIGHT_TRANSPORT_ONLY != 'true' &&
@@ -1984,8 +1984,8 @@ jobs:
             steps.encrypt-state.outputs.ready == 'true')) &&
           (steps.due.outputs.phase == 'predeadline' || steps.due.outputs.phase == 'night')
         env:
-          GH_TOKEN: ${{ github.token }}
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          GH_TOKEN: ${{github.token}}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
           set -euo pipefail
           result=.relay-output/result.json
@@ -2072,8 +2072,8 @@ jobs:
           steps.encrypt-state.outputs.ready == 'true' &&
           steps.due.outputs.phase == 'morning'
         env:
-          GH_TOKEN: ${{ github.token }}
-          OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
+          GH_TOKEN: ${{github.token}}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
           set -euo pipefail
           now_hhmm="$(date +%H%M)"
@@ -2131,13 +2131,13 @@ jobs:
         if: (!steps.authority.outputs.d16)&&steps.runtime.outcome=='success'&&(steps.due.outputs.phase=='predeadline'||(steps.due.outputs.phase=='night'&&steps.night-ready.outputs.allowed=='true'&&steps.publication-state-verified.outputs.ready=='true'&&(steps.readback.outcome=='success'||steps.immutable-readback.outcome=='success')))
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{github.token}}
         run: |
           args=()
-          if [ '${{ steps.due.outputs.phase }}' = night ]; then
-            args=(-f night_checkpoint_key=g11-state-v4-published-${{ steps.due.outputs.operational_date }}-${{ github.run_id }}-${{ github.run_attempt }}-checkpoint)
+          if [ '${{steps.due.outputs.phase}}' = night ]; then
+            args=(-f night_checkpoint_key=g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint)
           fi
-          gh workflow run 364923281 -f mode=${{ steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4' }} -f operational_date=${{ steps.due.outputs.operational_date }} "${args[@]}"
+          gh workflow run 364923281 -f mode=${{steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4'}} -f operational_date=${{steps.due.outputs.operational_date}} "${args[@]}"
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
     if: >-
@@ -2149,8 +2149,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
-      G11_OIDC_AUDIENCE: ${{ secrets.OIDC_AUD }}
+      G11_APP_ORIGIN: ${{secrets.APP_ENDPOINT}}
+      G11_OIDC_AUDIENCE: ${{secrets.OIDC_AUD}}
     steps:
       - name: Checkout public relay
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
