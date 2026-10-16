@@ -2118,16 +2118,15 @@ jobs:
       - name: Classify optional PREDEADLINE relay failure
         if: always() && steps.runtime.outcome == 'failure' && steps.due.outputs.phase == 'predeadline'
         run: echo 'G11_PREDEADLINE_OPTIONAL_UNAVAILABLE=CRITICAL_CHECKPOINT_RETAINED'
-      - name: Continue verified same-day rescue
-        if: steps.authority.outputs.rescue_bootstrap == 'true' && steps.readback.outcome == 'success'
+      - name: Continue same-day rescue
+        if: steps.authority.outputs.rescue_bootstrap=='true'&&steps.readback.outcome=='success'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{github.token}}
         run: |
-          sleep 45
-          test "$(python3 scripts/dynamic_last_race_heartbeat.py --result .relay-output/result.json --operational-date "${{steps.due.outputs.operational_date}}")" = CONTINUE || exit 0
-          active=$(gh run list --workflow g11-free-runner.yml --json databaseId,status --limit 30 --jq '[.[] | select(.status == "queued" or .status == "in_progress")] | length')
-          [ "${active}" -le 1 ] || exit 0
-          gh workflow run g11-free-runner.yml -f phase=predeadline -f operational_date="${{steps.due.outputs.operational_date}}"
+          sleep 45; d="${{steps.due.outputs.operational_date}}"
+          test "$(python3 scripts/dynamic_last_race_heartbeat.py --result .relay-output/result.json --operational-date "$d")" = CONTINUE || exit 0
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/g11-free-runner.yml/runs" -q '[.workflow_runs[]|select(.status|test("^(queued|in_progress)$"))|select(.event!="push" or (.head_commit.message//""|contains("[daily-runtime-freeze]")|not))]|length')" -le 1 || exit 0
+          gh workflow run g11-free-runner.yml -f phase=predeadline -f operational_date="$d"
       - name: WILD4 shadow
         if: (!steps.authority.outputs.d16)&&steps.runtime.outcome=='success'&&(steps.due.outputs.phase=='predeadline'||(steps.due.outputs.phase=='night'&&steps.night-ready.outputs.allowed=='true'&&steps.publication-state-verified.outputs.ready=='true'&&(steps.readback.outcome=='success'||steps.immutable-readback.outcome=='success')))
         continue-on-error: true
