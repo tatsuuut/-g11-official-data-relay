@@ -344,7 +344,7 @@ jobs:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-critical-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       - name: Keep the predeadline relay alive between delayed cron starts
-        if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-save.outcome=='success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
+        if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-save.outcome == 'success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
         env:
           GH_TOKEN: ${{github.token}}
           OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
@@ -2229,4 +2229,4 @@ jobs:
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
 
-# NIGHT recovery v4
+# NIGHT recovery v5
