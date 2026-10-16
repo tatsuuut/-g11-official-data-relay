@@ -573,11 +573,18 @@ def append_projection(accepted, incoming, now):
 
 def run(state, day, output, run_id):
     cert = certificate(state, day)
-    from g11.relay import daily_runtime_authority_v1 as daily
-    from g11.relay import delayed_morning_recovery_v1 as recovery
-    from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
-    from g11.canonical import public_app_feed as feedlib
-    from g11.growth_p3.v1_1 import current_runtime_v1 as p3
+    # Import without the normal CLI auto-run hook, then verify the accepted
+    # rescue certificate, pinned source and both model inventories below.
+    original_argv = sys.argv
+    try:
+        sys.argv = [sys.argv[0]]
+        from g11.relay import daily_runtime_authority_v1 as daily
+        from g11.relay import delayed_morning_recovery_v1 as recovery
+        from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
+        from g11.canonical import public_app_feed as feedlib
+        from g11.growth_p3.v1_1 import current_runtime_v1 as p3
+    finally:
+        sys.argv = original_argv
     root = state / "rescue"
     store_path = root / "store"
     recovery.verify_boundary(root, day)
