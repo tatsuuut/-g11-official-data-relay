@@ -285,6 +285,7 @@ jobs:
         run: |
           python3 -m py_compile scripts/daily_predeadline_authority_recovery_v1.py
           python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py -q
+          python3 -m unittest discover -s scripts -p test_delayed_rescue_predeadline_v1.py -q
       - name: Capture and lock dependency-free PREDEADLINE critical lane
         if: steps.due.outputs.phase == 'predeadline'
         id: critical
@@ -560,7 +561,7 @@ jobs:
         working-directory: .g11-private
         env:
           WILD_OOS_ROOT: ${{ github.workspace }}/.relay-state/store/g11/wild-pack-oos/morning
-        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true'
+        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true' && steps.authority.outputs.delayed_rescue != 'true'
         run: |
           python3 - "${WILD_OOS_ROOT}" <<'PY'
           import pathlib
@@ -592,7 +593,7 @@ jobs:
         env:
           STATE_STORE: ${{ github.workspace }}/.relay-state/store
           OPERATIONAL_DATE: ${{ steps.due.outputs.operational_date }}
-        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true'
+        if: (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.rescue_bootstrap == 'true') && env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true' && steps.authority.outputs.delayed_rescue != 'true'
         run: |
           set -euo pipefail
           python3 - "${STATE_STORE}" "${{ steps.due.outputs.operational_date }}" <<'PY'
@@ -899,7 +900,7 @@ jobs:
         if: >-
           always() && steps.encrypt-state.outputs.ready == 'true' &&
           env.G11_NIGHT_TRANSPORT_ONLY != 'true' &&
-          steps.due.outputs.phase != 'predeadline'
+          (steps.due.outputs.phase != 'predeadline' || steps.authority.outputs.delayed_rescue == 'true')
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
@@ -2124,12 +2125,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sleep 45
-          test "$(python3 scripts/dynamic_last_race_heartbeat.py --result .relay-output/result.json --operational-date 2026-10-06)" = CONTINUE || exit 0
+          test "$(python3 scripts/dynamic_last_race_heartbeat.py --result .relay-output/result.json --operational-date "${{ steps.due.outputs.operational_date }}")" = CONTINUE || exit 0
           active=$(gh run list --workflow g11-free-runner.yml --json databaseId,status --limit 30 --jq '[.[] | select(.status == "queued" or .status == "in_progress")] | length')
           [ "${active}" -le 1 ] || exit 0
-          gh workflow run g11-free-runner.yml -f phase=predeadline -f operational_date=2026-10-06
+          gh workflow run g11-free-runner.yml -f phase=predeadline -f operational_date="${{ steps.due.outputs.operational_date }}"
       - name: WILD4 shadow
-        if: steps.runtime.outcome == 'success' && (steps.due.outputs.phase == 'predeadline' || (steps.due.outputs.phase == 'night' && steps.night-ready.outputs.allowed == 'true' && steps.publication-state-verified.outputs.ready == 'true' && (steps.readback.outcome == 'success' || steps.immutable-readback.outcome == 'success')))
+        if: steps.authority.outputs.delayed_rescue != 'true' && steps.runtime.outcome == 'success' && (steps.due.outputs.phase == 'predeadline' || (steps.due.outputs.phase == 'night' && steps.night-ready.outputs.allowed == 'true' && steps.publication-state-verified.outputs.ready == 'true' && (steps.readback.outcome == 'success' || steps.immutable-readback.outcome == 'success')))
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}

@@ -408,6 +408,14 @@ def main():
     sys.argv = [sys.argv[0], *sys.argv[2:]]
     _require("--operational-date" in sys.argv, "PREDEADLINE_RECOVERY_DAY_MISSING")
     day = sys.argv[sys.argv.index("--operational-date") + 1]
+    if mode == "predeadline" and day == "2026-10-16" and "--state-root" in sys.argv:
+        state = Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve()
+        if (state / "rescue/feed.json").is_file():
+            sys.path.insert(0, str(Path.cwd()))
+            from delayed_rescue_predeadline_v1 import run
+            run(state, day, Path(sys.argv[sys.argv.index("--feed-output") + 1]),
+                sys.argv[sys.argv.index("--public-run-id") + 1])
+            return 0
     if mode == "predeadline" and _run_same_day_rescue_predeadline(day):
         return 0
     if mode == "night" and _run_same_day_rescue_night(day):
