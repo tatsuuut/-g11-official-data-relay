@@ -82,10 +82,10 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
     if phase == "predeadline" and day == "2026-10-16" and (state / "rescue/feed.json").is_file():
-        from delayed_rescue_predeadline_v1 import certificate
+        from daily_predeadline_authority_recovery_v1 import certificate
         cert = certificate(state, day)
         return {"checkout_candidate": "true", "frozen": "true", "rescue_bootstrap": "true",
-                "delayed_rescue": "true", "source_sha": cert["runtime_source_sha"]}
+                "d16": "true", "source_sha": cert["runtime_source_sha"]}
     path = state / "daily-runtime" / day / "authority.json"
     if phase in {"predeadline", "night"} and not path.exists() and day == "2026-10-06":
         from daily_predeadline_authority_recovery_v1 import rescue_certificate

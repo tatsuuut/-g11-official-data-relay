@@ -308,7 +308,7 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     if rescue_class == "SAME_DAY_RESCUE_BOUNDARY":
         if (incoming.get("operational_date_jst") == "2026-10-16"
                 and (state / "rescue/predeadline-audit.json").is_file()):
-            from delayed_rescue_predeadline_v1 import deliver as deliver_delayed_live
+            from daily_predeadline_authority_recovery_v1 import deliver as deliver_delayed_live
             return deliver_delayed_live(state, feed_path, origin)
         return deliver_rescue(state, feed_path, origin, attempts, pause)
     if rescue_class == "TODAY_ONLY_RESCUE_PREDEADLINE":
