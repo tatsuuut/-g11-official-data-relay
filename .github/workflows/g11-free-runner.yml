@@ -2155,11 +2155,9 @@ jobs:
             args=(-f night_checkpoint_key=g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint)
           fi
           gh workflow run 364923281 -f mode=${{steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4'}} -f operational_date=${{steps.due.outputs.operational_date}} "${args[@]}"
-      - name: Report failed predeadline continuation after current publication
+      - name: Report failed continuation
         if: always() && steps.predeadline-chain.outcome == 'failure'
-        run: |
-          echo 'G11_PREDEADLINE_CHAIN=FAILED_AFTER_CURRENT_PUBLICATION_ATTEMPT' >&2
-          exit 1
+        run: exit 1
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
     if: >-
