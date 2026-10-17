@@ -326,7 +326,6 @@ jobs:
         run: |
           set -euo pipefail
           jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
-          cp .relay-output/result.json .relay-output/critical-heartbeat.json
           mkdir -p .relay-cache
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
           tar -czf - -C .relay-state . | \
@@ -344,6 +343,75 @@ jobs:
         with:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-critical-${{steps.due.outputs.operational_date}}-${{github.run_id}}
+      - name: Keep the predeadline relay alive between delayed cron starts
+        continue-on-error: true
+        if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-save.outcome == 'success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
+        env:
+          GH_TOKEN: ${{github.token}}
+          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
+        run: |
+          set -euo pipefail
+          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
+            --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
+          if [ "${heartbeat}" = HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
+            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
+            exit 0
+          fi
+          sleep 45
+          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
+            --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
+          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
+            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
+            exit 0
+          fi
+          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
+            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
+            exit 0
+          fi
+          runs="$(curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 2 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=100")"
+          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_ID}" \
+            '.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
+          for active_id in ${active_ids}; do
+            active_title="$(printf '%s' "${runs}" | jq -r --argjson id "${active_id}" \
+              '.workflow_runs[] | select(.id == $id) | .display_title')"
+            jobs="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${active_id}/jobs?per_page=100")"
+            if printf '%s' "${jobs}" | jq -e --arg target "LIVE-predeadline-${OPERATIONAL_DATE}" \
+              'any(.jobs[]; .name == $target and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending"))' >/dev/null; then
+              echo "G11_PREDEADLINE_CHAIN=DEFER_ACTIVE_LIVE run=${active_id}"
+              exit 0
+            fi
+            if [ "$(printf '%s' "${jobs}" | jq '.jobs | length')" -eq 0 ] && \
+               [ "${active_title}" = "LIVE-predeadline-${OPERATIONAL_DATE}" ]; then
+              echo "G11_PREDEADLINE_CHAIN=DEFER_QUEUED_LIVE run=${active_id}"
+              exit 0
+            fi
+          done
+          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
+            '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
+            -d "${payload}"
       - name: Checkout hash-locked research runtime
         if: (steps.due.outputs.phase!='predeadline'||steps.authority.outputs.rescue_bootstrap=='true')&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.authority.outputs.frozen!='true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -2086,74 +2154,6 @@ jobs:
             args=(-f night_checkpoint_key=g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint)
           fi
           gh workflow run 364923281 -f mode=${{steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4'}} -f operational_date=${{steps.due.outputs.operational_date}} "${args[@]}"
-      - name: Keep the predeadline relay alive between delayed cron starts
-        if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-save.outcome == 'success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
-        env:
-          GH_TOKEN: ${{github.token}}
-          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
-        run: |
-          set -euo pipefail
-          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
-            --result .relay-output/critical-heartbeat.json --operational-date "${OPERATIONAL_DATE}")"
-          if [ "${heartbeat}" = HANDOFF ]; then
-            echo 'G11_PREDEADLINE_CHAIN=NIGHT_HANDOFF'
-            exit 0
-          fi
-          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
-            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
-            exit 0
-          fi
-          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
-            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
-            exit 0
-          fi
-          sleep 45
-          heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
-            --result .relay-output/critical-heartbeat.json --operational-date "${OPERATIONAL_DATE}")"
-          if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
-            echo 'G11_PREDEADLINE_CHAIN=RESCUE_NIGHT_HANDOFF'
-            exit 0
-          fi
-          if [ "${heartbeat}" != CONTINUE ] && [ "${heartbeat}" != CHECK_HANDOFF ]; then
-            echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
-            exit 0
-          fi
-          runs="$(curl --fail-with-body --silent --show-error \
-            --retry 3 --retry-delay 2 \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=100")"
-          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_ID}" \
-            '.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
-          for active_id in ${active_ids}; do
-            active_title="$(printf '%s' "${runs}" | jq -r --argjson id "${active_id}" \
-              '.workflow_runs[] | select(.id == $id) | .display_title')"
-            jobs="$(curl --fail-with-body --silent --show-error \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${active_id}/jobs?per_page=100")"
-            if printf '%s' "${jobs}" | jq -e --arg target "LIVE-predeadline-${OPERATIONAL_DATE}" \
-              'any(.jobs[]; .name == $target and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending"))' >/dev/null; then
-              echo "G11_PREDEADLINE_CHAIN=DEFER_ACTIVE_LIVE run=${active_id}"
-              exit 0
-            fi
-            if [ "$(printf '%s' "${jobs}" | jq '.jobs | length')" -eq 0 ] && \
-               [ "${active_title}" = "LIVE-predeadline-${OPERATIONAL_DATE}" ]; then
-              echo "G11_PREDEADLINE_CHAIN=DEFER_QUEUED_LIVE run=${active_id}"
-              exit 0
-            fi
-          done
-          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
-            '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
-            -d "${payload}"
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
     if: >-
