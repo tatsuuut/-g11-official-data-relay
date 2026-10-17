@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-    paths: [.github/workflows/g11-free-runner.yml, scripts/daily_runtime_bootstrap_v1.py]
+    paths: [.github/workflows/g11-free-runner.yml,scripts/daily_runtime_bootstrap_v1.py]
   workflow_dispatch:
     inputs:
       phase:
