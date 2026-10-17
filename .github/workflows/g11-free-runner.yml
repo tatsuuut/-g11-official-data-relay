@@ -330,7 +330,7 @@ jobs:
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
           tar -czf - -C .relay-state . | \
             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-              --symmetric --cipher-algo AES256 --compress-algo none \
+              --symmetric --cipher-algo AES256 \
               --output .relay-cache/state.tgz.gpg.tmp
           exec 3<&-
           mv .relay-cache/state.tgz.gpg.tmp .relay-cache/state.tgz.gpg
@@ -907,7 +907,7 @@ jobs:
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
           tar -czf - -C .relay-state . | \
             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-              --symmetric --cipher-algo AES256 --compress-algo none --output "${temporary}"
+              --symmetric --cipher-algo AES256 --output "${temporary}"
           exec 3<&-
           mv "${temporary}" "${encrypted}"
           test -s "${encrypted}"
@@ -990,7 +990,7 @@ jobs:
         if: steps.encrypt-state.outputs.ready=='true'&&steps.night-ready.outputs.allowed=='true'
         uses: ./.github/actions/g11-publication-checkpoint
         with:
-          cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{ github.run_attempt }}-checkpoint
+          cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint
       - name: Publish a newly verified feed through OIDC
         if: steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!=''&&steps.night-ready.outputs.allowed=='true'&&(env.G11_NIGHT_TRANSPORT_ONLY=='true'||steps.publication-state-verified.outputs.ready=='true')
         id: publish
@@ -1750,7 +1750,7 @@ jobs:
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
           tar -czf - -C .relay-state . | \
             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-              --symmetric --cipher-algo AES256 --compress-algo none --output .relay-cache/state-delivery.tgz.gpg.tmp
+              --symmetric --cipher-algo AES256 --output .relay-cache/state-delivery.tgz.gpg.tmp
           exec 3<&-
           mv .relay-cache/state-delivery.tgz.gpg.tmp .relay-cache/state-delivery.tgz.gpg
           cp .relay-cache/state-delivery.tgz.gpg .relay-cache/state.tgz.gpg
@@ -2152,7 +2152,7 @@ jobs:
         run: |
           args=()
           if [ '${{steps.due.outputs.phase}}' = night ]; then
-            args=(-f night_checkpoint_key=g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{ github.run_attempt }}-checkpoint)
+            args=(-f night_checkpoint_key=g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint)
           fi
           gh workflow run 364923281 -f mode=${{steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4'}} -f operational_date=${{steps.due.outputs.operational_date}} "${args[@]}"
       - name: Report failed continuation
