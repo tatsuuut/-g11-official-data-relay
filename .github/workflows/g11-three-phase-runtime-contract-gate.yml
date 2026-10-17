@@ -13,6 +13,7 @@ on:
   push:
     branches:
       - main
+      - codex/g11-morning-state-audit-20261018
     paths:
       - ".github/workflows/g11-free-runner.yml"
       - ".github/workflows/g11-explicit-night-dispatcher.yml"
@@ -89,3 +90,57 @@ jobs:
           echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
           echo 'G11_LIVE_ACQUISITION_PUBLICATION_UI=NOT_TESTED_BY_THIS_GATE'
           echo 'MERGE_POLICY=DO_NOT_MERGE_RUNTIME_CHANGES_UNLESS_THIS_GATE_PASSES'
+
+  saved-state-audit:
+    if: github.ref == 'refs/heads/codex/g11-morning-state-audit-20261018'
+    needs: contract-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Restore exact existing encrypted checkpoint read only
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-10-18-39075655398
+          fail-on-cache-miss: true
+      - name: Inspect saved state without prediction imports or writes
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 3<<<"$STATE_PASSPHRASE"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "$RUNNER_TEMP/audit-state.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - <<'PY'
+          import hashlib,json,os,tarfile
+          from pathlib import PurePosixPath
+          with tarfile.open(os.environ['RUNNER_TEMP']+'/audit-state.tgz','r:gz') as tf:
+              members=tf.getmembers()
+              assert all(not PurePosixPath(m.name).is_absolute() and '..' not in PurePosixPath(m.name).parts and not m.issym() and not m.islnk() for m in members)
+              files={m.name.removeprefix('./'):m for m in members if m.isfile()}
+              def data(name):
+                  return tf.extractfile(files[name]).read() if name in files else None
+              def obj(name):
+                  raw=data(name)
+                  return json.loads(raw) if raw is not None else {}
+              meta=obj('relay-state.json')
+              authority=obj('daily-runtime/2026-10-18/authority.json')
+              morning=[p for p in files if p.startswith('store/snapshots/morning/') and p.endswith('.json')]
+              manifests=[p for p in files if '/2026-10-18/' in p and any(x in p for x in ['morning-predictions','bet-upstream','position-oos-admission'])]
+              bind=[p for p in files if p.startswith('daily-runtime/2026-10-18/bindings/MORNING/') and p.endswith('.json')]
+              raw=data('store/responses/schedule-b-20261018/response.bin')
+              receipt=obj('store/responses/schedule-b-20261018/receipt.json')
+              print('G11_SAVED_MORNING_AUDIT='+json.dumps({
+                  'day':meta.get('OPERATIONAL_DATE_JST'),'morning_complete':meta.get('MORNING_COMPLETE'),
+                  'authority_present':bool(authority),'authority_sha256':authority.get('authority_sha256'),
+                  'runtime_source_sha':authority.get('runtime_source_sha'),
+                  'morning_snapshot_count':len(morning),'independent_prediction_manifest_count':len(manifests),
+                  'morning_binding_count':len(bind),'morning_binding_executed':[obj(p).get('executed') for p in bind],
+                  'official_input_present':'store/snapshots/morning/official-day-input.json' in files,
+                  'rescue_feed_present':'rescue/feed.json' in files,
+                  'saved_b_archive_sha256':hashlib.sha256(raw).hexdigest() if raw else None,
+                  'saved_b_receipt_present':bool(receipt),
+                  'production_state_writes':0,'prediction_calls':0
+              },sort_keys=True))
+          PY
