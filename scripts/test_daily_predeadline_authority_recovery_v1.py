@@ -307,3 +307,38 @@ class Boundaries(unittest.TestCase):
             with self.assertRaises(RuntimeError):live.certificate(state,live.DELAYED_DAY,NOW)
 
 if __name__ == '__main__': unittest.main()
+
+class Oct18ContinuationScopeTests(unittest.TestCase):
+    def test_only_explicit_days_are_admitted(self):
+        self.assertEqual(live.DELAYED_DAYS, {'2026-10-16','2026-10-18'})
+        for day in ('2026-10-17','2026-10-19'):
+            with TemporaryDirectory() as td:
+                with self.assertRaisesRegex(RuntimeError, 'CURRENT_DAY_ONLY'):
+                    live.certificate(Path(td), day, datetime.fromisoformat(day+'T09:00:00+09:00'))
+    def test_oct18_requires_existing_boundary_and_current_day(self):
+        with TemporaryDirectory() as td:
+            for at in ('2026-10-17T09:00:00+09:00','2026-10-19T02:00:00+09:00'):
+                with self.assertRaisesRegex(RuntimeError,'CURRENT_DAY_ONLY'):
+                    live.certificate(Path(td),'2026-10-18',datetime.fromisoformat(at),allow_night_rollover=True)
+            with self.assertRaisesRegex(RuntimeError,'BOUNDARY_MISSING'):
+                live.certificate(Path(td),'2026-10-18',datetime.fromisoformat('2026-10-18T09:00:00+09:00'))
+    def test_oct18_night_overlay_keeps_predictions_and_rejects_early_results(self):
+        from types import SimpleNamespace
+        day='2026-10-18';key='20261018-04-02'
+        feed={'operational_date_jst':day,'stage':'MORNING','SNAPSHOT_CLASS':'SAME_DAY_RESCUE_BOUNDARY',
+          'counts':{'formal':0,'results':0,'pending':1},'same_day_rescue':{'immutable':True},
+          'races':[{'key':key,'venue_code':'04','race':2,'deadline_jst':day+'T10:05:00+09:00',
+          'result_trifecta':None,'payout':None,'result_meta':{},'practical_bets':['1-2-3'],
+          'same_day_rescue_lock':{'p3_snapshot_sha256':'a'*64},'research_eligible':False}]}
+        result=SimpleNamespace(race_key=key,operational_date=day,venue_code='04',race_no=2,trifecta_popularity=2,
+          winning_method='escape',race_status='ESTABLISHED',trifecta_settlements=[],trifecta_combination='2-1-3',trifecta_payout=1200)
+        original=deepcopy(feed)
+        with self.assertRaisesRegex(RuntimeError,'NIGHT_BEFORE_DEADLINE'):
+            live.night_overlay(feed,[result],datetime.fromisoformat(day+'T10:05:00+09:00'))
+        out=live.night_overlay(feed,[result],datetime.fromisoformat(day+'T20:00:00+09:00'))
+        self.assertEqual(feed,original);self.assertEqual(out['races'][0]['practical_bets'],['1-2-3'])
+        self.assertEqual(out['races'][0]['same_day_rescue_lock'],original['races'][0]['same_day_rescue_lock'])
+        self.assertEqual(live.night_overlay(out,[result],datetime.fromisoformat(day+'T21:00:00+09:00')),out)
+        result.operational_date='2026-10-17'
+        with self.assertRaisesRegex(RuntimeError,'NIGHT_RESULT_IDENTITY'):
+            live.night_overlay(feed,[result],datetime.fromisoformat(day+'T20:00:00+09:00'))
