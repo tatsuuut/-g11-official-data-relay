@@ -84,6 +84,13 @@ jobs:
             python3 -m unittest -v "${module}"
           done
 
+      - name: Verify isolated continuation and delivery guards
+        env:
+          PYTHONPATH: .g11-private
+        run: |
+          python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py -q
+          python3 -m unittest discover -s scripts -p test_daily_runtime_delivery_v1.py -q
+
       - name: Gate summary
         run: |
           echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
