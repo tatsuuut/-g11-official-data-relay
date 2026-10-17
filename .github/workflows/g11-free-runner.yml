@@ -328,7 +328,7 @@ jobs:
           jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
           mkdir -p .relay-cache
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-          tar -czf - -C .relay-state . | \
+          tar -I 'gzip -1' -cf - -C .relay-state . | \
             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
               --symmetric --cipher-algo AES256 \
               --output .relay-cache/state.tgz.gpg.tmp
@@ -769,7 +769,7 @@ jobs:
           )
           print("G11_RELAY_RESULT_EXTRACT=PASS")
           PY
-      - name: WILD4 capture audit
+      - name: Audit WILD4 training-food capture
         if: steps.runtime.outcome=='success'&&steps.due.outputs.phase!='dry-run'&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.due.outputs.phase!='same-day-rescue'&&steps.critical.outputs.rescue!='true'&&env.G11_R13!='true'&&!steps.authority.outputs.d16
         working-directory: .g11-private
         env:
@@ -905,7 +905,7 @@ jobs:
           encrypted=".relay-cache/state.tgz.gpg"
           temporary="${encrypted}.tmp"
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-          tar -czf - -C .relay-state . | \
+          tar -I 'gzip -1' -cf - -C .relay-state . | \
             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
               --symmetric --cipher-algo AES256 --output "${temporary}"
           exec 3<&-
@@ -1748,7 +1748,7 @@ jobs:
           fi
           mkdir -p .relay-cache
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-          tar -czf - -C .relay-state . | \
+          tar -I 'gzip -1' -cf - -C .relay-state . | \
             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
               --symmetric --cipher-algo AES256 --output .relay-cache/state-delivery.tgz.gpg.tmp
           exec 3<&-
@@ -1990,7 +1990,7 @@ jobs:
             python3 scripts/audit_three_phase_runtime_contract.py \
               --night-ready .relay-output/readback-existing-night.json --day "${{steps.due.outputs.operational_date}}"
           fi
-      - name: Continue NIGHT after last race
+      - name: Continue bounded NIGHT after official last-race handoff
         if: >-
           always() && !cancelled() &&
           env.G11_NIGHT_TRANSPORT_ONLY != 'true' &&
