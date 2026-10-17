@@ -4,8 +4,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - .github/workflows/g11-free-runner.yml
+    paths: [.github/workflows/g11-free-runner.yml,scripts/daily_runtime_bootstrap_v1.py]
   workflow_dispatch:
     inputs:
       phase:
@@ -2233,5 +2232,4 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
-
 # NIGHT recovery v5
