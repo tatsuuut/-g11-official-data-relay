@@ -101,7 +101,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-published-2026-10-18-39075655398
+          key: g11-state-v4-published-2026-10-18-39077934262
           fail-on-cache-miss: true
       - name: Inspect saved state without prediction imports or writes
         env:
@@ -142,5 +142,39 @@ jobs:
                   'saved_b_archive_sha256':hashlib.sha256(raw).hexdigest() if raw else None,
                   'saved_b_receipt_present':bool(receipt),
                   'production_state_writes':0,'prediction_calls':0
+              },sort_keys=True))
+
+              cert=obj('rescue/boundary.json')
+              feed=obj('rescue/feed.json')
+              evidence=obj('rescue/generation-evidence.json')
+              rows=[r for r in feed.get('races',[]) if r.get('same_day_rescue_lock')]
+              from datetime import datetime
+              canonical={p.removeprefix('store/snapshots/'):hashlib.sha256(data(p)).hexdigest() for p in files if p.startswith('store/snapshots/')}
+              models=authority.get('model_files',{})
+              model_match=bool(models) and cert.get('model_files')==models and all(hashlib.sha256(data('store/'+p) or b'').hexdigest()==h and hashlib.sha256(data('rescue/store/'+p) or b'').hexdigest()==h for p,h in models.items())
+              timely=all(max(datetime.fromisoformat(r['same_day_rescue_lock'][k]) for k in ('p3_locked_at_jst','v4_locked_at_jst')) < datetime.fromisoformat(r['deadline_jst']) for r in rows)
+              receipt=obj('rescue/delivery.json')
+              assert cert and feed and rows and model_match and timely
+              assert canonical==cert['preserved_canonical_lock_files']
+              assert authority['authority_sha256']=='74e0837747328847c7059d499be7197b2ba07a9a92b10f1940707c800d8c4fe8'
+              assert cert['source_delta']==['g11/canonical/official_pipeline.py']
+              assert cert['canonical_morning_promoted'] is False and cert['same_day_results_used'] is False
+              assert receipt.get('status')=='PASS' and receipt.get('site_get_readback')=='PASS'
+              print('G11_POST_RECOVERY_STATE_AUDIT='+json.dumps({
+                  'status':'PASS','canonical_morning_snapshot_count':len(morning),
+                  'canonical_snapshots_unchanged':True,'parent_authority_unchanged':True,
+                  'models_unchanged':model_match,'source_delta':cert['source_delta'],
+                  'rescue_source_sha':cert['runtime_source_sha'],
+                  'rescued_races':len(rows),'all_saves_before_deadline':timely,
+                  'first_p3_save':min(r['same_day_rescue_lock']['p3_locked_at_jst'] for r in rows),
+                  'last_p3_save':max(r['same_day_rescue_lock']['p3_locked_at_jst'] for r in rows),
+                  'first_v4_save':min(r['same_day_rescue_lock']['v4_locked_at_jst'] for r in rows),
+                  'last_v4_save':max(r['same_day_rescue_lock']['v4_locked_at_jst'] for r in rows),
+                  'first_deadline':min(r['deadline_jst'] for r in rows),
+                  'morning_authority':feed.get('same_day_rescue',{}).get('morning_authority'),
+                  'wild4_shadow':feed.get('same_day_rescue',{}).get('wild4_shadow'),
+                  'generation_failure_count':len(evidence.get('failures',[])),
+                  'canonical_morning_promoted':False,'same_day_results_used':False,
+                  'delivery':receipt,'production_state_writes':0,'prediction_calls':0
               },sort_keys=True))
           PY
