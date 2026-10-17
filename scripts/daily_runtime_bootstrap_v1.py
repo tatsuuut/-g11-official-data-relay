@@ -77,7 +77,7 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
             raise RuntimeError("RESCUE_EFFECTIVE_DATE")
         retained_module(state, day).load(state, day)
         boundary = state / "rescue/boundary.json"
-        source_sha = json.loads(boundary.read_bytes())["runtime_source_sha"] if boundary.exists() else "e508a0be5267349beb0d1bda425de9d828671d47"
+        source_sha = json.loads(boundary.read_bytes())["runtime_source_sha"] if boundary.exists() else ("122a785806395b43145a0189c5f6724d5e8e8d4a" if day == "2026-10-18" else "e508a0be5267349beb0d1bda425de9d828671d47")
         return {"checkout_candidate":"true", "frozen":"true", "source_sha":source_sha}
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
