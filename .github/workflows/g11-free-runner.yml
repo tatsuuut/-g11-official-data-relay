@@ -344,6 +344,7 @@ jobs:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-critical-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       - name: Keep the predeadline relay alive between delayed cron starts
+        id: predeadline-chain
         continue-on-error: true
         if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-save.outcome == 'success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
         env:
@@ -2154,6 +2155,11 @@ jobs:
             args=(-f night_checkpoint_key=g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint)
           fi
           gh workflow run 364923281 -f mode=${{steps.due.outputs.phase == 'night' && 'wild4-settle' || 'wild4'}} -f operational_date=${{steps.due.outputs.operational_date}} "${args[@]}"
+      - name: Report failed predeadline continuation after current publication
+        if: always() && steps.predeadline-chain.outcome == 'failure'
+        run: |
+          echo 'G11_PREDEADLINE_CHAIN=FAILED_AFTER_CURRENT_PUBLICATION_ATTEMPT' >&2
+          exit 1
   repair-20260928-final:
     name: Restore historical FINAL using accepted result overlay
     if: >-
