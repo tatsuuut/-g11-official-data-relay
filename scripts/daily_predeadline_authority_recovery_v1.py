@@ -880,6 +880,36 @@ def restore_night_baseline(state, archive):
     print(json.dumps({'NIGHT_PREINCIDENT_READBACK':'PASS','RESTORED_DERIVED_STATUS_ONLY':bool(changes)}))
 
 
+def rescue_night_delta(accepted, out, base_sha):
+    """Bound the result-only wire, preserving every saved canonical byte/LOCK."""
+    require(out['operational_date_jst'] == accepted['operational_date_jst'] == '2026-10-18'
+        and accepted['stage'] == 'MORNING' and out['stage'] == 'NIGHT'
+        and out['same_day_rescue'] == accepted['same_day_rescue']
+        and len(out['races']) == len(accepted['races']) == 156, 'NIGHT_DELTA_IDENTITY')
+    protected = deepcopy(out)
+    for k in ('stage', 'status', 'generated_at_jst'):
+        protected[k] = accepted[k]
+    protected['counts'] = deepcopy(accepted['counts'])
+    prior = {r['key']: r for r in accepted['races']}
+    require(len(prior) == 156 and {r['key'] for r in out['races']} == set(prior), 'NIGHT_DELTA_RACE_SET')
+    changes = []
+    for row, restored in zip(out['races'], protected['races']):
+        old = prior[row['key']]
+        changes.append({'RACE_KEY': row['key'], 'CHANGED_FIELDS':
+            {k: deepcopy(row[k]) for k in ('result_trifecta', 'payout', 'result_meta')}})
+        for k in ('result_trifecta', 'payout', 'result_meta'):
+            restored[k] = deepcopy(old[k])
+    require(protected == accepted and out['status'] == 'PASS'
+        and out['counts'] == {**accepted['counts'], 'results': 156, 'pending': 0}, 'NIGHT_DELTA_NONRESULT_MUTATION')
+    wire = canonical({'SCHEMA': 'G11_RESCUE_NIGHT_DELTA_V1', 'OPERATIONAL_DATE': '2026-10-18',
+        'BASE_FEED_SHA': base_sha, 'TARGET_FEED_SHA': sha(canonical(out)+b'\n'),
+        'AUTHORITY_SHA256': out['same_day_rescue']['authority_sha256'],
+        'TOP_LEVEL': {k: deepcopy(out[k]) for k in ('stage','status','generated_at_jst','counts')},
+        'RACES': changes})
+    require(len(wire) <= 900_000, 'NIGHT_DELTA_WIRE_BUDGET')
+    return wire
+
+
 def run_delayed_night(state, day, output, origin):
     Path(".relay-output").mkdir(parents=True, exist_ok=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -977,7 +1007,10 @@ def run_delayed_night(state, day, output, origin):
         'SETTLED_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='SETTLED' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
         'GORIPAN':'NO_FIXED_BET_NO_BACKFILL','PROTECTED_UNCHANGED':True,'FIXED_BUT_NOT_PUBLISHED_LIVE':unpublished}
     data=canonical(out)+b'\n'
-    require(len(data)<=2097152,'NIGHT_DELIVERY_SIZE')
+    if day == '2026-10-18':
+        rescue_night_delta(accepted, out, sha(raw))
+    else:
+        require(len(data)<=2097152,'NIGHT_DELIVERY_SIZE')
     atomic(saved,data);atomic(report,canonical({'runtime_result':result,'official_url':url,
         'official_receipt':_serializable(receipt),'feed_sha256':sha(data),'accepted_feed_sha256':sha(raw),
         'protected_sha256':sha(canonical(before)),'by_race':scores})+b'\n')
@@ -1010,10 +1043,11 @@ def deliver_delayed_night(state,feed_path,origin):
     if accepted['stage']=='NIGHT':require(accepted==out,'NIGHT_ALREADY_SETTLED_CONFLICT')
     else:
         with tempfile.TemporaryDirectory() as directory:
-            p=Path(directory)/'feed.json';resp=Path(directory)/'response.json';p.write_bytes(data)
+            wire = rescue_night_delta(accepted,out,base_sha) if day == '2026-10-18' else data
+            p=Path(directory)/'feed.json';resp=Path(directory)/'response.json';p.write_bytes(wire)
             r=subprocess.run(['curl','--silent','--show-error','--max-time','45','-X','POST',origin+'/api/g11-sync',
               '-H','Authorization: Bearer '+os.environ['G11_SYNC_OIDC'],'-H','Content-Type: application/json',
-              '-H','x-g11-feed-sha256: '+sha(data),'-H','x-g11-rescue-night-base-sha256: '+base_sha,
+              '-H','x-g11-feed-sha256: '+sha(wire),'-H','x-g11-rescue-night-base-sha256: '+base_sha,
               '-H','x-g11-rescue-night-audit-sha256: '+audit_sha,'-H','x-g11-rescue-night-checkpoint-sha256: '+checkpoint_sha,'--data-binary','@'+str(p),'--output',str(resp),'--write-out','%{http_code}'],capture_output=True,text=True,check=True)
             ack=json.loads(resp.read_bytes())
             require(200<=int(r.stdout)<300 and ack.get('status')=='PASS','NIGHT_SITE_REJECTED:'+str(ack.get('error')))
@@ -1029,3 +1063,4 @@ def deliver_delayed_night(state,feed_path,origin):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
