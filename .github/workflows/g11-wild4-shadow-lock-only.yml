@@ -906,7 +906,7 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         run: |
           python3 - <<'PYRESEARCH'
-          import hashlib,json,os,pathlib,urllib.request
+          import json,os,pathlib,sys
           from datetime import datetime,timezone
           from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
           ledger=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-future-locks'
@@ -915,12 +915,12 @@ jobs:
           url=('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed'
               '?view=goripan-generation&specialty_revision='+life.SPECIALTY_V4_REVISION+
               '&generation='+state['active']['identity']+'&through='+day)
-          with urllib.request.urlopen(url,timeout=20) as response:
-              raw=response.read(8*1024*1024+1)
-              life.require(len(raw)<=8*1024*1024 and response.status==200
-                  and hashlib.sha256(raw).hexdigest()==response.headers.get('x-g11-feed-sha256'),
-                  'SPECIALTY_HTTP_READBACK')
-          evidence=json.loads(raw)
+          # Reuse the same public GET/hash verification as the existing binder.
+          sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'scripts'))
+          import hot_delta_transport_v1 as hot
+          pathlib.Path('.relay-output').mkdir(exist_ok=True)
+          evidence,_,raw=hot.fetch(url)
+          life.require(len(raw)<=8*1024*1024, 'SPECIALTY_HTTP_READBACK')
           life.require(evidence.get('through')==day and not evidence.get('TEST_ONLY'), 'SPECIALTY_SOURCE_DAY')
           state=life.refresh_specialty_v4(ledger,state,evidence,now=datetime.now(timezone.utc))
           print('SPECIALTY_V4_RESEARCH_READBACK='+json.dumps(life.specialty_public_status(state),sort_keys=True))
