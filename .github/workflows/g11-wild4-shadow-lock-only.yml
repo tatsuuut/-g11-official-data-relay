@@ -233,7 +233,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 1cafd75c34216bd67592ed0e914b9298d3c9521a
+          ref: bb7f273e51fc80af1669f3e9857dd4a9e6adae04
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -894,6 +894,37 @@ jobs:
           path: ${{ runner.temp }}/trained-candidate.tgz.gpg
           retention-days: 90
           if-no-files-found: error
+      # Optional research refresh reuses this NIGHT opportunity and the same
+      # encrypted artifact. It never calls bind_day, training, or model promotion.
+      # A just-settled day may not yet be public: HOLD until the existing retry.
+      - name: Persist V4 specialty research after completed NIGHT
+        if: steps.settlement.outputs.complete == 'true' && steps.day.outputs.lifecycle_enabled == 'true'
+        continue-on-error: true
+        timeout-minutes: 1
+        working-directory: .g11-private
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+        run: |
+          python3 - <<'PYRESEARCH'
+          import hashlib,json,os,pathlib,urllib.request
+          from datetime import datetime,timezone
+          from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+          ledger=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-future-locks'
+          state=life.read(life.state_path(ledger))
+          day=os.environ['OPERATIONAL_DATE']
+          url=('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed'
+              '?view=goripan-generation&specialty_revision='+life.SPECIALTY_V4_REVISION+
+              '&generation='+state['active']['identity']+'&through='+day)
+          with urllib.request.urlopen(url,timeout=20) as response:
+              raw=response.read(8*1024*1024+1)
+              life.require(len(raw)<=8*1024*1024 and response.status==200
+                  and hashlib.sha256(raw).hexdigest()==response.headers.get('x-g11-feed-sha256'),
+                  'SPECIALTY_HTTP_READBACK')
+          evidence=json.loads(raw)
+          life.require(evidence.get('through')==day and not evidence.get('TEST_ONLY'), 'SPECIALTY_SOURCE_DAY')
+          state=life.refresh_specialty_v4(ledger,state,evidence,now=datetime.now(timezone.utc))
+          print('SPECIALTY_V4_RESEARCH_READBACK='+json.dumps(life.specialty_public_status(state),sort_keys=True))
+          PYRESEARCH
       - name: Encrypt immutable future locks
         if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success')
         env:
@@ -923,7 +954,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 1cafd75c34216bd67592ed0e914b9298d3c9521a
+          ref: bb7f273e51fc80af1669f3e9857dd4a9e6adae04
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -1033,6 +1064,7 @@ jobs:
             echo 'WILD4_POST_NIGHT_SETTLEMENT_INCOMPLETE' >&2
             exit 1
           fi
+
 
 
 
