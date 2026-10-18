@@ -75,9 +75,18 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
             return {"checkout_candidate":"true", "frozen":"false", "source_sha":"cd7fdb3133e2d57c7443973eb6bd5f67cc8e4344"}
         if day < "2026-10-16":
             raise RuntimeError("RESCUE_EFFECTIVE_DATE")
-        retained_module(state, day).load(state, day)
+        authority = retained_module(state, day).load(state, day)
         boundary = state / "rescue/boundary.json"
-        source_sha = json.loads(boundary.read_bytes())["runtime_source_sha"] if boundary.exists() else ("122a785806395b43145a0189c5f6724d5e8e8d4a" if day == "2026-10-18" else "e508a0be5267349beb0d1bda425de9d828671d47")
+        if boundary.exists():
+            source_sha = json.loads(boundary.read_bytes())["runtime_source_sha"]
+        elif day >= "2026-10-19":
+            # A new recovery must retain the day's already approved source.
+            # Selecting the old incident revision can undo acquisition fixes
+            # and fail the unchanged private source-delta safety check.
+            source_sha = authority["runtime_source_sha"]
+        else:
+            source_sha = ("122a785806395b43145a0189c5f6724d5e8e8d4a" if day == "2026-10-18"
+                          else "e508a0be5267349beb0d1bda425de9d828671d47")
         return {"checkout_candidate":"true", "frozen":"true", "source_sha":source_sha}
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}

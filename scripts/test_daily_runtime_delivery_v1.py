@@ -550,3 +550,88 @@ class SavedRescueCronContinuationTests(DelayedRecoveryRoutingTests):
             self.day = day
             self.metadata.write_text(json.dumps({"OPERATIONAL_DATE_JST":day,"MORNING_COMPLETE":False}))
             self.assertEqual(self.route("08:44:49","morning")["phase"],"morning")
+
+
+class DelayedRecoverySourceSelectionTests(unittest.TestCase):
+    """Select an already frozen runtime; never create predictions or live state."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.fixture = Scenario(self.root / "source-fixture")
+
+    def state_for(self, day="2026-10-19"):
+        state = self.root / day
+        shutil.copytree(self.fixture.store / "g11", state / "store/g11")
+        authority = d.create(
+            state, day, self.fixture.main, "b" * 40,
+            now=_rescue_datetime.fromisoformat(day + "T02:15:00+09:00"),
+        )
+        return state, authority
+
+    def prepare(self, state, day, now_day=None):
+        current = _rescue_datetime.fromisoformat((now_day or day) + "T08:10:00+09:00")
+        class FixedClock(_rescue_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return current.astimezone(tz)
+        with patch.object(bootstrap, "datetime", FixedClock):
+            return bootstrap.prepare(state, day, "same-day-rescue", self.root / "unused-source")
+
+    def test_new_day_reuses_verified_frozen_source_without_state_mutation(self):
+        day = "2026-10-19"
+        state, authority = self.state_for(day)
+        before = {p.relative_to(state).as_posix(): p.read_bytes()
+                  for p in state.rglob("*") if p.is_file()}
+        selected = self.prepare(state, day)
+        self.assertEqual(selected["source_sha"], authority["runtime_source_sha"])
+        self.assertEqual(selected["frozen"], "true")
+        self.assertEqual(before, {p.relative_to(state).as_posix(): p.read_bytes()
+                                 for p in state.rglob("*") if p.is_file()})
+        self.assertFalse((state / "rescue").exists())
+
+    def test_existing_saved_boundary_source_is_retained(self):
+        state, _ = self.state_for()
+        boundary = state / "rescue/boundary.json"
+        boundary.parent.mkdir()
+        # Only selection is tested here; the existing private boundary verifier
+        # still owns full certificate verification before any recovery.
+        boundary.write_text(json.dumps({"runtime_source_sha": "c" * 40}))
+        before = boundary.read_bytes()
+        self.assertEqual(self.prepare(state, "2026-10-19")["source_sha"], "c" * 40)
+        self.assertEqual(boundary.read_bytes(), before)
+
+    def test_existing_incident_source_exceptions_are_unchanged(self):
+        for day, expected in (
+            ("2026-10-16", "e508a0be5267349beb0d1bda425de9d828671d47"),
+            ("2026-10-18", "122a785806395b43145a0189c5f6724d5e8e8d4a"),
+        ):
+            with self.subTest(day=day):
+                state, _ = self.state_for(day)
+                self.assertEqual(self.prepare(state, day)["source_sha"], expected)
+
+    def test_past_day_cannot_start_new_rescue(self):
+        state, _ = self.state_for("2026-10-18")
+        with self.assertRaisesRegex(RuntimeError, "RESCUE_CURRENT_DAY_ONLY"):
+            self.prepare(state, "2026-10-18", now_day="2026-10-19")
+
+    def test_tampered_authority_cannot_select_any_runtime(self):
+        state, _ = self.state_for()
+        path = state / "daily-runtime/2026-10-19/authority.json"
+        value = json.loads(path.read_bytes())
+        value["runtime_source_sha"] = "c" * 40
+        path.write_text(json.dumps(value))
+        with self.assertRaisesRegex(RuntimeError, "DAILY_AUTHORITY_SHA_MISMATCH"):
+            self.prepare(state, "2026-10-19")
+
+    def test_tampered_archive_cannot_select_any_runtime(self):
+        state, authority = self.state_for()
+        archive = state / "daily-runtime/2026-10-19" / authority["source_archive"]
+        archive.write_bytes(b"invalid archive")
+        with self.assertRaisesRegex(RuntimeError, "DAILY_SOURCE_ARCHIVE_SHA_MISMATCH"):
+            self.prepare(state, "2026-10-19")
+
+    def test_missing_authority_never_falls_back_to_an_old_runtime(self):
+        with self.assertRaisesRegex(RuntimeError, "DAILY_AUTHORITY_UNKNOWN"):
+            self.prepare(self.root / "missing", "2026-10-19")
