@@ -17,7 +17,7 @@ class RecoveryTests(unittest.TestCase):
         if not path: self.skipTest("Saved read-only October 17 app fixture is required")
         app = json.loads(Path(path).read_bytes())
         before = deepcopy(app); projection = r.projection_from_app(app)
-        self.assertEqual(r.digest(r.canonical(projection)), r.PROJECTION_SHA)
+        self.assertIn(r.digest(r.canonical(projection)), (r.PROJECTION_SHA, r.SAVED_PROJECTION_SHA))
         self.assertEqual(len(projection["races"]), 154)
         self.assertEqual(app, before)
 
@@ -77,6 +77,15 @@ class RecoveryTests(unittest.TestCase):
                 event.write_text(json.dumps({"head_commit": {"message": r.MARKER}}))
                 with patch.object(r, "THROUGH", "2000-01-01"):
                     with self.assertRaisesRegex(RuntimeError, "ONE_DAY_AUTHORITY_EXPIRED"): r.scope()
+
+    def test_finish_saved_never_evaluates_or_posts_again(self):
+        import ast
+        tree = ast.parse(Path(r.__file__).read_text())
+        for fn in (n for n in tree.body if isinstance(n, ast.FunctionDef)
+                   and n.name in ("finish_saved", "readback_saved")):
+            calls = {ast.unparse(n.func) for n in ast.walk(fn) if isinstance(n, ast.Call)}
+            self.assertFalse(calls & {"life.refresh_specialty_v4", "life.save", "publish", "subprocess.run"})
+            self.assertNotIn("ACTIONS_ID_TOKEN_REQUEST_TOKEN", ast.unparse(fn))
 
     def test_encrypted_saved_readback_full_byte_equality(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -412,31 +412,22 @@ jobs:
       - name: Load the existing pinned lifecycle dependency
         if: env.G11_SPECIALTY_ONLY == 'true'
         run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
-      - name: Validate normal-day canonical identity and append only V4 research
+      - name: Continue the already saved V4 receipt without reevaluation
         if: env.G11_SPECIALTY_ONLY == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
-          python3 scripts/specialty_v4_save_recovery.py prepare \
+          python3 scripts/specialty_v4_save_recovery.py finish-saved \
             --work "${RUNNER_TEMP}/specialty-v4-save" --private "${GITHUB_WORKSPACE}/.g11-private"
       - name: Verify research-only safety and encrypted roundtrip before durable upload
         if: env.G11_SPECIALTY_ONLY == 'true'
         env:
           SPECIALTY_TEST_APP: ${{ runner.temp }}/specialty-v4-save/app-before.json
         run: python3 -m unittest discover -s scripts -p test_specialty_v4_save_recovery.py -v
-      - name: Encrypt the unchanged ledger with only its research receipt appended
+      - name: Retain exact encrypted bytes of the verified saved receipt
         if: env.G11_SPECIALTY_ONLY == 'true'
-        env:
-          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          tar -czf "${RUNNER_TEMP}/specialty-v4-save/future-locks.tgz" \
-            -C "${RUNNER_TEMP}/specialty-v4-save/restored" g11-wild4-future-locks
-          exec 3<<<"${STATE_PASSPHRASE}"
-          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 \
-            --output "${RUNNER_TEMP}/specialty-v4-save/future-locks.tgz.gpg" "${RUNNER_TEMP}/specialty-v4-save/future-locks.tgz"
-          exec 3<&-
+        run: cp "${RUNNER_TEMP}/specialty-v4-save/source.gpg" "${RUNNER_TEMP}/specialty-v4-save/future-locks.tgz.gpg"
       - name: Save V4 research through the existing canonical encrypted artifact
         if: env.G11_SPECIALTY_ONLY == 'true'
         uses: actions/upload-artifact@v4
@@ -459,12 +450,12 @@ jobs:
           python3 scripts/specialty_v4_save_recovery.py verify-saved \
             --work "${RUNNER_TEMP}/specialty-v4-save" \
             --lock-archive "${GITHUB_WORKSPACE}/.specialty-saved-readback/future-locks.tgz.gpg"
-      - name: Publish only research metadata and read back through the existing app GET
+      - name: Verify the existing public GET without republishing
         if: env.G11_SPECIALTY_ONLY == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 scripts/specialty_v4_save_recovery.py publish --work "${RUNNER_TEMP}/specialty-v4-save"
+          python3 scripts/specialty_v4_save_recovery.py readback-saved --work "${RUNNER_TEMP}/specialty-v4-save"
 
   wild4-prospective:
     name: Goripan WILD4 prospective observation

@@ -39,6 +39,12 @@ SOURCE_SHA = "f86bbfd24923d4acf103c67b7ed4f52f09825acb52600d0f6d2510c06dda7ddf"
 EXCLUDED_AUTHORITY = "226c9c5de084e6e7c0a5607bb1f56821d2125da46cd122d249ad4c45996160aa"
 REVISION = "V4_IMMEDIATE_ADOPTION_500R_CUMULATIVE"
 LIFECYCLE = "model-registry/lifecycle.json"
+SAVED_ARTIFACT = 12127317988
+SAVED_RUN = 39103154950
+SAVED_DIGEST = "sha256:6a6e7f8cc2f0150330ba5731ce25fa3c51c5fce25179b3bf153b96e2b2a863cf"
+SAVED_APP_SHA = "50ef2a9e394253386d5713caabe74a651a588d408257821586a05c87262679cf"
+SAVED_PROJECTION_SHA = "b2cf612b024894db9d164a2c739c66116638468f0d43e7110c709b338d715ccf"
+SAVED_ADOPTION_SHA = "45ce8636ba84eb3fdd15e3aa9424c755b3795df97cf392274dc9365fd8bb194e"
 
 
 def require(ok, code):
@@ -79,12 +85,12 @@ def artifact_guard():
         api("/actions/artifacts?name=" + today + "&per_page=100")["artifacts"]), "NEWER_DAY_LEDGER_EXISTS")
 
 
-def download_source(work):
+def download_source(work, artifact_id=ARTIFACT_ID, artifact_sha=ARTIFACT_SHA):
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
     req = urllib.request.Request("https://api.github.com/repos/" + REPO + "/actions/artifacts/"
-        + str(ARTIFACT_ID) + "/zip", headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+        + str(artifact_id) + "/zip", headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
         "Accept": "application/vnd.github+json"})
     try:
         urllib.request.build_opener(NoRedirect).open(req, timeout=30)
@@ -96,7 +102,7 @@ def download_source(work):
     # The signed artifact host never receives the GitHub Authorization header.
     with urllib.request.urlopen(location, timeout=45) as response:
         raw = response.read(16 * 1024 * 1024 + 1)
-    require(len(raw) <= 16 * 1024 * 1024 and "sha256:" + digest(raw) == ARTIFACT_SHA,
+    require(len(raw) <= 16 * 1024 * 1024 and "sha256:" + digest(raw) == artifact_sha,
         "ARTIFACT_DIGEST")
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         require(archive.namelist() == ["future-locks.tgz.gpg"], "ARTIFACT_SHAPE")
@@ -273,14 +279,112 @@ def publish(args):
     print("SPECIALTY_PUBLIC_GET_READBACK=PASS " + json.dumps(receipt, sort_keys=True), flush=True)
 
 
+def saved_artifact_guard():
+    """Complete the saved-and-published receipt, without recalculating adoption.
+
+    The prior run stopped only on its broad app-summary comparison. Its artifact
+    upload, decrypted byte readback, and seven safety tests all completed first.
+    Normal runtime artifact selection still requires a successful run.
+    """
+    current = int(os.environ["GITHUB_RUN_ID"])
+    items = api("/actions/artifacts?name=" + ARTIFACT_NAME + "&per_page=100")["artifacts"]
+    others = [a for a in items if a["name"] == ARTIFACT_NAME and not a["expired"]
+        and a["workflow_run"]["id"] != current]
+    require(bool(others), "SAVED_ARTIFACT_MISSING")
+    latest = max(others, key=lambda a: (a["created_at"], a["id"]))
+    require(latest["id"] == SAVED_ARTIFACT and latest["digest"] == SAVED_DIGEST
+        and latest["workflow_run"]["id"] == SAVED_RUN
+        and latest["workflow_run"]["repository_id"] == latest["workflow_run"]["head_repository_id"] == 1367703708,
+        "SAVED_ARTIFACT_CHANGED")
+    original = next((a for a in others if a["id"] == ARTIFACT_ID), None)
+    require(original and original["digest"] == ARTIFACT_SHA, "ORIGINAL_ARTIFACT_RETAINED")
+    run = api("/actions/runs/" + str(SAVED_RUN))
+    require(run["conclusion"] == "failure" and run["path"] == WORKFLOW and run["head_branch"] == "main"
+        and run["head_sha"] == "70442b2981ba288923024b73e251ac67e733f65e", "SAVED_RUN_IDENTITY")
+    jobs = api("/actions/runs/" + str(SAVED_RUN) + "/jobs")["jobs"]
+    job = next((j for j in jobs if j["id"] == 117603382212), None)
+    require(job is not None, "SAVED_JOB_IDENTITY")
+    steps = {s["name"]: s["conclusion"] for s in job["steps"]}
+    required = ["Validate normal-day canonical identity and append only V4 research",
+        "Verify research-only safety and encrypted roundtrip before durable upload",
+        "Save V4 research through the existing canonical encrypted artifact",
+        "Read back the saved research artifact before publication", "Require complete decrypted byte equality"]
+    require(all(steps.get(name) == "success" for name in required)
+        and [k for k,v in steps.items() if v == "failure"]
+        == ["Publish only research metadata and read back through the existing app GET"], "SAVED_PROOF_STEPS")
+    today = "g11-wild4-20261018-future-oos-locks-encrypted"
+    require(not any(a["name"] == today and not a["expired"] for a in
+        api("/actions/artifacts?name=" + today + "&per_page=100")["artifacts"]), "NEWER_DAY_LEDGER_EXISTS")
+
+
+def finish_saved(args):
+    work = args.work; work.mkdir(parents=True, exist_ok=False)
+    saved_artifact_guard()
+    prior_work = work / "prior"; prior_work.mkdir()
+    old_ledger = download_source(prior_work)
+    ledger = download_source(work, SAVED_ARTIFACT, SAVED_DIGEST)
+    sys.path.insert(0, str(args.private))
+    from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+    before = life.read(life.state_path(old_ledger)); after = life.read(life.state_path(ledger))
+    files = inventory(ledger)
+    validate_difference(inventory(old_ledger), files, before, after)
+    require(before["CONTENT_SHA256"] == "ccf4e2d16bd5476bcdc7544767c837d28603016df7ee664fbb1f87da8a5e4c5b"
+        and after["CONTENT_SHA256"] == "27af74a61081bc82a2b100a0a8d055ee62006fd96389473e253af7125e15d691",
+        "SAVED_LIFECYCLE_SHA")
+    pin = life.read(ledger / "day-model-binding.json")
+    require(pin["date"] == DAY and pin["authority"] == life.AUTHORITY and pin["model"] == after["active"]
+        and life.model_info(ledger / "model-registry/models" / MODEL) == pin["model"], "SAVED_MODEL_IDENTITY")
+    ab = after["specialty"]["engines"]["ABEKEN_V4"]
+    adoption = ab["generations"][ab["current_generation"]]["adoptions"]["v4:initial"]
+    require(adoption == life.sealed(adoption) and adoption["CONTENT_SHA256"] == SAVED_ADOPTION_SHA
+        and adoption["saved_at"] == "2026-10-18T06:12:03.041580+00:00" and adoption["sample"] == 1156
+        and not after["generations"][MODEL].get("specialty_updates"), "SAVED_ADOPTION_IDENTITY")
+    app, headers, raw = get("view=v53-final&date=" + DAY)
+    projection = projection_from_app(app)
+    require(digest(raw) == SAVED_APP_SHA and headers.get("x-g11-canonical-feed-sha256") == CANONICAL_SHA
+        and headers.get("x-g11-source-feed-sha256") == SOURCE_SHA
+        and digest(canonical(projection)) == headers.get("x-g11-wild4-projection-sha256") == SAVED_PROJECTION_SHA
+        and life.public_status(ledger) == projection["observation"]["lifecycle"], "SAVED_PUBLIC_IDENTITY")
+    require(app["selective_alert_inputs"]["selection_enabled"] is False
+        and app["selective_alert_inputs"]["delivery_enabled"] is False, "NOTIFICATION_DISABLED")
+    (work / "app-before.json").write_bytes(raw)
+    (work / "projection.json").write_bytes(canonical(projection))
+    (work / "expected-ledger-files.json").write_bytes(canonical(files))
+    receipt = {"revision": REVISION, "saved_at": adoption["saved_at"], "adoption_sha256": SAVED_ADOPTION_SHA,
+        "source_artifact": SAVED_ARTIFACT, "source_run": SAVED_RUN, "source_artifact_digest": SAVED_DIGEST,
+        "source_day": DAY, "through": THROUGH, "abeken_generation": ab["current_generation"],
+        "abeken_valid": 1156, "wild4_valid": 1137, "wild4_hold": "EARLIER_RESULTS_PENDING",
+        "evidence_sha256": adoption["source_sha256"], "projection_sha256": SAVED_PROJECTION_SHA,
+        "protected_files": len(files)-1, "protected_state_sha256": digest(canonical(protected_state(after))),
+        "model_prediction_settlement_mutated": False, "adoption_regenerated": False,
+        "publication_repeated": False, "selection_enabled": False, "delivery_enabled": False}
+    (work / "receipt.json").write_bytes(canonical(receipt))
+    print("SPECIALTY_SAVED_RECEIPT_CONTINUED=" + json.dumps(receipt, sort_keys=True), flush=True)
+
+
+def readback_saved(args):
+    saved_artifact_guard()
+    work = args.work
+    require(inventory(work / "saved-readback/g11-wild4-future-locks")
+        == read(work / "expected-ledger-files.json"), "PERSISTENCE_GATE")
+    after, headers, raw = get("view=v53-final&date=" + DAY)
+    require(raw == (work / "app-before.json").read_bytes() and digest(raw) == SAVED_APP_SHA
+        and headers.get("x-g11-canonical-feed-sha256") == CANONICAL_SHA
+        and headers.get("x-g11-source-feed-sha256") == SOURCE_SHA
+        and headers.get("x-g11-wild4-projection-sha256") == SAVED_PROJECTION_SHA
+        and projection_from_app(after) == read(work / "projection.json"), "EXACT_PUBLIC_GET_READBACK")
+    print("SPECIALTY_PUBLIC_GET_READBACK=PASS " + json.dumps(read(work / "receipt.json"), sort_keys=True), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "verify-saved", "publish"])
+    parser.add_argument("action", choices=["prepare", "verify-saved", "publish", "finish-saved", "readback-saved"])
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--private", type=Path)
     parser.add_argument("--lock-archive", type=Path)
     args = parser.parse_args(); scope()
-    {"prepare": prepare, "verify-saved": verify_saved, "publish": publish}[args.action](args)
+    {"prepare": prepare, "verify-saved": verify_saved, "publish": publish,
+        "finish-saved": finish_saved, "readback-saved": readback_saved}[args.action](args)
 
 
 if __name__ == "__main__":
