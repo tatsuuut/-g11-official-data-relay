@@ -499,3 +499,54 @@ class DelayedRecoveryRoutingTests(unittest.TestCase):
     def test_missing_authority_never_attempts_recovery(self):
         (self.state / "daily-runtime" / self.day / "authority.json").unlink()
         self.assertEqual(self.route()["recovery_route"], "NO_SAVED_DAY_AUTHORITY")
+
+
+class SavedRescueCronContinuationTests(DelayedRecoveryRoutingTests):
+    def setUp(self):
+        super().setUp()
+        self.day = "2026-10-18"
+        self.metadata.write_text(json.dumps({"OPERATIONAL_DATE_JST":self.day,"MORNING_COMPLETE":False}))
+        (self.state / "daily-runtime" / self.day).mkdir(parents=True)
+        (self.state / "daily-runtime" / self.day / "authority.json").write_text("{}")
+
+    def saved_feed(self):
+        p = self.state / "rescue/feed.json"
+        p.parent.mkdir(exist_ok=True)
+        p.write_text("immutable saved predictions")
+        return p
+
+    def test_delayed_morning_and_auto_continue_only_verified_saved_state(self):
+        self.saved_feed()
+        before = {str(p):p.read_bytes() for p in self.state.rglob("*") if p.is_file()}
+        for phase in ("morning", "auto"):
+            with self.subTest(phase=phase), patch("daily_predeadline_authority_recovery_v1.certificate") as verify:
+                value = self.route("08:44:49", phase)
+                self.assertEqual(value["phase"], "predeadline")
+                self.assertEqual(value["recovery_route"], "SAVED_RESCUE_PREDEADLINE_CONTINUATION")
+                verify.assert_called_once_with(self.state,self.day,now=_rescue_datetime.fromisoformat(self.day+"T08:44:49+09:00"))
+        self.assertEqual(before,{str(p):p.read_bytes() for p in self.state.rglob("*") if p.is_file()})
+
+    def test_missing_or_invalid_certificate_never_resumes(self):
+        self.saved_feed()
+        for phase in ("morning", "auto"):
+            with self.subTest(phase=phase), self.assertRaisesRegex(RuntimeError,"BOUNDARY_MISSING"):
+                self.route("08:44:49", phase)
+        with patch("daily_predeadline_authority_recovery_v1.certificate",side_effect=RuntimeError("ADMITTED_OCT18_BOUNDARY")):
+            with self.assertRaisesRegex(RuntimeError,"ADMITTED_OCT18_BOUNDARY"):
+                self.route("08:44:49", "morning")
+
+    def test_normal_morning_live_night_and_completed_morning_keep_their_phase(self):
+        self.saved_feed()
+        with patch("daily_predeadline_authority_recovery_v1.certificate") as verify:
+            for time,phase in (("02:15:00","morning"),("07:59:59","morning"),("09:00:00","predeadline"),("23:15:00","night")):
+                self.assertEqual(self.route(time,phase)["phase"],phase)
+            self.metadata.write_text(json.dumps({"OPERATIONAL_DATE_JST":self.day,"MORNING_COMPLETE":True}))
+            self.assertEqual(self.route("09:00:00","morning")["phase"],"morning")
+            verify.assert_not_called()
+
+    def test_other_days_are_not_admitted_by_the_new_route(self):
+        self.saved_feed()
+        for day in ("2026-10-17","2026-10-19"):
+            self.day = day
+            self.metadata.write_text(json.dumps({"OPERATIONAL_DATE_JST":day,"MORNING_COMPLETE":False}))
+            self.assertEqual(self.route("08:44:49","morning")["phase"],"morning")

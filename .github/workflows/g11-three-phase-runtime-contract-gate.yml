@@ -10,6 +10,8 @@ on:
       - ".github/workflows/g11-three-phase-runtime-contract-gate.yml"
       - "scripts/audit_public_surface.py"
       - "scripts/audit_three_phase_runtime_contract.py"
+      - "scripts/daily_runtime_bootstrap_v1.py"
+      - "scripts/test_daily_runtime_delivery_v1.py"
   push:
     branches:
       - main
@@ -19,6 +21,8 @@ on:
       - ".github/workflows/g11-three-phase-runtime-contract-gate.yml"
       - "scripts/audit_public_surface.py"
       - "scripts/audit_three_phase_runtime_contract.py"
+      - "scripts/daily_runtime_bootstrap_v1.py"
+      - "scripts/test_daily_runtime_delivery_v1.py"
   workflow_dispatch:
 
 permissions:
