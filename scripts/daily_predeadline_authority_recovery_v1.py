@@ -579,8 +579,13 @@ def append_projection(accepted, incoming, now):
                 row["abeken_shadow"]["v53"]["live"] = deepcopy(live)
             additions[field].append(key)
         if row.get("pre_race_v2"):
-            for field in ("pre_race_history", "pre_race_stage"):
-                row["abeken_shadow"]["v53"][field] = deepcopy(next_v4.get(field))
+            # Derive history only from the LIVE actually admitted above. An
+            # expired unpublished V4 must never leak through its history view.
+            admitted_v4 = row["abeken_shadow"]["v53"]
+            live_view = admitted_v4.get("live")
+            admitted_v4["pre_race_history"] = {"early": None, "final":
+                {"snapshot_sha256": live_view["snapshot_sha256"], "view": deepcopy(live_view)} if live_view else None}
+            admitted_v4["pre_race_stage"] = "FINAL" if live_view else "NONE"
     out["generated_at_jst"] = incoming["generated_at_jst"]
     out["source"] = deepcopy(incoming["source"])
     return out, additions
@@ -723,7 +728,7 @@ def deliver(state, feed_path, origin):
     # Lossless, explicitly scoped rescue LIVE delta. Normal HOT stays unchanged.
     require(base_headers.get("x-g11-source-feed-sha256") == sha(base_raw), "DELTA_BASE_SHA")
     encoded = subprocess.run(["node", "-e",
-        "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{"
+        "let s='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{"
         "const canon=v=>Array.isArray(v)?'['+v.map(canon).join(',')+']':"
         "v!==null&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}':JSON.stringify(v);"
         "process.stdout.write(canon(JSON.parse(s)));});"],
