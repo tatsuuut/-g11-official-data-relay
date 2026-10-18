@@ -118,6 +118,13 @@ def recovery_route(state, day, phase, now=None):
     if metadata.get("OPERATIONAL_DATE_JST") != day or metadata.get("MORNING_COMPLETE") is True:
         return result
     if (state / "rescue/feed.json").is_file():
+        # A delayed MORNING cron must continue the saved rescue, not enter
+        # the closed MORNING window and strand the predeadline self-chain.
+        from daily_predeadline_authority_recovery_v1 import DELAYED_DAYS, certificate
+        if day in DELAYED_DAYS and phase in {"morning", "auto"}:
+            certificate(state, day, now=now)
+            return {**result, "phase":"predeadline",
+                    "recovery_route":"SAVED_RESCUE_PREDEADLINE_CONTINUATION"}
         return {**result,"recovery_route":"ALREADY_SAVED_NO_REGENERATION"}
     if any((state / "store/snapshots/morning").glob("*.json")):
         return {**result,"recovery_route":"PARTIAL_CANONICAL_LOCK_REQUIRES_REVIEW"}
