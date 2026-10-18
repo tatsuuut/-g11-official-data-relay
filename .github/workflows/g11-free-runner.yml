@@ -1,4 +1,3 @@
-# Rescue LIVE delta transport verified against Site257; resume the existing runtime lane.
 name: runtime sync
 run-name: ${{github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
