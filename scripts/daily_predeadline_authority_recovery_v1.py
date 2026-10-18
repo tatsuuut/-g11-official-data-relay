@@ -715,18 +715,43 @@ def deliver(state, feed_path, origin):
     day = incoming["operational_date_jst"]
     cert = certificate(state, day)
     url = origin + "/api/g11-feed?date=" + day
-    accepted, _, _ = hot.fetch(url)
+    accepted, base_headers, base_raw = hot.fetch(url)
     require(accepted.get("SNAPSHOT_CLASS") == incoming.get("SNAPSHOT_CLASS") == "SAME_DAY_RESCUE_BOUNDARY"
             and accepted["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"]
             and incoming.get("operational_date_jst") == day, "DELIVERY_IDENTITY")
     out, added = append_projection(accepted, incoming, clock())
-    data = hot.compact(out)
+    # Lossless, explicitly scoped rescue LIVE delta. Normal HOT stays unchanged.
+    require(base_headers.get("x-g11-source-feed-sha256") == sha(base_raw), "DELTA_BASE_SHA")
+    encoded = subprocess.run(["node", "-e",
+        "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{"
+        "const canon=v=>Array.isArray(v)?'['+v.map(canon).join(',')+']':"
+        "v!==null&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}':JSON.stringify(v);"
+        "process.stdout.write(canon(JSON.parse(s)));});"],
+        input=canonical(out), capture_output=True, check=True).stdout
+    data = encoded
+    prior = {r["key"]: r for r in accepted["races"]}
+    changes = []
+    allowed = {"predeadline", "pre_race_v2", "p3_morning_snapshot_sha256", "abeken_shadow",
+               "best_ev", "best_ev_bet", "value_bets", "odds_captured_at_jst", "odds_merit"}
+    for row in out["races"]:
+        before = prior[row["key"]]
+        diff = {k: row[k] for k in row if row.get(k) != before.get(k)}
+        require(set(diff) <= allowed, "DELTA_FIELD_ADMISSION")
+        if diff:
+            changes.append({"RACE_KEY": row["key"], "CHANGED_FIELDS": diff})
+    patch = {"SCHEMA": "G11_RESCUE_LIVE_DELTA_V1", "OPERATIONAL_DATE": day,
+        "BASE_FEED_SHA": sha(base_raw), "TARGET_FEED_SHA": sha(data),
+        "AUTHORITY_SHA256": cert["authority_sha256"],
+        "TOP_LEVEL": {"source": out["source"], "generated_at_jst": out["generated_at_jst"]},
+        "RACES": changes}
+    wire = canonical(patch)
+    require(len(wire) <= 900_000, "DELTA_WIRE_BUDGET")
     with tempfile.TemporaryDirectory() as directory:
         payload, response = Path(directory) / "feed.json", Path(directory) / "response.json"
-        payload.write_bytes(data)
+        payload.write_bytes(wire)
         result = subprocess.run(["curl", "--silent", "--show-error", "--max-time", "45", "-X", "POST",
             origin + "/api/g11-sync", "-H", "Authorization: Bearer " + os.environ["G11_SYNC_OIDC"],
-            "-H", "Content-Type: application/json", "-H", "x-g11-feed-sha256: " + sha(data),
+            "-H", "Content-Type: application/json", "-H", "x-g11-feed-sha256: " + sha(wire),
             "--data-binary", "@" + str(payload), "--output", str(response), "--write-out", "%{http_code}"],
             capture_output=True, text=True, check=True)
         ack = json.loads(response.read_bytes())
@@ -734,6 +759,7 @@ def deliver(state, feed_path, origin):
                 "SITE_REJECTED:" + str(ack.get("error")))
     readback, headers, raw = hot.fetch(url)
     require(headers.get("x-g11-source-feed-sha256") == sha(data) == ack.get("payload_sha256"), "SITE_SHA_READBACK")
+    require(readback == out, "DELTA_FULL_READBACK")
     require(readback["same_day_rescue"] == out["same_day_rescue"] and readback["counts"]["formal"] == 0,
             "SITE_BOUNDARY_READBACK")
     actual = {r["key"]: r for r in readback["races"]}
