@@ -1,0 +1,67 @@
+name: G11 V2 saved-state read-only route audit
+on:
+  push:
+    branches: [codex/g11-v2-saved-state-route-audit]
+    paths: [.github/workflows/g11-v2-saved-state-route-audit.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: eb7d37312d6eb79dba6acf26f963b7a8fb50bb22
+          persist-credentials: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-10-18-39081797291
+          fail-on-cache-miss: true
+      - name: Verify saved authority route without prediction or production writes
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          exec 3<<<"$G11_PRIVATE_REPO_TOKEN"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "$RUNNER_TEMP/audit-state.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - <<'PY'
+          import hashlib,json,os,sys,tarfile
+          from pathlib import Path
+          from datetime import datetime,timedelta,timezone
+          from tempfile import TemporaryDirectory
+          sys.path.insert(0,"scripts")
+          import daily_runtime_bootstrap_v1 as bootstrap
+          from daily_predeadline_authority_recovery_v1 import certificate,inventory
+          day="2026-10-18"
+          now=datetime.now(timezone(timedelta(hours=9)))
+          assert now.date().isoformat()==day
+          with TemporaryDirectory() as temp:
+              state=Path(temp)/"state";state.mkdir()
+              with tarfile.open(os.environ["RUNNER_TEMP"]+"/audit-state.tgz","r:gz") as tf:
+                  assert all(not Path(m.name).is_absolute() and ".." not in Path(m.name).parts and not m.issym() and not m.islnk() for m in tf.getmembers())
+                  tf.extractall(state,filter="data")
+              before=inventory(state)
+              cert=certificate(state,day,now=now)
+              impl=bootstrap.retained_module(state,day)
+              parent=impl.load(state,day)
+              assert impl.model_inventory(state/"store")==parent["model_files"]
+              assert impl.model_inventory(state/"rescue/store")==cert["model_files"]
+              for phase in ("morning","auto"):
+                  route=bootstrap.recovery_route(state,day,phase,now=now)
+                  assert route["phase"]=="predeadline",route
+                  assert route["recovery_route"]=="SAVED_RESCUE_PREDEADLINE_CONTINUATION",route
+              prepared=bootstrap.prepare(state,day,"predeadline",Path(temp)/"unused")
+              assert prepared["d16"]=="true" and prepared["source_sha"]==cert["runtime_source_sha"]
+              assert bootstrap.recovery_route(state,day,"morning",now=now.replace(hour=2,minute=15))["phase"]=="morning"
+              assert bootstrap.recovery_route(state,day,"night",now=now)["phase"]=="night"
+              assert before==inventory(state)
+              morning=list((state/"store/snapshots/morning").glob("*.json"))
+              assert not morning
+              p=state/"store/g11/wild-pack-oos/morning"/day
+              assert not list(p.glob("bet-upstream*"))
+              print(json.dumps({"status":"PASS","source_cache":"g11-state-v4-published-2026-10-18-39081797291","public_source":"eb7d37312d6eb79dba6acf26f963b7a8fb50bb22","route":"SAVED_RESCUE_PREDEADLINE_CONTINUATION","parent_authority":parent["authority_sha256"],"rescue_authority":cert["authority_sha256"],"rescue_source":prepared["source_sha"],"all_extracted_files_unchanged":True,"parent_and_rescue_models_unchanged":True,"canonical_morning_count":len(morning),"goripan_upstream_count":0,"prediction_calls":0,"production_state_writes":0,"normal_0215_and_night_routes_preserved":True},sort_keys=True))
+          PY
