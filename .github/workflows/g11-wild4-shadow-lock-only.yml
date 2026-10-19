@@ -233,7 +233,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: bb7f273e51fc80af1669f3e9857dd4a9e6adae04
+          ref: e1a8004000e8293ccf4f7b8c79ff4f630e8ecfe0
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -898,20 +898,28 @@ jobs:
       # encrypted artifact. It never calls bind_day, training, or model promotion.
       # A just-settled day may not yet be public: HOLD until the existing retry.
       - name: Persist V4 specialty research after completed NIGHT
-        if: steps.settlement.outputs.complete == 'true' && steps.day.outputs.lifecycle_enabled == 'true'
+        id: specialty
+        if: inputs.lineage_readback_date == '' && steps.day.outputs.lifecycle_enabled == 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.settlement.outputs.complete == 'true' || steps.availability.outputs.due != 'true')
         continue-on-error: true
         timeout-minutes: 1
         working-directory: .g11-private
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          RESEARCH_NIGHT_COMPLETE: ${{ steps.settlement.outputs.complete }}
         run: |
           python3 - <<'PYRESEARCH'
           import json,os,pathlib,sys
-          from datetime import datetime,timezone
+          from datetime import datetime,timezone,timedelta,date
           from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
           ledger=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-future-locks'
           state=life.read(life.state_path(ledger))
           day=os.environ['OPERATIONAL_DATE']
+          if os.environ.get('RESEARCH_NIGHT_COMPLETE') != 'true':
+              # Initial adoption in an existing idle slot only; no formal LIVE work waits for research.
+              saved=state.get('generations',{}).get(state['active']['identity'],{}).get('specialty_updates',{})
+              if 'v4:initial' in saved:
+                  print('SPECIALTY_INITIAL_ALREADY_SAVED');sys.exit(0)
+              day=(date.fromisoformat(day)-timedelta(days=1)).isoformat()
           url=('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed'
               '?view=goripan-generation&specialty_revision='+life.SPECIALTY_V4_REVISION+
               '&generation='+state['active']['identity']+'&through='+day)
@@ -924,9 +932,10 @@ jobs:
           life.require(evidence.get('through')==day and not evidence.get('TEST_ONLY'), 'SPECIALTY_SOURCE_DAY')
           state=life.refresh_specialty_v4(ledger,state,evidence,now=datetime.now(timezone.utc))
           print('SPECIALTY_V4_RESEARCH_READBACK='+json.dumps(life.specialty_public_status(state),sort_keys=True))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write('saved=true\n')
           PYRESEARCH
       - name: Encrypt immutable future locks
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true')
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -938,7 +947,7 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
@@ -954,7 +963,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: bb7f273e51fc80af1669f3e9857dd4a9e6adae04
+          ref: e1a8004000e8293ccf4f7b8c79ff4f630e8ecfe0
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -1064,6 +1073,7 @@ jobs:
             echo 'WILD4_POST_NIGHT_SETTLEMENT_INCOMPLETE' >&2
             exit 1
           fi
+
 
 
 
