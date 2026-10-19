@@ -899,7 +899,7 @@ jobs:
       # A just-settled day may not yet be public: HOLD until the existing retry.
       - name: Persist V4 specialty research after completed NIGHT
         id: specialty
-        if: inputs.lineage_readback_date == '' && steps.day.outputs.lifecycle_enabled == 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.settlement.outputs.complete == 'true' || steps.availability.outputs.due != 'true')
+        if: inputs.lineage_readback_date == '' && steps.day.outputs.lifecycle_enabled == 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         continue-on-error: true
         timeout-minutes: 1
         working-directory: .g11-private
@@ -914,19 +914,33 @@ jobs:
           ledger=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-future-locks'
           state=life.read(life.state_path(ledger))
           day=os.environ['OPERATIONAL_DATE']
+          # Use the existing authenticated transport's public hash verification.
+          sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'scripts'))
+          import hot_delta_transport_v1 as hot
+          pathlib.Path('.relay-output').mkdir(exist_ok=True)
           if os.environ.get('RESEARCH_NIGHT_COMPLETE') != 'true':
-              # Initial adoption in an existing idle slot only; no formal LIVE work waits for research.
+              # A matching unexpired packet can contain only already-published LOCKs.
+              # Never make a newly generated formal LOCK wait for research.
               saved=state.get('generations',{}).get(state['active']['identity'],{}).get('specialty_updates',{})
               if 'v4:initial' in saved:
                   print('SPECIALTY_INITIAL_ALREADY_SAVED');sys.exit(0)
+              manifest=life.b.load_json(ledger/'batch-manifest.json')
+              if manifest.get('DATE') != day or manifest.get('NEW_LOCKED_THIS_RUN') != 0:
+                  print('SPECIALTY_INITIAL_DEFERRED_NEW_FORMAL_WORK');sys.exit(0)
+              live,_,live_raw=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date='+day)
+              life.require(len(live_raw)<=8*1024*1024 and live.get('operational_date_jst')==day, 'SPECIALTY_PRIOR_PUBLICATION_DAY')
+              published={g['race_key']:g['lock_sha256'] for r in live.get('races',[])
+                         if (g:=r.get('wild_pack',{}).get('wild4',{}).get('goripan'))}
+              keys=manifest.get('RACE_KEYS',[])
+              life.require(len(keys)==len(set(keys)), 'SPECIALTY_PRIOR_PUBLICATION_DUPLICATE')
+              for key in keys:
+                  lock=life.b.load_json(ledger/(key+'.json'))
+                  life.require(published.get(key)==lock['CONTENT_SHA256'], 'SPECIALTY_PRIOR_LOCK_NOT_PUBLIC')
               day=(date.fromisoformat(day)-timedelta(days=1)).isoformat()
           url=('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed'
               '?view=goripan-generation&specialty_revision='+life.SPECIALTY_V4_REVISION+
               '&generation='+state['active']['identity']+'&through='+day)
           # Reuse the same public GET/hash verification as the existing binder.
-          sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'scripts'))
-          import hot_delta_transport_v1 as hot
-          pathlib.Path('.relay-output').mkdir(exist_ok=True)
           evidence,_,raw=hot.fetch(url)
           life.require(len(raw)<=8*1024*1024, 'SPECIALTY_HTTP_READBACK')
           life.require(evidence.get('through')==day and not evidence.get('TEST_ONLY'), 'SPECIALTY_SOURCE_DAY')
