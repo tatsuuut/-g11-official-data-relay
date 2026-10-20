@@ -596,7 +596,15 @@ jobs:
                   key=item['PAYLOAD']['STANDARD_RACE_KEY']
                   name='odds3t-'+key.lower()
                   if (source_store/'snapshots/predeadline'/(name+'.json')).is_file():
-                      snapshots[key]=official.load_verified_snapshot('predeadline',name)
+                      verified=official.load_verified_snapshot('predeadline',name)
+                      if '${{ steps.decrypted.outputs.canonical_ready }}' == 'false':
+                          from datetime import datetime
+                          captured=datetime.fromisoformat(verified['SNAPSHOT']['SOURCE_RECEIPTS'][0]['CAPTURED_AT_JST'])
+                          cutoff=datetime.fromisoformat(item['PAYLOAD']['UPSTREAM_PREDICTION_CUTOFF_AT'])
+                          if captured < cutoff:
+                              print('WILD4_RESCUE_STALE_ODDS_EXCLUDED='+key)
+                              continue
+                      snapshots[key]=verified
               direct=bet.attach_prediction_time_odds(upstream,snapshots)
               common={r['STANDARD_RACE_KEY']:r for r in records}
               for item in direct['RECORDS']:
