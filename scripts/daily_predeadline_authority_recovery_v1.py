@@ -659,7 +659,29 @@ def run(state, day, output, run_id):
         relay_runtime._run_true_ai_morning_shadow(store_path, datetime.fromisoformat(day).date())
         from g11.wild_pack.v1 import runtime_orchestrator_v1 as wild_runtime
         wild_runtime.run_morning(store_path, datetime.fromisoformat(day).date(), clock())
-        wild_runtime.run_predeadline(store_path, datetime.fromisoformat(day).date())
+        original_attach = wild_runtime.bet.attach_prediction_time_odds
+        def attach_future_only(upstream, snapshots):
+            accepted = {}
+            for record in upstream["RECORDS"]:
+                packet = record["PAYLOAD"]
+                key = packet["STANDARD_RACE_KEY"]
+                verified_odds = snapshots.get(key)
+                if verified_odds is None:
+                    continue
+                receipt = verified_odds["SNAPSHOT"]["SOURCE_RECEIPTS"][0]
+                captured = datetime.fromisoformat(receipt["CAPTURED_AT_JST"])
+                cutoff = datetime.fromisoformat(packet["UPSTREAM_PREDICTION_CUTOFF_AT"])
+                deadline = datetime.fromisoformat(packet["RACE_DEADLINE_AT"])
+                if cutoff <= captured < deadline:
+                    accepted[key] = verified_odds
+                else:
+                    print("G11_RESCUE_WILD_STALE_ODDS_EXCLUDED:" + key, flush=True)
+            return original_attach(upstream, accepted)
+        try:
+            wild_runtime.bet.attach_prediction_time_odds = attach_future_only
+            wild_runtime.run_predeadline(store_path, datetime.fromisoformat(day).date())
+        finally:
+            wild_runtime.bet.attach_prediction_time_odds = original_attach
         print("G11_RESCUE_WILD_PROSPECTIVE_INPUT=READY", flush=True)
     except Exception as exc:
         print("G11_RESCUE_WILD_PROSPECTIVE_INPUT_UNAVAILABLE:" + type(exc).__name__ + ":" + str(exc), flush=True)
