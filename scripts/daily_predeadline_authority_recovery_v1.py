@@ -661,6 +661,7 @@ def run(state, day, output, run_id):
         key = row["key"]
         if key not in rescued:
             continue
+        original_row = deepcopy(row)
         pre = live_rows.get(key)
         if pre:
             receipt = receipts[p3.live_snapshot_name(key)]
@@ -677,6 +678,16 @@ def run(state, day, output, run_id):
                     "morning_snapshot_sha256": morning_sha, "engine_version_pin": cert["p3"]["version"],
                     "morning_lock_mutated": False, "result_input_used": False, "predeadline": deepcopy(pre),
                     "locked_at_jst": receipt["saved_at_jst"], "captured_at_jst": pre["captured_at_jst"]}}
+            final_lock = row["pre_race_v2"]["final"]
+            saved_at = datetime.fromisoformat(final_lock["locked_at_jst"])
+            if not (captured <= saved_at < deadlines[key]
+                    and isinstance(final_lock["snapshot_sha256"], str)
+                    and len(final_lock["snapshot_sha256"]) == 64
+                    and final_lock["predeadline"]["captured_at_jst"] == final_lock["captured_at_jst"]):
+                print("G11_RESCUE_RACE_QUARANTINED:" + key + ":INVALID_FINAL_LOCK", flush=True)
+                row.clear()
+                row.update(original_row)
+                continue
         av = (v4_rows.get(key, {}).get("v53") or {})
         if av.get("live"):
             require(av["morning"] == row["abeken_shadow"]["v53"]["morning"], "V4_BASELINE_READBACK")
