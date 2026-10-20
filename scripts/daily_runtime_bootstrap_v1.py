@@ -77,7 +77,33 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
             raise RuntimeError("RESCUE_EFFECTIVE_DATE")
         authority = retained_module(state, day).load(state, day)
         boundary = state / "rescue/boundary.json"
-        if boundary.exists():
+        if day == "2026-10-21":
+            # B acquisition-only repair. Never rewrite today's frozen source or
+            # any generated prediction. Preserve the failed, empty rescue as evidence.
+            source_sha = "e0e192dd8e34df628439ccdd332748848aaf7725"
+            if boundary.exists():
+                failed = json.loads(boundary.read_bytes())
+                if failed["runtime_source_sha"] != source_sha:
+                    unsigned = dict(failed)
+                    certificate_sha = unsigned.pop("authority_sha256", None)
+                    if (certificate_sha != hashlib.sha256(canonical(unsigned)).hexdigest()
+                            or failed.get("parent_authority_sha256") != authority["authority_sha256"]
+                            or failed.get("runtime_source_sha") != "3485f3252b7703714756508e141903e04173e9b9"
+                            or failed.get("operational_date_jst") != day
+                            or failed.get("canonical_morning_promoted") is not False
+                            or failed.get("research_eligible") is not False):
+                        raise RuntimeError("B_RATE_REPAIR_FAILED_BOUNDARY_IDENTITY")
+                    rescue = state / "rescue"
+                    if ((rescue / "feed.json").exists()
+                            or any(p.is_file() for p in (rescue / "store/snapshots").rglob("*"))
+                            or any(p.is_file() for p in (state / "store/snapshots/morning").rglob("*"))):
+                        raise RuntimeError("B_RATE_REPAIR_EXISTING_LOCK_PROHIBITED")
+                    preserved = state / "recovery-attempts" / day / certificate_sha
+                    preserved.parent.mkdir(parents=True, exist_ok=True)
+                    if preserved.exists():
+                        raise RuntimeError("B_RATE_REPAIR_PRESERVED_ATTEMPT_EXISTS")
+                    rescue.rename(preserved)
+        elif boundary.exists():
             source_sha = json.loads(boundary.read_bytes())["runtime_source_sha"]
         elif day >= "2026-10-19":
             # A new recovery must retain the day's already approved source.
