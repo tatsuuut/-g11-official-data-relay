@@ -1,4 +1,4 @@
-# Resume the October 21 per-race rescue continuation (lock diagnostic).
+# Resume the October 21 per-race rescue continuation (binding fixed).
 name: runtime sync
 run-name: ${{github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
