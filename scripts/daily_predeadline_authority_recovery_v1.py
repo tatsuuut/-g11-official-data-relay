@@ -656,10 +656,10 @@ def run(state, day, output, run_id):
     # Keep it outside canonical morning authority and never block P3/V4 delivery.
     try:
         from g11.relay import v1 as relay_runtime
-        relay_runtime._run_true_ai_morning_shadow(store_path, date.fromisoformat(day))
+        relay_runtime._run_true_ai_morning_shadow(store_path, datetime.fromisoformat(day).date())
         from g11.wild_pack.v1 import runtime_orchestrator_v1 as wild_runtime
-        wild_runtime.run_morning(store_path, date.fromisoformat(day), clock())
-        wild_runtime.run_predeadline(store_path, date.fromisoformat(day))
+        wild_runtime.run_morning(store_path, datetime.fromisoformat(day).date(), clock())
+        wild_runtime.run_predeadline(store_path, datetime.fromisoformat(day).date())
         print("G11_RESCUE_WILD_PROSPECTIVE_INPUT=READY", flush=True)
     except Exception as exc:
         print("G11_RESCUE_WILD_PROSPECTIVE_INPUT_UNAVAILABLE:" + type(exc).__name__ + ":" + str(exc), flush=True)
