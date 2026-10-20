@@ -233,7 +233,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: f31249210e6358b791d316d1ba7a114b8a06a426
+          ref: 32eb84317653934106fe647a1b64dbe08dfdbe03
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -503,6 +503,7 @@ jobs:
                   prior_complete=bool(prior_complete and today.get('operational_date_jst')==day and deadlines and datetime.now(timezone.utc)<min(deadlines))
               except Exception: prior_complete=False
           generation_evidence=None
+          active=life.BASE
           previous=(date.fromisoformat(day)-timedelta(days=1)).isoformat()
           try:
               ledger=temp/'g11-wild4-future-locks'
@@ -519,8 +520,15 @@ jobs:
                   generation_evidence,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=goripan-generation&generation='+active+'&through='+previous)
           except Exception:
               print('WILD4_GENERATION_SOURCE=UNAVAILABLE_PROMOTION_HELD')
+          model_scope_evidence=None
+          # Approved 2026-10-20 scope only; no same-day model switch or threshold change.
+          if day >= life.MODEL_SCOPE_EFFECTIVE and active == life.BASE:
+              try:
+                  model_scope_evidence,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=goripan-generation&specialty_revision='+life.SPECIALTY_V4_REVISION+'&generation='+active+'&through='+previous)
+              except Exception:
+                  print('WILD4_MODEL_SCOPE=UNAVAILABLE_PROMOTION_HELD')
           selected=life.bind_day(temp/'g11-wild4-future-locks',temp/'g11-wild4-candidate',
-              temp/'g11-wild4-calibrated-candidate',day,previous_night_complete=prior_complete,now=datetime.now(timezone.utc),generation_evidence=generation_evidence)
+              temp/'g11-wild4-calibrated-candidate',day,previous_night_complete=prior_complete,now=datetime.now(timezone.utc),generation_evidence=generation_evidence,model_scope_evidence=model_scope_evidence)
           info=life.model_info(selected)
           if os.environ.get('WILD4_RECOVERED_MODEL_IDENTITY') and info['identity']!=os.environ['WILD4_RECOVERED_MODEL_IDENTITY']:
               raise SystemExit('RECOVERED_MODEL_CHANGED')
@@ -977,7 +985,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: f31249210e6358b791d316d1ba7a114b8a06a426
+          ref: 32eb84317653934106fe647a1b64dbe08dfdbe03
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -1087,6 +1095,7 @@ jobs:
             echo 'WILD4_POST_NIGHT_SETTLEMENT_INCOMPLETE' >&2
             exit 1
           fi
+
 
 
 
