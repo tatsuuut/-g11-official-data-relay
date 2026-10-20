@@ -78,7 +78,7 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
         authority = retained_module(state, day).load(state, day)
         boundary = state / "rescue/boundary.json"
         if day == "2026-10-21":
-            # B acquisition-only repair. Never rewrite today's frozen source or
+            # B acquisition-only repair (156 official races verified). Never rewrite today's frozen source or
             # any generated prediction. Preserve the failed, empty rescue as evidence.
             source_sha = "e0e192dd8e34df628439ccdd332748848aaf7725"
             if boundary.exists():
