@@ -282,13 +282,14 @@ jobs:
               cert=json.loads(path.read_bytes()); unsigned=dict(cert)
               sha=unsigned.pop('authority_sha256',None)
               canonical=json.dumps(unsigned,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
-              rescue=(cert.get('operational_date_jst')==os.environ['OPERATIONAL_DATE']=='2026-10-06'
+              rescue=(cert.get('operational_date_jst')==os.environ['OPERATIONAL_DATE'] and os.environ['OPERATIONAL_DATE'] in {'2026-10-06','2026-10-21'}
                   and cert.get('schema')=='G11_SAME_DAY_RESCUE_BOUNDARY_V1'
                   and cert.get('canonical_morning_promoted') is False
                   and cert.get('research_eligible') is False
                   and cert.get('same_day_results_used') is False
                   and sha==hashlib.sha256(canonical).hexdigest()
-                  and not pathlib.Path('.relay-state/daily-runtime/2026-10-06/authority.json').exists())
+                  and not pathlib.Path('.relay-state/store/snapshots/morning/official-day-input.json').exists()
+                  and (os.environ['OPERATIONAL_DATE']=='2026-10-21' or not pathlib.Path('.relay-state/daily-runtime/2026-10-06/authority.json').exists()))
               if not rescue: raise SystemExit('WILD4_RESCUE_BOUNDARY_INVALID')
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('canonical_ready='+str(ready).lower()+'\n')
