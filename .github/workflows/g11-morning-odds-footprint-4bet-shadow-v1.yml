@@ -1,5 +1,5 @@
 name: runtime observation
-# Current-state v4 binding verified; missing MORNING remains isolated WAITING.
+# Current-state v4 binding verified; Oct 21 rescue observes only future official odds.
 
 on:
   push:
