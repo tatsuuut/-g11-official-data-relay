@@ -459,7 +459,7 @@ from pathlib import Path
 import re
 
 DELAYED_DAY = "2026-10-16"
-DELAYED_DAYS = {DELAYED_DAY, "2026-10-18"}
+DELAYED_DAYS = {DELAYED_DAY, "2026-10-18", "2026-10-21"}
 SCHEMA = "G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1"
 JST = timezone(timedelta(hours=9))
 
@@ -512,6 +512,8 @@ def certificate(state, day, now=None, *, allow_night_rollover=False):
         require(cert["authority_sha256"] == "226c9c5de084e6e7c0a5607bb1f56821d2125da46cd122d249ad4c45996160aa"
                 and parent_sha == "74e0837747328847c7059d499be7197b2ba07a9a92b10f1940707c800d8c4fe8"
                 and cert["runtime_source_sha"] == "122a785806395b43145a0189c5f6724d5e8e8d4a", "ADMITTED_OCT18_BOUNDARY")
+    if day == "2026-10-21":
+        require(cert["runtime_source_sha"] == "e0e192dd8e34df628439ccdd332748848aaf7725", "ADMITTED_OCT21_ACQUISITION_REPAIR")
     return cert
 
 def inventory(root):
@@ -882,7 +884,7 @@ def restore_night_baseline(state, archive):
 
 def rescue_night_delta(accepted, out, base_sha):
     """Bound the result-only wire, preserving every saved canonical byte/LOCK."""
-    require(out['operational_date_jst'] == accepted['operational_date_jst'] == '2026-10-18'
+    require(out['operational_date_jst'] == accepted['operational_date_jst'] and out['operational_date_jst'] in {'2026-10-18', '2026-10-21'}
         and accepted['stage'] == 'MORNING' and out['stage'] == 'NIGHT'
         and out['same_day_rescue'] == accepted['same_day_rescue']
         and len(out['races']) == len(accepted['races']) == 156, 'NIGHT_DELTA_IDENTITY')
@@ -901,7 +903,7 @@ def rescue_night_delta(accepted, out, base_sha):
             restored[k] = deepcopy(old[k])
     require(protected == accepted and out['status'] == 'PASS'
         and out['counts'] == {**accepted['counts'], 'results': 156, 'pending': 0}, 'NIGHT_DELTA_NONRESULT_MUTATION')
-    wire = canonical({'SCHEMA': 'G11_RESCUE_NIGHT_DELTA_V1', 'OPERATIONAL_DATE': '2026-10-18',
+    wire = canonical({'SCHEMA': 'G11_RESCUE_NIGHT_DELTA_V1', 'OPERATIONAL_DATE': out['operational_date_jst'],
         'BASE_FEED_SHA': base_sha, 'TARGET_FEED_SHA': sha(canonical(out)+b'\n'),
         'AUTHORITY_SHA256': out['same_day_rescue']['authority_sha256'],
         'TOP_LEVEL': {k: deepcopy(out[k]) for k in ('stage','status','generated_at_jst','counts')},
@@ -1007,7 +1009,7 @@ def run_delayed_night(state, day, output, origin):
         'SETTLED_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='SETTLED' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
         'GORIPAN':'NO_FIXED_BET_NO_BACKFILL','PROTECTED_UNCHANGED':True,'FIXED_BUT_NOT_PUBLISHED_LIVE':unpublished}
     data=canonical(out)+b'\n'
-    if day == '2026-10-18':
+    if day in {'2026-10-18', '2026-10-21'}:
         rescue_night_delta(accepted, out, sha(raw))
     else:
         require(len(data)<=2097152,'NIGHT_DELIVERY_SIZE')
@@ -1043,7 +1045,7 @@ def deliver_delayed_night(state,feed_path,origin):
     if accepted['stage']=='NIGHT':require(accepted==out,'NIGHT_ALREADY_SETTLED_CONFLICT')
     else:
         with tempfile.TemporaryDirectory() as directory:
-            wire = rescue_night_delta(accepted,out,base_sha) if day == '2026-10-18' else data
+            wire = rescue_night_delta(accepted,out,base_sha) if day in {'2026-10-18', '2026-10-21'} else data
             p=Path(directory)/'feed.json';resp=Path(directory)/'response.json';p.write_bytes(wire)
             r=subprocess.run(['curl','--silent','--show-error','--max-time','45','-X','POST',origin+'/api/g11-sync',
               '-H','Authorization: Bearer '+os.environ['G11_SYNC_OIDC'],'-H','Content-Type: application/json',
