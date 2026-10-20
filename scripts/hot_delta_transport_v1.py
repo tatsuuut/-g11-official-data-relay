@@ -30,7 +30,7 @@ BASE_RACE_FIELDS = {
     "second_boat", "axis", "quality", "turbulence", "practical_bets",
     "production_points", "prediction", "caution", "p3_head", "p3_logic_id",
     "p3_production_bets", "p3_published_at_jst", "p3_snapshot",
-    "p3_snapshot_sha256", "p3_status", "special_case_id", "special_strength",
+    "p3_snapshot_sha256", "p3_morning_snapshot_sha256", "p3_status", "special_case_id", "special_strength",
     "strong_mark", "trifecta_confidence", "predeadline", "pre_race_v2",
     "predeadline_exclusion_reason", "odds_merit", "best_ev", "best_ev_bet",
     "value_bets", "odds_captured_at_jst", "result_trifecta", "payout",
