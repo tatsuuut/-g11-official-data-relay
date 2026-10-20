@@ -1,4 +1,3 @@
-# NIGHT
 name: runtime sync
 run-name: ${{github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
@@ -2233,4 +2232,3 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
-# NIGHT recovery v5
