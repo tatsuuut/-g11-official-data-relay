@@ -680,6 +680,7 @@ def run(state, day, output, run_id):
                     "locked_at_jst": receipt["saved_at_jst"], "captured_at_jst": pre["captured_at_jst"]}}
             final_lock = row["pre_race_v2"]["final"]
             saved_at = datetime.fromisoformat(final_lock["locked_at_jst"])
+            print("G11_RESCUE_FINAL_LOCK_DIAGNOSTIC:" + json.dumps({"key": key, "captured": final_lock["captured_at_jst"], "saved": final_lock["locked_at_jst"], "deadline": deadlines[key].isoformat(), "snapshot_sha": final_lock["snapshot_sha256"], "morning_sha": final_lock["morning_snapshot_sha256"], "race_morning_sha": row["p3_morning_snapshot_sha256"], "predeadline_status": final_lock["predeadline"].get("status"), "predeadline_captured": final_lock["predeadline"].get("captured_at_jst")}, sort_keys=True), flush=True)
             if not (captured <= saved_at < deadlines[key]
                     and isinstance(final_lock["snapshot_sha256"], str)
                     and len(final_lock["snapshot_sha256"]) == 64
