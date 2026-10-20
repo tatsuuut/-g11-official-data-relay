@@ -283,7 +283,7 @@ jobs:
               sha=unsigned.pop('authority_sha256',None)
               canonical=json.dumps(unsigned,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
               rescue=(cert.get('operational_date_jst')==os.environ['OPERATIONAL_DATE'] and os.environ['OPERATIONAL_DATE'] in {'2026-10-06','2026-10-21'}
-                  and cert.get('schema')=='G11_SAME_DAY_RESCUE_BOUNDARY_V1'
+                  and cert.get('schema')==('G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1' if os.environ['OPERATIONAL_DATE']=='2026-10-21' else 'G11_SAME_DAY_RESCUE_BOUNDARY_V1')
                   and cert.get('canonical_morning_promoted') is False
                   and cert.get('research_eligible') is False
                   and cert.get('same_day_results_used') is False
