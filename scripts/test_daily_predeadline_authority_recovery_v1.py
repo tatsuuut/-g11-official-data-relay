@@ -310,7 +310,7 @@ if __name__ == '__main__': unittest.main()
 
 class Oct18ContinuationScopeTests(unittest.TestCase):
     def test_only_explicit_days_are_admitted(self):
-        self.assertEqual(live.DELAYED_DAYS, {'2026-10-16','2026-10-18'})
+        self.assertEqual(live.DELAYED_DAYS, {'2026-10-16','2026-10-18','2026-10-21'})
         for day in ('2026-10-17','2026-10-19'):
             with TemporaryDirectory() as td:
                 with self.assertRaisesRegex(RuntimeError, 'CURRENT_DAY_ONLY'):
