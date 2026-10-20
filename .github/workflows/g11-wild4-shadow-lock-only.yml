@@ -988,7 +988,7 @@ jobs:
 
 
       - name: Checkout read-only WILD4 public projection adapter
-        if: steps.decrypted.outputs.canonical_ready == 'true' && github.ref == 'refs/heads/main'
+        if: steps.decrypted.outputs.runtime_ready == 'true' && github.ref == 'refs/heads/main'
         id: public-source
         continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -1022,6 +1022,23 @@ jobs:
             --store "${GITHUB_WORKSPACE}/${{ steps.decrypted.outputs.store }}" \
             --candidate-root "${WILD4_CANDIDATE_ROOT}" \
             --output "${RUNNER_TEMP}/goripan-public-projection.json"
+          if [ '${{ steps.decrypted.outputs.canonical_ready }}' = 'false' ]; then
+            python3 - <<'PYRESCUEPROJECTION'
+          import hashlib,json,os,pathlib
+          path=pathlib.Path(os.environ["RUNNER_TEMP"])/"goripan-public-projection.json"
+          boundary=json.loads(pathlib.Path("../.relay-state/rescue/boundary.json").read_bytes())
+          if boundary.get("schema")!="G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1" or boundary.get("operational_date_jst")!="2026-10-21" or boundary.get("canonical_morning_promoted") is not False or boundary.get("research_eligible") is not False or boundary.get("same_day_results_used") is not False:
+              raise SystemExit("WILD4_RESCUE_PROJECTION_BOUNDARY")
+          cert=dict(boundary);sha=cert.pop("authority_sha256",None)
+          if sha!=hashlib.sha256(json.dumps(cert,ensure_ascii=False,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest():
+              raise SystemExit("WILD4_RESCUE_PROJECTION_SHA")
+          projection=json.loads(path.read_bytes())
+          projection["rescue_boundary_sha256"]=sha
+          for row in projection["races"]: row["classification"]="LINEAGE"
+          path.write_bytes(json.dumps(projection,ensure_ascii=False,sort_keys=True,separators=(",",":"),allow_nan=False).encode())
+          print("GORIPAN_RESCUE_SHADOW_PROJECTION="+str(len(projection["races"])))
+          PYRESCUEPROJECTION
+          fi
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
       - name: Deliver WILD4 public projection and verify exact Site GET readback
         if: steps.public-projection.outputs.ready == 'true'
@@ -1059,7 +1076,8 @@ jobs:
           expected=readback_headers['x-g11-feed-sha256']
           if hashlib.sha256(data).hexdigest()!=expected: raise SystemExit('SITE_GET_SHA')
           feed=json.loads(data)
-          if feed.get('goripan',{}).get('status')!='VERIFIED_CANONICAL_PROJECTION': raise SystemExit('SITE_PROJECTION_STATUS')
+          expected_status='VERIFIED_CANONICAL_PROJECTION' if '${{ steps.decrypted.outputs.canonical_ready }}' == 'true' else 'VERIFIED_RESCUE_PROSPECTIVE_SHADOW'
+          if feed.get('goripan',{}).get('status')!=expected_status: raise SystemExit('SITE_PROJECTION_STATUS')
           races={r['key']:r for r in feed['races']}
           for lock in projection['races']:
               actual=races[lock['race_key']].get('wild_pack',{}).get('wild4',{}).get('goripan')
