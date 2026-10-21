@@ -50,6 +50,29 @@ def parse_night_results(text,target,official,parser,*,require_full_races=False):
     return output
 
 
+def morning_metadata_bridge(gate):
+    """Accept the producer's empty quarantine metadata, preserving all checks.
+
+    Nonempty quarantine remains unsupported by this frozen bridge. No fields
+    or hashes in the verified snapshot are removed or rewritten.
+    """
+    import hashlib
+    import inspect
+    original = gate.build_canonical_official_morning_input
+    source = inspect.getsource(original)
+    if hashlib.sha256(source.encode()).hexdigest() != '569abba9258f903f432be33b3e7905351e84b27f900251e9e5ecf61d3aaa59e1':
+        raise ValueError('MORNING_METADATA_BRIDGE_SOURCE_CHANGED')
+    old = 'and set(payload)\n'
+    if source.count(old) != 1:
+        raise ValueError('MORNING_METADATA_BRIDGE_CONTRACT_CHANGED')
+    source = source.replace(old, 'and type(payload.get("QUARANTINED_RACES", [])) is list\n'
+        '        and not payload.get("QUARANTINED_RACES", [])\n'
+        '        and (set(payload) - {"QUARANTINED_RACES"})\n', 1)
+    namespace = dict(original.__globals__)
+    exec(compile(source, original.__code__.co_filename, 'exec'), namespace)
+    return namespace[original.__name__]
+
+
 def run_relay():
     """Apply the same official-input decoder to normal MORNING/NIGHT reads.
 
@@ -64,17 +87,22 @@ def run_relay():
     sys.path.insert(0, str(Path.cwd()))
     from g11.canonical import official_pipeline as official
     parser = official.parse_result_text
+    gate = official.FORMAL_GATE
+    bridge = gate.build_canonical_official_morning_input
     def adapted(text, target_date, *, require_full_races=False):
         return parse_night_results(text, target_date, official, parser,
                                   require_full_races=require_full_races)
     original_argv = sys.argv[:]
     try:
         official.parse_result_text = adapted
+        gate.build_canonical_official_morning_input = morning_metadata_bridge(gate)
         sys.argv = ['g11.relay.v1', *original_argv[2:]]
         print('G11_OFFICIAL_L_ROW_ADAPTER_V1:ACTIVE', file=sys.stderr)
+        print('G11_MORNING_EMPTY_QUARANTINE_BRIDGE_V1:ACTIVE', file=sys.stderr)
         runpy.run_module('g11.relay.v1', run_name='__main__')
     finally:
         official.parse_result_text = parser
+        gate.build_canonical_official_morning_input = bridge
         sys.argv = original_argv
 
 

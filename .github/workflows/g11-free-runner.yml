@@ -682,7 +682,7 @@ jobs:
           do
             python3 -m unittest "${module}"
           done
-      - name: Run the private fail-closed relay
+      - name: Run verified private relay
         id: runtime
         continue-on-error: true
         working-directory: .g11-private
