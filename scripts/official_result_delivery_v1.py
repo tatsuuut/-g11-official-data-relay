@@ -38,6 +38,9 @@ def envelope(snapshot, snapshot_sha, feed, source_sha):
         'evidence':{'operational_date':day,'source_url':url,'archive_sha256':receipts[0]['SHA256'],'rows':rows}}
 
 def publish(state, feed_path, origin, request=request_json):
+    # Canonical evidence verification rejects non-absolute file identities.
+    state=Path(state).resolve()
+    feed_path=Path(feed_path).resolve()
     feed=json.loads(Path(feed_path).read_bytes())
     current=feed.get('stage')=='NIGHT' and feed.get('SNAPSHOT_CLASS')=='SAME_DAY_RESCUE_BOUNDARY'
     day=feed['operational_date_jst'] if current else (date.fromisoformat(feed['operational_date_jst'])-timedelta(days=1)).isoformat()
