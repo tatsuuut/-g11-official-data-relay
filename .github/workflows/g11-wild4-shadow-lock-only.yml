@@ -302,6 +302,8 @@ jobs:
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          CANONICAL_READY: ${{ steps.decrypted.outputs.canonical_ready }}
+          SETTLEMENT_ONLY: ${{ (github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle') }}
         run: |
           set -euo pipefail
           if [ ! -e .prior-encrypted/future-locks.tgz.gpg ]; then
@@ -362,6 +364,13 @@ jobs:
           files=sorted(p for p in out.glob('*.json') if pattern.fullmatch(p.stem))
           if [p.stem for p in files]!=manifest['RACE_KEYS']:
               raise SystemExit('PRIOR_LOCK_COVERAGE')
+          # A final rescue handoff verifies each original LOCK in the join step.
+          # Keep malformed bytes intact so one held race cannot drop valid ones.
+          if (os.environ.get('CANONICAL_READY')=='false' and os.environ.get('SETTLEMENT_ONLY')=='true'
+              and pathlib.Path('.relay-state/rescue/store/snapshots/night/official-day-results.json').is_file()):
+              print('WILD4_PRIOR_LOCKS='+str(len(files)))
+              print('WILD4_PRIOR_LOCK_CHECK=DEFERRED_TO_PER_RACE_RESCUE_JOIN')
+              raise SystemExit(0)
           for path in files:
               lock=json.loads(path.read_text())
               value={key:item for key,item in lock.items() if key!='CONTENT_SHA256'}
@@ -562,6 +571,7 @@ jobs:
         working-directory: .g11-private
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          SETTLEMENT_ONLY: ${{ (github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle') }}
         run: |
           python3 - "${GITHUB_WORKSPACE}" <<'PY'
           import os, pathlib, sys
@@ -638,6 +648,8 @@ jobs:
               print('WILD4_LATEST_CAPTURE_AGE_SECONDS='+str(int((now-captured).total_seconds())))
           due=[r for r in records if datetime.fromisoformat(r['UPSTREAM_PACKET']['RACE_DEADLINE_AT'])>now
                and r['UPSTREAM_PACKET']['EVALUATION_CONTEXT_PACK_ID']==binding['EVALUATION_CONTEXT_PACK_ID']]
+          if os.environ.get('SETTLEMENT_ONLY') == 'true':
+              due=[]
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('due='+('true' if due else 'false')+'\n')
           print('WILD4_ODDS_DAY_CONSIDERED='+str(len(records)))
@@ -809,20 +821,21 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Checkout pinned official settlement source
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: efd476cac11dc3ee8753b5a5001c42271be41974
+          ref: 4cccd89537ea98fc41ddbe55ff204ac7c0f6c02e
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-settlement
           persist-credentials: false
       - name: Settle only immutable locks from verified final NIGHT
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           NIGHT_CHECKPOINT_KEY: ${{ inputs.night_checkpoint_key }}
+          CANONICAL_READY: ${{ steps.decrypted.outputs.canonical_ready }}
         run: |
           set -euo pipefail
           export PYTHONPATH="${GITHUB_WORKSPACE}/.g11-private"
@@ -835,6 +848,31 @@ jobs:
           spec = importlib.util.spec_from_file_location('wild4_pinned_settlement', module_path)
           module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
           ledger = temp/'g11-wild4-future-locks'
+          if os.environ.get('CANONICAL_READY') == 'false':
+              import json
+              from g11.canonical.official_pipeline import _is_sg_event_title
+              rescue_source = workspace/'.g11-settlement/g11/wild_pack/v1/wild4_rescue_settlement_v1.py'
+              rescue_spec = importlib.util.spec_from_file_location('wild4_rescue_settlement', rescue_source)
+              rescue = importlib.util.module_from_spec(rescue_spec); rescue_spec.loader.exec_module(rescue)
+              state = workspace/'.relay-state'
+              source = state/'rescue/store/snapshots/night/official-day-results.json'
+              if not source.is_file():
+                  if os.environ.get('NIGHT_CHECKPOINT_KEY'):
+                      raise SystemExit('WILD4_RESCUE_VERIFIED_NIGHT_MISSING')
+                  print('WILD4_RESCUE_NIGHT=AWAITING_VERIFIED_RESULTS')
+                  sys.exit(0)
+              store = OfficialArtifactStore(state/'rescue/store')
+              summary = rescue.settle_rescue_day(ledger,state,day,
+                  store.load_verified_snapshot('night','official-day-results'),
+                  store.load_verified_snapshot('morning','official-day-input'),is_sg=_is_sg_event_title)
+              with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
+                  output.write('new='+str(summary['new'])+'\ncomplete='+str(summary['complete']).lower()+'\nheld='+str(summary['held'])+'\n')
+                  output.write('rescue_join_readback=true\n')
+              print('WILD4_RESCUE_NIGHT_READBACK='+json.dumps(summary,sort_keys=True))
+              print('WILD4_RESCUE_FORMAL_METRICS_INCLUDED=false; LEARNING_CONNECTED=false')
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as output:
+                  output.write('Rescue NIGHT: saved='+str(summary['total'])+'; held='+str(summary['held'])+'\n')
+              sys.exit(0)
           previous = module.verify_prior(ledger)
           lock_keys = {p.stem for p in ledger.glob('*.json') if module.KEY.fullmatch(p.stem)}
           complete = False
@@ -870,7 +908,7 @@ jobs:
           PY
       - name: Continue existing BET learning after completed NIGHT
         id: growth
-        if: steps.settlement.outputs.complete == 'true' && steps.day.outputs.lifecycle_enabled == 'true'
+        if: steps.settlement.outputs.complete == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && steps.day.outputs.lifecycle_enabled == 'true'
         continue-on-error: true
         timeout-minutes: 17
         working-directory: .g11-private
@@ -1116,12 +1154,16 @@ jobs:
             --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json"
 
       - name: Require completion for verified NIGHT handoff
-        if: always() && !cancelled() && inputs.night_checkpoint_key != ''
+        if: always() && !cancelled() && (inputs.night_checkpoint_key != '' || (steps.settlement.outputs.held != '' && steps.settlement.outputs.held != '0'))
         run: |
-          if [ '${{ steps.settlement.outputs.complete }}' != true ]; then
+          if [ '${{ steps.settlement.outputs.complete }}' != true ] && [ '${{ steps.settlement.outputs.rescue_join_readback }}' != true ]; then
             echo 'WILD4_POST_NIGHT_SETTLEMENT_INCOMPLETE' >&2
             exit 1
           fi
+          if [ '${{ steps.settlement.outputs.held }}' != '' ] && [ '${{ steps.settlement.outputs.held }}' != '0' ]; then
+            echo '::warning::Rescue NIGHT saved valid records; held races remain explicitly unresolved in the immutable audit'
+          fi
+
 
 
 
