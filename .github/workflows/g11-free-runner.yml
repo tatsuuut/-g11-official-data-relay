@@ -1754,7 +1754,7 @@ jobs:
           mv .relay-cache/state-delivery.tgz.gpg.tmp .relay-cache/state-delivery.tgz.gpg
           cp .relay-cache/state-delivery.tgz.gpg .relay-cache/state.tgz.gpg
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
-          [ '${{steps.due.outputs.phase}}' != predeadline ] || GH_TOKEN="${{github.token}}" gh workflow run g11-morning-odds-footprint-4bet-shadow-v1.yml --ref main -f mode=wild4 -f operational_date='${{steps.due.outputs.operational_date}}' || echo WILD4_DISPATCH_RETRY
+          [ '${{steps.due.outputs.phase}}' != predeadline ] || GH_TOKEN="${{github.token}}" gh workflow run g11-morning-odds-footprint-4bet-shadow-v1.yml -f mode=wild4 || echo WILD4_DISPATCH_RETRY
       - name: Save encrypted delivery state
         if: always()&&steps.delivery-state.outputs.ready=='true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -1843,7 +1843,7 @@ jobs:
                 --night-ready .relay-output/readback.json --day "${{steps.due.outputs.operational_date}}"
             fi
           fi
-      - name: Prove first formal V53 race from official snapshots and deployed readback
+      - name: Verify V53 readback
         if: steps.publish.outcome=='success'&&steps.publish.outputs.immutable_night!='true'&&steps.due.outputs.phase!='night'&&steps.due.outputs.phase!='same-day-rescue'&&steps.readback.outcome=='success'&&steps.critical.outputs.rescue!='true'
         env:
           OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
