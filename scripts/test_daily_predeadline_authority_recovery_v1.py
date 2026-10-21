@@ -359,6 +359,17 @@ class Oct18ContinuationScopeTests(unittest.TestCase):
             with TemporaryDirectory() as td:
                 with self.assertRaisesRegex(RuntimeError, 'CURRENT_DAY_ONLY'):
                     live.certificate(Path(td), day, datetime.fromisoformat(day+'T09:00:00+09:00'))
+
+    def test_broken_snapshot_proof_holds_only_its_race_without_changing_forecasts(self):
+        rows=[{'key':key,'same_day_rescue_lock':{'p3_snapshot_sha256':'p3','v4_snapshot_sha256':'v4'}}
+              for key in ('20261021-04-01','20261021-04-02')]
+        baseline={'races':deepcopy(rows)}
+        rows[0]['predeadline']={'snapshot_sha256':'corrupt-live'}
+        feed={'races':rows};before=deepcopy(feed)
+        held=live.night_saved_forecast_holds(feed,baseline,{'p3','v4'},set())
+        self.assertEqual(set(held),{'20261021-04-01'})
+        self.assertEqual(set(held['20261021-04-01']),{'p3_rescue','abeken_rescue','p3_live','abeken_live'})
+        self.assertEqual(feed,before)
     def test_oct18_requires_existing_boundary_and_current_day(self):
         with TemporaryDirectory() as td:
             for at in ('2026-10-17T09:00:00+09:00','2026-10-19T02:00:00+09:00'):
