@@ -5,34 +5,16 @@ on:
     branches:
       - main
     paths:
-      - ".github/workflows/g11-free-runner.yml"
-      - ".github/workflows/g11-explicit-night-dispatcher.yml"
-      - ".github/workflows/g11-three-phase-runtime-contract-gate.yml"
-      - "scripts/audit_public_surface.py"
-      - "scripts/audit_three_phase_runtime_contract.py"
-      - "scripts/daily_runtime_bootstrap_v1.py"
-      - "scripts/test_daily_runtime_delivery_v1.py"
-      - ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml"
-      - "scripts/daily_predeadline_authority_recovery_v1.py"
-      - "scripts/test_daily_predeadline_authority_recovery_v1.py"
-      - "scripts/predeadline_watchdog_v1.py"
-      - "scripts/test_predeadline_watchdog_v1.py"
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/**"
   push:
     branches:
       - main
     paths:
-      - ".github/workflows/g11-free-runner.yml"
-      - ".github/workflows/g11-explicit-night-dispatcher.yml"
-      - ".github/workflows/g11-three-phase-runtime-contract-gate.yml"
-      - "scripts/audit_public_surface.py"
-      - "scripts/audit_three_phase_runtime_contract.py"
-      - "scripts/daily_runtime_bootstrap_v1.py"
-      - "scripts/test_daily_runtime_delivery_v1.py"
-      - ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml"
-      - "scripts/daily_predeadline_authority_recovery_v1.py"
-      - "scripts/test_daily_predeadline_authority_recovery_v1.py"
-      - "scripts/predeadline_watchdog_v1.py"
-      - "scripts/test_predeadline_watchdog_v1.py"
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/**"
   workflow_dispatch:
 
 permissions:
@@ -55,6 +37,9 @@ jobs:
 
       - name: Audit public surface before private checkout
         run: python3 scripts/audit_public_surface.py
+
+      - name: Verify rescue transport with distinct stored and display responses
+        run: python3 -m unittest discover -s scripts -p test_rescue_transport_contract_v1.py -q
 
       - name: Checkout private G11 main
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -150,4 +135,5 @@ jobs:
           echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
           echo 'G11_LIVE_ACQUISITION_PUBLICATION_UI=NOT_TESTED_BY_THIS_GATE'
           echo 'MERGE_POLICY=DO_NOT_MERGE_RUNTIME_CHANGES_UNLESS_THIS_GATE_PASSES'
+
 
