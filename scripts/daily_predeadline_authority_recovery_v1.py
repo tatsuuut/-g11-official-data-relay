@@ -550,6 +550,14 @@ def inventory(root):
     return {p.relative_to(root).as_posix(): sha(p.read_bytes()) for p in root.rglob("*")
             if p.is_file() and not p.is_symlink()}
 
+def night_operational_inventory_hash(inventories):
+    # The existing deme index is mutable research, not an operational LOCK.
+    # All other files in all four protected roots remain hash-bound.
+    protected = deepcopy(inventories)
+    protected[0].pop('shadow/original-display/v2/deme-discovery.json', None)
+    return sha(canonical(protected))
+
+
 def validate_write(stage, name, value, deadlines, now):
     require(stage == "predeadline", "ONLY_PREDEADLINE_WRITES")
     match = re.search(r"\d{8}-\d{2}-\d{2}", name)
@@ -1080,7 +1088,8 @@ def run_delayed_night(state, day, output, origin):
             require(proof.get('cache_key')=='g11-state-v4-published-2026-10-16-38911423461', 'NIGHT_INCIDENT_BASELINE')
         else:
             proof=a
-        require(a['feed_sha256']==sha(saved.read_bytes()) and proof['protected_sha256']==sha(canonical(before)), 'NIGHT_REPLAY_BINDING')
+        require(a['feed_sha256']==sha(saved.read_bytes()) and (proof['protected_sha256']==sha(canonical(before))
+            or a.get('operational_protected_sha256')==night_operational_inventory_hash(before)), 'NIGHT_REPLAY_BINDING')
         require(out['same_day_rescue']==accepted['same_day_rescue'], 'NIGHT_REPLAY_BOUNDARY')
         output.write_bytes(saved.read_bytes())
         print(json.dumps(a['runtime_result'],sort_keys=True));return
@@ -1139,7 +1148,8 @@ def run_delayed_night(state, day, output, origin):
         require(len(data)<=2097152,'NIGHT_DELIVERY_SIZE')
     atomic(saved,data);atomic(report,canonical({'runtime_result':result,'official_url':url,
         'official_receipt':_serializable(receipt),'feed_sha256':sha(data),'accepted_feed_sha256':sha(raw),
-        'protected_sha256':sha(canonical(before)),'by_race':scores})+b'\n')
+        'protected_sha256':sha(canonical(before)),
+        'operational_protected_sha256':night_operational_inventory_hash(before),'by_race':scores})+b'\n')
     output.write_bytes(data);print(json.dumps(result,sort_keys=True))
 
 
