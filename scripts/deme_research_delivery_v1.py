@@ -7,8 +7,8 @@ import hashlib
 import json
 import os
 import re
-import urllib.error
-import urllib.request
+import subprocess
+import tempfile
 from pathlib import Path
 
 RELEASE='G11_DEME_CONTINUITY_20261021_V1'
@@ -20,17 +20,37 @@ def compact(value):
 def sha(value):return hashlib.sha256(value).hexdigest()
 
 def request_json(url, data=None, token=None):
+    # Use the same curl transport as the accepted operational delivery.
+    # The edge rejects urllib's default client with HTTP 403 / error 1010.
     headers={'Cache-Control':'no-cache'}
     if data is not None:
         headers.update({'Authorization':'Bearer '+token,'Content-Type':'application/json','x-g11-feed-sha256':sha(data)})
-    request=urllib.request.Request(url,data=data,headers=headers)
-    try:
-        with urllib.request.urlopen(request,timeout=25) as response:
-            raw=response.read(40_000_001)
-            if len(raw)>40_000_000:raise ValueError('RESEARCH_READ_LIMIT')
-            return json.loads(raw),dict(response.headers.items())
-    except urllib.error.HTTPError as exc:
-        raise ValueError('RESEARCH_HTTP_'+str(exc.code)) from None
+    with tempfile.TemporaryDirectory() as directory:
+        root=Path(directory);body=root/'response.json';response_headers=root/'headers.txt'
+        args=['curl','--silent','--show-error','--max-time','25','--max-filesize','40000000',
+            '--config','-','--dump-header',str(response_headers),'--output',str(body),'--write-out','%{http_code}']
+        if data is not None:
+            payload=root/'payload.json';payload.write_bytes(data)
+            args+=['--request','POST','--data-binary','@'+str(payload)]
+        # Keep the publisher credential off argv, disk and logs.
+        config=''.join('header = '+json.dumps(k+': '+v)+'\n' for k,v in headers.items())
+        result=subprocess.run(args+[url],input=config,text=True,capture_output=True,timeout=30)
+        if result.returncode:raise ValueError('RESEARCH_TRANSPORT_FAILED')
+        raw=body.read_bytes()
+        if len(raw)>40000000:raise ValueError('RESEARCH_READ_LIMIT')
+        if not result.stdout.isdigit() or not 200<=int(result.stdout)<300:
+            reason=''
+            try:
+                code=json.loads(raw).get('error')
+                if isinstance(code,str) and re.fullmatch('[A-Z0-9_]{1,80}',code):reason='_'+code
+            except (ValueError,AttributeError):pass
+            raise ValueError('RESEARCH_HTTP_'+result.stdout+reason)
+        parsed_headers={}
+        for line in response_headers.read_text().splitlines():
+            if line.startswith('HTTP/'):parsed_headers={}
+            elif ':' in line:
+                key,value=line.split(':',1);parsed_headers[key.lower()]=value.strip()
+        return json.loads(raw),parsed_headers
 
 def publish(state, feed_path, origin, request=request_json):
     projection_path=feed_path.parent/'deme-discovery-public.json'
