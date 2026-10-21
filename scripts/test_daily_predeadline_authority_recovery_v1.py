@@ -452,3 +452,70 @@ class FuturePinnedRescueTests(unittest.TestCase):
                 value=bootstrap.prepare(self.state,self.day,phase,self.state/'unused')
                 self.assertEqual(value['source_sha'],self.cert['runtime_source_sha'])
                 self.assertEqual(value['d16'],'true')
+
+
+
+class RescueDeliveryRoutingTests(unittest.TestCase):
+    def route(self, day, stage, audit, target):
+        import daily_runtime_delivery_v1 as delivery
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); (root / "rescue").mkdir()
+            if audit: (root / "rescue/predeadline-audit.json").write_text("{}")
+            feed=root / "feed.json"
+            feed.write_text(json.dumps({"operational_date_jst": day, "stage": stage,
+                "SNAPSHOT_CLASS": "SAME_DAY_RESCUE_BOUNDARY",
+                "caution": "x" * (delivery.hot.BASE_BUDGET + 100)}))
+            before=feed.read_bytes()
+            with patch.object(recovery,"deliver",return_value="LIVE") as live, \
+                 patch.object(recovery,"deliver_delayed_night",return_value="NIGHT") as night, \
+                 patch.object(delivery,"deliver_rescue",return_value="INITIAL") as initial:
+                self.assertEqual(delivery.deliver(root,feed,delivery.ORIGIN),target)
+                self.assertEqual(live.call_count,int(target=="LIVE"))
+                self.assertEqual(night.call_count,int(target=="NIGHT"))
+                self.assertEqual(initial.call_count,int(target=="INITIAL"))
+            self.assertEqual(feed.read_bytes(),before)
+
+    def test_large_live_feed_uses_delta_for_all_admitted_dates(self):
+        for day in ("2026-10-16","2026-10-18","2026-10-21","2026-10-22","2026-11-01"):
+            with self.subTest(day=day): self.route(day,"MORNING",True,"LIVE")
+
+    def test_night_does_not_need_live_audit_or_morning_base(self):
+        for day in ("2026-10-21","2026-10-22"):
+            with self.subTest(day=day): self.route(day,"NIGHT",False,"NIGHT")
+
+    def test_initial_boundary_and_legacy_dates_keep_existing_transport(self):
+        self.route("2026-10-21","MORNING",False,"INITIAL")
+        self.route("2026-10-06","MORNING",True,"INITIAL")
+
+    def test_boundary_error_never_falls_back_to_full_republication(self):
+        import daily_runtime_delivery_v1 as delivery
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); (root / "rescue").mkdir()
+            (root / "rescue/predeadline-audit.json").write_text("{}")
+            feed=root / "feed.json"
+            feed.write_text(json.dumps({"operational_date_jst":"2026-10-21","stage":"MORNING",
+                "SNAPSHOT_CLASS":"SAME_DAY_RESCUE_BOUNDARY"}))
+            with patch.object(recovery,"deliver",side_effect=RuntimeError("CERTIFICATE")), \
+                 patch.object(delivery,"deliver_rescue",side_effect=AssertionError("UNSAFE_FALLBACK")):
+                with self.assertRaisesRegex(RuntimeError,"CERTIFICATE"):
+                    delivery.deliver(root,feed,delivery.ORIGIN)
+
+    def test_publication_failure_cannot_stop_saved_rescue_and_observer(self):
+        from types import SimpleNamespace as S
+        workflow=(Path(__file__).resolve().parents[1]/".github/workflows/g11-free-runner.yml").read_text()
+        def allowed(name,persisted=True,cancelled=False,runtime="success",published="failure"):
+            block=workflow.split("      - name: "+name+"\n",1)[1]
+            expr=block.split("if: ",1)[1].split("\n",1)[0]
+            self.assertIn("always()",expr)
+            expr=expr.replace("&&"," and ").replace("||"," or ").replace("!cancelled()","not cancelled()")
+            expr=expr.replace("steps.publication-state-verified.outputs.ready",repr("true" if persisted else "false"))
+            steps=S(runtime=S(outcome=runtime),publish=S(outcome=published),
+                authority=S(outputs=S(rescue_bootstrap="true")),due=S(outputs=S(phase="predeadline")))
+            return eval(expr,{"__builtins__":{}},{"steps":steps,"always":lambda:True,"cancelled":lambda:cancelled})
+        for name in ("Rescue","WILD4 shadow"):
+            self.assertTrue(allowed(name))
+            self.assertFalse(allowed(name,persisted=False))
+            self.assertFalse(allowed(name,cancelled=True))
+        self.assertFalse(allowed("WILD4 shadow",runtime="failure"))
