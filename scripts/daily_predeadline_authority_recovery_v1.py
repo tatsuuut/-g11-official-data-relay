@@ -933,6 +933,25 @@ def night_saved_live_audit(feed, rescued, receipts, snapshot_hashes, loaders):
     return audit_feed,unpublished,held
 
 
+def night_saved_forecast_holds(feed, baseline, morning_hashes, live_hashes):
+    """A race with a broken saved forecast proof cannot discard other races."""
+    base_rows={r['key']:r for r in baseline['races']};held={}
+    for row in feed['races']:
+        try:
+            for field in ('same_day_rescue_lock','practical_bets','p3_production_bets','p3_snapshot_sha256'):
+                require(row.get(field)==base_rows[row['key']].get(field),'NIGHT_BASELINE_CHANGED')
+            proof=row.get('same_day_rescue_lock')
+            if proof:
+                require(proof['p3_snapshot_sha256'] in morning_hashes and proof['v4_snapshot_sha256'] in morning_hashes,'NIGHT_MORNING_SNAPSHOT')
+            for obj in [row.get('predeadline'),((row.get('abeken_shadow') or {}).get('v53') or {}).get('live')]:
+                if obj:require(obj.get('snapshot_sha256') in live_hashes,'NIGHT_LIVE_SNAPSHOT')
+            require(not ((row.get('wild_pack') or {}).get('wild4') or {}).get('production_bet') and not (row.get('wild_pack') or {}).get('morning') and not (row.get('wild_pack') or {}).get('pre_race'),'NIGHT_UNEXPECTED_WILD_BET')
+        except (ValueError,TypeError,KeyError,RuntimeError) as exc:
+            held[row['key']]={engine:type(exc).__name__+':'+str(exc)
+                for engine in ('p3_rescue','abeken_rescue','p3_live','abeken_live')}
+    return held
+
+
 def restore_night_baseline(state, archive):
     """Read an exact pre-incident checkpoint; restore only a derived status timestamp."""
     import tarfile
@@ -1044,22 +1063,13 @@ def run_delayed_night(state, day, output, origin):
       'EXPECTED_RESULT_COUNT':len(expected),'PENDING_RESULT_COUNT':0,'PENDING_RACE_KEYS':[],
       'RESULTS':[_serializable(r) for r in results]},[receipt])
     # Existing accepted forecasts must still be backed by the immutable rescue baseline.
-    baseline=json.loads(baseline_bytes);base_rows={r['key']:r for r in baseline['races']}
-    for row in accepted['races']:
-        for field in ('same_day_rescue_lock','practical_bets','p3_production_bets','p3_snapshot_sha256'):
-            require(row.get(field)==base_rows[row['key']].get(field),'NIGHT_BASELINE_CHANGED')
-        proof=row.get('same_day_rescue_lock')
-        if proof:
-            require(proof['p3_snapshot_sha256'] in before[2].values() and proof['v4_snapshot_sha256'] in before[2].values(),'NIGHT_MORNING_SNAPSHOT')
-        for obj in [row.get('predeadline'),((row.get('abeken_shadow') or {}).get('v53') or {}).get('live')]:
-            if obj:require(obj.get('snapshot_sha256') in before[3].values(),'NIGHT_LIVE_SNAPSHOT')
-        require(not ((row.get('wild_pack') or {}).get('wild4') or {}).get('production_bet') and not (row.get('wild_pack') or {}).get('morning') and not (row.get('wild_pack') or {}).get('pre_race'),'NIGHT_UNEXPECTED_WILD_BET')
+    proof_holds=night_saved_forecast_holds(accepted,json.loads(baseline_bytes),set(before[2].values()),set(before[3].values()))
     out=night_overlay(accepted,results,clock())
     # Audit also includes already-fixed LIVE snapshots withheld by a failed
     # predeadline publication. They are never appended to the public forecast.
     from g11.growth_p3.v1_1 import current_runtime_v1 as p3
     from g11.canonical import public_app_feed as feedlib
-    rescued={r['key'] for r in accepted['races'] if r.get('same_day_rescue_lock')}
+    rescued={r['key'] for r in accepted['races'] if r.get('same_day_rescue_lock') and r['key'] not in proof_holds}
     try:receipts=json.loads((root/'live-write-receipts.json').read_bytes())
     except (ValueError,OSError):receipts={}
     def p3_live(key):
@@ -1069,6 +1079,7 @@ def run_delayed_night(state, day, output, origin):
         _,rows=feedlib._abeken_public_projection(root,'PREDEADLINE',day,{key})
         return (rows.get(key,{}).get('v53') or {}).get('live'),CanonicalRunner._abeken_v53_live_name(key)
     audit_feed,unpublished,held=night_saved_live_audit(out,rescued,receipts,set(before[3].values()),{'p3':p3_live,'abeken':v4_live})
+    held.update(proof_holds)
     scores=night_scores(audit_feed,results,held)
     require(before==[inventory(p) for p in protected_roots] and boundary_bytes==(root/'boundary.json').read_bytes()
         and baseline_bytes==(root/'feed.json').read_bytes(),'NIGHT_PROTECTED_MUTATION')
