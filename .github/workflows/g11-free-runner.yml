@@ -1,5 +1,4 @@
-name: runtime sync
-# NIGHT result adapter accepts verified L rows with a missing course field.
+name: runtime sync # L1
 run-name: ${{github.event_name == 'workflow_dispatch' && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
@@ -2234,5 +2233,4 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
-
 
