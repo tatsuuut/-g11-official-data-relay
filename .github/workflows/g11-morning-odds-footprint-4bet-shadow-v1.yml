@@ -1,5 +1,5 @@
 name: runtime observation
-# Current-state v4 binding verified; Oct 21 rescue observes only future official odds.
+# Current-state v4 binding verified; Oct 21 rescue retries future official odds after 09:08.
 
 on:
   push:
