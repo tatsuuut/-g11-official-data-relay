@@ -16,6 +16,18 @@ from rescue_night_result_parser_v1 import official_input_compatibility
 DAY = fixtures.TARGET
 
 
+def schedule_fixture():
+    value=fixtures.schedule_text()
+    # Parser fixtures reuse motor numbers; the real admission gate correctly
+    # rejects that across different racers. Give every test racer one motor.
+    for race in range(1,13):
+        for boat in range(1,7):
+            old=fixtures.schedule_entry_line(boat,4000+race*10+boat)
+            new=old.replace(f'{boat+10} 40.{boat:02d}',f'{(race-1)*6+boat} 40.{boat:02d}')
+            value=value.replace(old,new,1)
+    return value
+
+
 def second_venue(value):
     import re
     return re.sub(r'(?<!\d)4(\d{3})(?!\d)',r'5\1',value.replace('19KBGN','20KBGN').replace('19BBGN','20BBGN').replace('下関','若松'))
@@ -40,9 +52,11 @@ class SavedSourceClient:
         if old is not None:return old
         self.reads.append(source)
         if source.startswith('schedule-b-'):
-            b=fixtures.schedule_text()
-            if self.bad_b:b=b.replace(fixtures.schedule_entry_line(6,4016),'DAMAGED',1)
-            raw=(b+'\n'+second_venue(fixtures.schedule_text())).encode('cp932')
+            b=schedule_fixture()
+            if self.bad_b:
+                line=next(line for line in b.splitlines() if line.startswith('6 4016'))
+                b=b.replace(line,'DAMAGED',1)
+            raw=(b+'\n'+second_venue(schedule_fixture())).encode('cp932')
         elif source.startswith('racer-period-'):
             raw=b'\r\n'.join(fixtures.racer_record(base+race*10+boat)
                 for base in (4000,5000) for race in range(1,13) for boat in range(1,7))
