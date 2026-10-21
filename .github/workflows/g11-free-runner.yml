@@ -1754,8 +1754,8 @@ jobs:
           mv .relay-cache/state-delivery.tgz.gpg.tmp .relay-cache/state-delivery.tgz.gpg
           cp .relay-cache/state-delivery.tgz.gpg .relay-cache/state.tgz.gpg
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
-          [ '${{steps.due.outputs.phase}}' != predeadline ] || GH_TOKEN="${{github.token}}" gh workflow run g11-morning-odds-footprint-4bet-shadow-v1.yml -f mode=wild4 || echo WILD4_DISPATCH_RETRY
-      - name: Save encrypted delivery state
+          [ '${{steps.due.outputs.phase}}' != predeadline ] || GH_TOKEN="${{github.token}}" gh workflow run g11-morning-odds-footprint-4bet-shadow-v1.yml -f mode=wild4 -f operational_date='${{steps.due.outputs.operational_date}}' || echo WILD4_DISPATCH_RETRY
+      - name: Save state
         if: always()&&steps.delivery-state.outputs.ready=='true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -1966,7 +1966,7 @@ jobs:
           if __name__ == "__main__":
               main(*sys.argv[1:])
           PY
-      - name: Verify existing immutable night readback
+      - name: Verify night
         id: immutable-readback
         if: steps.publish.outcome=='success'&&steps.publish.outputs.immutable_night=='true'
         env:
@@ -2135,7 +2135,7 @@ jobs:
       - name: Classify optional PREDEADLINE relay failure
         if: always()&&steps.runtime.outcome=='failure'&&steps.due.outputs.phase=='predeadline'
         run: echo 'G11_PREDEADLINE_OPTIONAL_UNAVAILABLE=CRITICAL_CHECKPOINT_RETAINED'
-      - name: Continue same-day rescue
+      - name: Rescue
         if: steps.authority.outputs.rescue_bootstrap=='true'&&steps.readback.outcome=='success'
         env:
           GH_TOKEN: ${{github.token}}
