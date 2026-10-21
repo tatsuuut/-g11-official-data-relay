@@ -864,6 +864,15 @@ def deliver(state, feed_path, origin):
         "verified_v4_live_count": sum(bool(((r.get("abeken_shadow") or {}).get("v53") or {}).get("live")) for r in actual.values())}
     atomic(state / "rescue/predeadline-delivery.json", canonical(receipt) + b"\n")
     print(json.dumps(receipt, sort_keys=True))
+    # The accepted immutable rescue feed is the only source. This metadata-only
+    # sidecar cannot regenerate a LOCK or cancel verified operational delivery.
+    try:
+        import selective_alert_input_v1
+        # Match the normal delivery reader's frozen private checkout import path.
+        sys.path.insert(0, str(Path(".g11-private").resolve()))
+        selective_alert_input_v1.deliver_optional(state / "rescue/store", readback, origin=origin)
+    except Exception as exc:
+        print("G11_RESCUE_SELECTIVE_INPUT=HELD:" + type(exc).__name__)
     return receipt
 
 
@@ -1178,6 +1187,7 @@ def deliver_delayed_night(state,feed_path,origin):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 

@@ -168,6 +168,18 @@ def scenario(day="2026-10-21", phase="LIVE"):
 
 
 class RescueTransportContractTests(unittest.TestCase):
+    def test_verified_rescue_readback_drives_only_optional_saved_input_reader(self):
+        import selective_alert_input_v1 as inputs
+        with scenario() as (state, payload, site, saved), patch.object(inputs,'deliver_optional') as append:
+            receipt=delivery.deliver(state,payload,delivery.ORIGIN)
+            self.assertEqual(receipt['site_get_readback'],'PASS')
+            append.assert_called_once_with(state/'rescue/store',json.loads(site.raw),origin=delivery.ORIGIN)
+            self.assertIn(str(Path('.g11-private').resolve()),rescue.sys.path)
+            self.assert_preserved(saved)
+        with scenario() as (state, payload, site, saved), patch.object(inputs,'deliver_optional',side_effect=RuntimeError('fixture')):
+            self.assertEqual(delivery.deliver(state,payload,delivery.ORIGIN)['site_get_readback'],'PASS')
+            self.assert_preserved(saved)
+
     def assert_preserved(self, saved):
         for path, raw in saved.items():
             self.assertEqual(path.read_bytes(), raw, path.name)
@@ -237,3 +249,4 @@ class RescueTransportContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
