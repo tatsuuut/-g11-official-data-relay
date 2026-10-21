@@ -519,3 +519,34 @@ class RescueDeliveryRoutingTests(unittest.TestCase):
             self.assertFalse(allowed(name,persisted=False))
             self.assertFalse(allowed(name,cancelled=True))
         self.assertFalse(allowed("WILD4 shadow",runtime="failure"))
+
+
+class StoredRescueTransportTests(unittest.TestCase):
+    def test_exact_source_readback_uses_authenticated_route_and_rejects_display_body(self):
+        from unittest.mock import patch
+        import hot_delta_transport_v1 as hot
+        day="2026-10-21"; origin="https://g11-race-lab.higatatsunori2.chatgpt.site"
+        feed={"operational_date_jst":day,"SNAPSHOT_CLASS":"SAME_DAY_RESCUE_BOUNDARY"}
+        raw=b'{ "SNAPSHOT_CLASS":"SAME_DAY_RESCUE_BOUNDARY", "operational_date_jst":"2026-10-21" }\n'
+        headers={"x-g11-transport-readback":"STORED_RESCUE","x-g11-source-feed-sha256":hot.hash_bytes(raw)}
+        with patch.dict(os.environ,{"G11_SYNC_OIDC":"fixture"}), patch.object(hot,"fetch",return_value=(feed,headers,raw)) as read:
+            self.assertEqual(hot.fetch_stored_rescue(origin,day),(feed,headers,raw))
+            read.assert_called_once_with(origin+"/api/g11-feed?date="+day+"&view=stored-rescue",token="fixture")
+            headers["x-g11-source-feed-sha256"]="f"*64
+            with self.assertRaisesRegex(RuntimeError,"STORED_RESCUE_READBACK"):hot.fetch_stored_rescue(origin,day)
+            with self.assertRaisesRegex(RuntimeError,"ORIGIN_OR_DAY"):hot.fetch_stored_rescue("https://elsewhere.invalid",day)
+
+    def test_night_mints_existing_workflow_oidc_without_persisting_token(self):
+        from unittest.mock import patch,MagicMock
+        import hot_delta_transport_v1 as hot
+        import urllib.request,io
+        day="2026-10-21";origin="https://g11-race-lab.higatatsunori2.chatgpt.site"
+        feed={"operational_date_jst":day,"SNAPSHOT_CLASS":"SAME_DAY_RESCUE_BOUNDARY"};raw=json.dumps(feed).encode()
+        headers={"x-g11-transport-readback":"STORED_RESCUE","x-g11-source-feed-sha256":hot.hash_bytes(raw)}
+        response=MagicMock();response.__enter__.return_value=io.BytesIO(b'{"value":"fixture-night"}')
+        with patch.dict(os.environ,{"ACTIONS_ID_TOKEN_REQUEST_URL":"https://issuer.invalid/token?x=1","ACTIONS_ID_TOKEN_REQUEST_TOKEN":"request-fixture","G11_OIDC_AUDIENCE":"g11-race-lab"},clear=True), \
+             patch.object(urllib.request,"urlopen",return_value=response) as mint,patch.object(hot,"fetch",return_value=(feed,headers,raw)) as read:
+            hot.fetch_stored_rescue(origin,day)
+            self.assertIn("audience=g11-race-lab",mint.call_args.args[0].full_url)
+            self.assertEqual(read.call_args.kwargs,{"token":"fixture-night"})
+            self.assertNotIn("G11_SYNC_OIDC",os.environ)

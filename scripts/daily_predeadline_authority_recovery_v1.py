@@ -798,7 +798,7 @@ def deliver(state, feed_path, origin):
     day = incoming["operational_date_jst"]
     cert = certificate(state, day)
     url = origin + "/api/g11-feed?date=" + day
-    accepted, base_headers, base_raw = hot.fetch(url)
+    accepted, base_headers, base_raw = hot.fetch_stored_rescue(origin, day)
     require(accepted.get("SNAPSHOT_CLASS") == incoming.get("SNAPSHOT_CLASS") == "SAME_DAY_RESCUE_BOUNDARY"
             and accepted["same_day_rescue"]["authority_sha256"] == cert["authority_sha256"]
             and incoming.get("operational_date_jst") == day, "DELIVERY_IDENTITY")
@@ -840,7 +840,7 @@ def deliver(state, feed_path, origin):
         ack = json.loads(response.read_bytes())
         require(200 <= int(result.stdout) < 300 and ack.get("status") == "PASS",
                 "SITE_REJECTED:" + str(ack.get("error")))
-    readback, headers, raw = hot.fetch(url)
+    readback, headers, raw = hot.fetch_stored_rescue(origin, day)
     require(headers.get("x-g11-source-feed-sha256") == sha(data) == ack.get("payload_sha256"), "SITE_SHA_READBACK")
     require(readback == out, "DELTA_FULL_READBACK")
     require(readback["same_day_rescue"] == out["same_day_rescue"] and readback["counts"]["formal"] == 0,
@@ -1061,7 +1061,7 @@ def run_delayed_night(state, day, output, origin):
     protected_roots=[state/'store',state/'daily-runtime',state/'rescue/store/snapshots/morning',state/'rescue/store/snapshots/predeadline']
     before=[inventory(p) for p in protected_roots]
     boundary_bytes=(state/'rescue/boundary.json').read_bytes();baseline_bytes=(state/'rescue/feed.json').read_bytes()
-    accepted,headers,raw=hot.fetch(origin+'/api/g11-feed?date='+day)
+    accepted,headers,raw=hot.fetch_stored_rescue(origin,day)
     require(accepted.get('same_day_rescue',{}).get('authority_sha256') == cert['authority_sha256'], 'NIGHT_BOUNDARY')
     root=state/'rescue'; saved=root/'night-feed.json';report=root/'night-audit.json'
     if saved.exists():
@@ -1140,7 +1140,7 @@ def deliver_delayed_night(state,feed_path,origin):
     day=out['operational_date_jst']
     certificate(state,day,allow_night_rollover=True)
     require(data==(state/'rescue/night-feed.json').read_bytes(),'NIGHT_SAVED_OUTPUT')
-    accepted,headers,raw=hot.fetch(origin+'/api/g11-feed?date='+day)
+    accepted,headers,raw=hot.fetch_stored_rescue(origin,day)
     def without_results(f):
         v=deepcopy(f)
         for k in ('stage','status','generated_at_jst'):v.pop(k,None)
@@ -1166,7 +1166,7 @@ def deliver_delayed_night(state,feed_path,origin):
               '-H','x-g11-rescue-night-audit-sha256: '+audit_sha,'-H','x-g11-rescue-night-checkpoint-sha256: '+checkpoint_sha,'--data-binary','@'+str(p),'--output',str(resp),'--write-out','%{http_code}'],capture_output=True,text=True,check=True)
             ack=json.loads(resp.read_bytes())
             require(200<=int(r.stdout)<300 and ack.get('status')=='PASS','NIGHT_SITE_REJECTED:'+str(ack.get('error')))
-    actual,headers,raw=hot.fetch(origin+'/api/g11-feed?date='+day)
+    actual,headers,raw=hot.fetch_stored_rescue(origin,day)
     require(actual==out and headers.get('x-g11-source-feed-sha256')==sha(data),'NIGHT_SITE_READBACK')
     Path('.relay-output/hot-delta-accepted').write_text(sha(data)+'\n')
     Path('.relay-output/hot-delta-readback.json').write_bytes(raw)
@@ -1178,5 +1178,6 @@ def deliver_delayed_night(state,feed_path,origin):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 

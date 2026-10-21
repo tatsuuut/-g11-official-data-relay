@@ -256,13 +256,14 @@ def project_morning_base(path: Path, research_projection: dict | None = None) ->
     path.write_bytes(data + b"\n")
 
 
-def fetch(url: str) -> tuple[dict, dict[str, str], bytes]:
+def fetch(url: str, *, token: str | None = None) -> tuple[dict, dict[str, str], bytes]:
     body_path = Path(".relay-output/hot-get-body.json")
     header_path = Path(".relay-output/hot-get-headers.txt")
+    authorization = ["-H", "Authorization: Bearer " + token] if token else []
     subprocess.run([
         "curl", "--fail-with-body", "--silent", "--show-error", "--location",
         "--max-time", "35", "--dump-header", str(header_path),
-        "--output", str(body_path), url,
+        "--output", str(body_path), *authorization, url,
     ], check=True)
     body = body_path.read_bytes()
     headers = {}
@@ -275,6 +276,31 @@ def fetch(url: str) -> tuple[dict, dict[str, str], bytes]:
     if hash_bytes(body) != headers.get("x-g11-feed-sha256"):
         raise RuntimeError("HOT_READBACK_SHA")
     return json.loads(body), headers, body
+
+
+def fetch_stored_rescue(origin: str, day: str) -> tuple[dict, dict[str, str], bytes]:
+    """Read the exact accepted rescue bytes with the existing publisher identity."""
+    import re
+    import urllib.parse
+    import urllib.request
+    if origin != "https://g11-race-lab.higatatsunori2.chatgpt.site" or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise RuntimeError("STORED_RESCUE_ORIGIN_OR_DAY")
+    token = os.environ.get("G11_SYNC_OIDC")
+    if not token:
+        url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=" + urllib.parse.quote(os.environ["G11_OIDC_AUDIENCE"], safe="")
+        request = urllib.request.Request(url, headers={
+            "Authorization": "bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"],
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(request, timeout=30) as response:
+            token = json.load(response)["value"]
+    feed, headers, raw = fetch(origin + "/api/g11-feed?date=" + day + "&view=stored-rescue", token=token)
+    if (headers.get("x-g11-transport-readback") != "STORED_RESCUE"
+            or headers.get("x-g11-source-feed-sha256") != hash_bytes(raw)
+            or feed.get("operational_date_jst") != day
+            or feed.get("SNAPSHOT_CLASS") != "SAME_DAY_RESCUE_BOUNDARY"):
+        raise RuntimeError("STORED_RESCUE_READBACK")
+    return feed, headers, raw
 
 
 def create_delta(incoming: dict, accepted: dict, base_sha: str, research_projection: dict | None = None) -> dict:
@@ -606,6 +632,7 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
+
 
 
 
