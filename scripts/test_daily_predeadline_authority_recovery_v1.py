@@ -398,3 +398,57 @@ class Oct18ContinuationScopeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'NIGHT_RESULT_IDENTITY'):
             live.night_overlay(feed,[result],datetime.fromisoformat(day+'T20:00:00+09:00'))
 
+
+class FuturePinnedRescueTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.state=Path(self.temp.name)
+        self.day='2026-10-22';self.now=datetime.fromisoformat(self.day+'T09:00:00+09:00')
+        self.parent={'schema':'G11_DAILY_RUNTIME_AUTHORITY_V1','operational_date_jst':self.day,'immutable':True,
+                     'runtime_source_sha':'a'*40,'source_files':{'runtime.py':'b'*64},'model_files':{'model':'c'*64}}
+        for key in ('p3','abeken_v53','wild','true_ai'): self.parent[key]={'source_sha':'a'*40,'version':'unchanged'}
+        self.cert={**deepcopy(self.parent),'schema':live.SCHEMA,'source_delta':[],
+                   'canonical_morning_promoted':False,'research_eligible':False,'same_day_results_used':False,
+                   'safety_margin_seconds':300,'model_set_sha256':live.sha(live.canonical(self.parent['model_files']))}
+        self.write()
+    def write(self):
+        self.parent.pop('authority_sha256',None);self.parent['authority_sha256']=live.sha(live.canonical(self.parent))
+        self.cert['parent_authority_sha256']=self.parent['authority_sha256']
+        self.cert.pop('authority_sha256',None);self.cert['authority_sha256']=live.sha(live.canonical(self.cert))
+        for name,value in [('rescue/boundary.json',self.cert),('daily-runtime/'+self.day+'/authority.json',self.parent),
+                           ('relay-state.json',{'OPERATIONAL_DATE_JST':self.day,'MORNING_COMPLETE':False})]:
+            p=self.state/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(live.canonical(value))
+    def test_future_parent_preserving_continuation_and_rollover(self):
+        self.assertEqual(live.certificate(self.state,self.day,self.now),self.cert)
+        self.assertEqual(live.certificate(self.state,self.day,datetime.fromisoformat('2026-10-23T01:59:00+09:00'),allow_night_rollover=True),self.cert)
+        with self.assertRaisesRegex(RuntimeError,'CURRENT_DAY_ONLY'):
+            live.certificate(self.state,self.day,datetime.fromisoformat('2026-10-23T02:00:00+09:00'),allow_night_rollover=True)
+    def test_signed_changed_source_models_delta_or_binding_cannot_auto_admit(self):
+        original=deepcopy(self.cert)
+        for field,value in [('runtime_source_sha','d'*40),('source_files',{'other':'e'*64}),('source_delta',['runtime.py']),
+                            ('model_files',{'model':'d'*64}),('model_set_sha256','f'*64),('safety_margin_seconds',0),
+                            ('wild',{'source_sha':'e'*40,'version':'changed'})]:
+            self.cert=deepcopy(original);self.cert[field]=value;self.write()
+            with self.assertRaisesRegex(RuntimeError,'FUTURE_'): live.certificate(self.state,self.day,self.now)
+    def test_partial_canonical_lock_is_still_prohibited(self):
+        p=self.state/'store/snapshots/morning/saved.json';p.parent.mkdir(parents=True);p.write_text('preserved')
+        with self.assertRaisesRegex(RuntimeError,'NORMAL_LOCK_CONFLICT'): live.certificate(self.state,self.day,self.now)
+        self.assertEqual(p.read_text(),'preserved')
+    def test_future_night_uses_exact_saved_race_set_not_incident_156(self):
+        base={'operational_date_jst':self.day,'stage':'MORNING','status':'PASS','generated_at_jst':self.now.isoformat(),
+              'same_day_rescue':self.cert,'counts':{'formal':0,'results':0,'pending':2},
+              'races':[{'key':'20261022-01-0'+str(i),'result_trifecta':None,'payout':None,'result_meta':{},'practical_bets':['1-2-3']} for i in (1,2)]}
+        out=deepcopy(base);out.update(stage='NIGHT',generated_at_jst=self.day+'T23:00:00+09:00');out['counts'].update(results=2,pending=0)
+        for r in out['races']: r.update(result_trifecta='1-2-3',payout=1200)
+        patch=json.loads(live.rescue_night_delta(base,out,'e'*64));self.assertEqual(len(patch['RACES']),2)
+        for change in (lambda f:f['races'].pop(),lambda f:f['races'][0].update(key='20261022-02-01'),lambda f:f['races'][0].update(practical_bets=['6-5-4'])):
+            bad=deepcopy(out);change(bad)
+            with self.assertRaises(RuntimeError): live.rescue_night_delta(base,bad,'e'*64)
+    def test_future_saved_rescue_routes_cron_and_night_to_same_frozen_source(self):
+        import daily_runtime_bootstrap_v1 as bootstrap
+        (self.state/'rescue/feed.json').write_text('{}')
+        self.assertEqual(bootstrap.recovery_route(self.state,self.day,'morning',self.now)['phase'],'predeadline')
+        with patch.object(live,'clock',return_value=self.now):
+            for phase in ('predeadline','night'):
+                value=bootstrap.prepare(self.state,self.day,phase,self.state/'unused')
+                self.assertEqual(value['source_sha'],self.cert['runtime_source_sha'])
+                self.assertEqual(value['d16'],'true')

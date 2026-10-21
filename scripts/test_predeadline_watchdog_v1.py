@@ -294,3 +294,49 @@ class SiteTransportTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class DaytimeMissingMorningTests(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime.fromisoformat('2026-10-22T09:00:00+09:00')
+        self.env = {'GH_TOKEN':'test','GITHUB_REPOSITORY':'tatsuuut/-g11-official-data-relay',
+                    'G11_APP_ORIGIN':'https://example.invalid','GITHUB_EVENT_NAME':'schedule'}
+    def run_missing(self, feeds, runs):
+        reads=iter(feeds)
+        def get(url, token=None):
+            if '/api/g11-feed' in url:
+                value=next(reads)
+                if isinstance(value, Exception): raise value
+                return value
+            return {'workflow_runs':runs}
+        with mock.patch.dict('os.environ',self.env), mock.patch('predeadline_watchdog_v1._get',side_effect=get), mock.patch('predeadline_watchdog_v1._post') as post:
+            main(self.now)
+        return post
+    def test_missing_feed_404_recovers_once_with_current_day_and_main(self):
+        error=HTTPError('url',404,'missing',{},None)
+        post=self.run_missing([error,error],[])
+        self.assertEqual(post.call_count,1)
+        self.assertEqual(post.call_args.args[2],{'ref':'main','inputs':{'phase':'same-day-rescue','operational_date':'2026-10-22'}})
+    def test_active_or_feed_appearing_on_recheck_never_dispatches(self):
+        self.assertEqual(self.run_missing([{}],[{'status':'queued'}]).call_count,0)
+        self.assertEqual(self.run_missing([{},feed()],[]).call_count,0)
+    def test_non404_errors_never_become_missing_morning(self):
+        with self.assertRaises(HTTPError): self.run_missing([HTTPError('url',503,'unavailable',{},None)],[])
+    def test_two_attempts_cooldown_and_history_truncation(self):
+        from predeadline_watchdog_v1 import daytime_recovery_decision as decide_recovery
+        row={'status':'completed','event':'workflow_dispatch','display_title':'LIVE-same-day-rescue-2026-10-22',
+             'created_at':'2026-10-21T23:00:00Z','updated_at':'2026-10-21T23:59:00Z'}
+        self.assertEqual(decide_recovery({},[row],self.now),'RESCUE_RETRY_COOLDOWN')
+        self.assertEqual(decide_recovery({},[row,row],self.now),'RESCUE_RETRY_LIMIT')
+        self.assertEqual(decide_recovery({},[row]*100,self.now),'RECOVERY_HISTORY_INCOMPLETE')
+        row['updated_at']='2026-10-21T23:40:00Z'
+        self.assertEqual(decide_recovery({},[row],self.now),'DISPATCH_SAME_DAY_RESCUE')
+        self.assertEqual(decide_recovery({},[],self.now.replace(hour=22)),'OUTSIDE_RESCUE_WINDOW')
+    def test_saved_rescue_is_monitored_without_canonical_promotion(self):
+        f=feed();f.pop('canonical_authorities');f['counts']['formal']=0
+        f['SNAPSHOT_CLASS']='SAME_DAY_RESCUE_BOUNDARY'
+        f['same_day_rescue']={'operational_date_jst':DAY,'immutable':True,'canonical_morning_promoted':False,
+                             'research_eligible':False,'same_day_results_used':False}
+        self.assertEqual(_last_deadline(f,DAY).hour,22)
+        f['same_day_rescue']['canonical_morning_promoted']=True
+        with self.assertRaises(ValueError): _last_deadline(f,DAY)

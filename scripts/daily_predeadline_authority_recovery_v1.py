@@ -410,12 +410,12 @@ def main():
     sys.argv = [sys.argv[0], *sys.argv[2:]]
     _require("--operational-date" in sys.argv, "PREDEADLINE_RECOVERY_DAY_MISSING")
     day = sys.argv[sys.argv.index("--operational-date") + 1]
-    if mode == "night" and day in DELAYED_DAYS:
+    if mode == "night" and is_delayed_day(day):
         sys.path.insert(0, str(Path.cwd()))
         state = Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve()
         run_delayed_night(state, day, Path(sys.argv[sys.argv.index("--feed-output") + 1]), sys.argv[sys.argv.index("--app-origin") + 1])
         return 0
-    if mode == "predeadline" and day in DELAYED_DAYS and "--state-root" in sys.argv:
+    if mode == "predeadline" and is_delayed_day(day) and "--state-root" in sys.argv:
         state = Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve()
         if (state / "rescue/feed.json").is_file():
             sys.path.insert(0, str(Path.cwd()))
@@ -462,6 +462,34 @@ DELAYED_DAY = "2026-10-16"
 DELAYED_DAYS = {DELAYED_DAY, "2026-10-18", "2026-10-21"}
 SCHEMA = "G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1"
 JST = timezone(timedelta(hours=9))
+AUTONOMOUS_FROM = "2026-10-22"
+
+def is_future_rescue_day(day):
+    try:
+        return isinstance(day, str) and datetime.fromisoformat(day).date().isoformat() == day and day >= AUTONOMOUS_FROM
+    except ValueError:
+        return False
+
+def is_delayed_day(day):
+    return day in DELAYED_DAYS or is_future_rescue_day(day)
+
+def uses_rescue_delta(day):
+    return day in {"2026-10-18", "2026-10-21"} or is_future_rescue_day(day)
+
+def validate_future_boundary(cert, parent, day):
+    """Future automatic continuation cannot change the day's frozen runtime."""
+    require(is_future_rescue_day(day), "FUTURE_DAY")
+    require(parent.get("schema") == "G11_DAILY_RUNTIME_AUTHORITY_V1"
+            and cert.get("runtime_source_sha") == parent.get("runtime_source_sha")
+            and cert.get("source_files") == parent.get("source_files")
+            and cert.get("source_delta") == [], "FUTURE_PINNED_SOURCE")
+    require(bool(cert.get("model_files")) and cert["model_files"] == parent.get("model_files")
+            and cert.get("model_set_sha256") == sha(canonical(cert["model_files"])), "FUTURE_PINNED_MODELS")
+    require(cert.get("safety_margin_seconds") == 300
+            and all(cert.get(k) == parent.get(k) and isinstance(cert.get(k), dict)
+                    and cert[k].get("source_sha") == cert["runtime_source_sha"]
+                    for k in ("p3", "abeken_v53", "wild", "true_ai")), "FUTURE_RUNTIME_BINDINGS")
+
 
 def require(ok, reason):
     if not ok:
@@ -487,7 +515,7 @@ def clock():
 def certificate(state, day, now=None, *, allow_night_rollover=False):
     current = now or clock()
     date_ok = current.date().isoformat() == day or (allow_night_rollover and current.date() == datetime.fromisoformat(day).date() + timedelta(days=1) and current.hour < 2)
-    require(day in DELAYED_DAYS and date_ok, "CURRENT_DAY_ONLY")
+    require(is_delayed_day(day) and date_ok, "CURRENT_DAY_ONLY")
     path = state / "rescue/boundary.json"
     require(path.is_file() and not path.is_symlink(), "BOUNDARY_MISSING")
     cert = json.loads(path.read_bytes())
@@ -514,6 +542,8 @@ def certificate(state, day, now=None, *, allow_night_rollover=False):
                 and cert["runtime_source_sha"] == "122a785806395b43145a0189c5f6724d5e8e8d4a", "ADMITTED_OCT18_BOUNDARY")
     if day == "2026-10-21":
         require(cert["runtime_source_sha"] == "e0e192dd8e34df628439ccdd332748848aaf7725", "ADMITTED_OCT21_ACQUISITION_REPAIR")
+    if is_future_rescue_day(day):
+        validate_future_boundary(cert, parent, day)
     return cert
 
 def inventory(root):
@@ -840,7 +870,7 @@ def deliver(state, feed_path, origin):
 def night_overlay(accepted, results, now):
     """Result-only projection; every prediction/LOCK/research field is retained."""
     day = accepted.get('operational_date_jst')
-    require(day in DELAYED_DAYS
+    require(is_delayed_day(day)
             and accepted.get('SNAPSHOT_CLASS') == 'SAME_DAY_RESCUE_BOUNDARY'
             and accepted.get('counts', {}).get('formal') == 0, 'NIGHT_ACCEPTED_SCOPE')
     rows = accepted['races']
@@ -985,16 +1015,17 @@ def restore_night_baseline(state, archive):
 
 def rescue_night_delta(accepted, out, base_sha):
     """Bound the result-only wire, preserving every saved canonical byte/LOCK."""
-    require(out['operational_date_jst'] == accepted['operational_date_jst'] and out['operational_date_jst'] in {'2026-10-18', '2026-10-21'}
+    require(out['operational_date_jst'] == accepted['operational_date_jst'] and uses_rescue_delta(out['operational_date_jst'])
         and accepted['stage'] == 'MORNING' and out['stage'] == 'NIGHT'
         and out['same_day_rescue'] == accepted['same_day_rescue']
-        and len(out['races']) == len(accepted['races']) == 156, 'NIGHT_DELTA_IDENTITY')
+        and len(out['races']) == len(accepted['races'])
+        and (1 <= len(out['races']) <= 288 if is_future_rescue_day(out['operational_date_jst']) else len(out['races']) == 156), 'NIGHT_DELTA_IDENTITY')
     protected = deepcopy(out)
     for k in ('stage', 'status', 'generated_at_jst'):
         protected[k] = accepted[k]
     protected['counts'] = deepcopy(accepted['counts'])
     prior = {r['key']: r for r in accepted['races']}
-    require(len(prior) == 156 and {r['key'] for r in out['races']} == set(prior), 'NIGHT_DELTA_RACE_SET')
+    require(len(prior) == len(accepted['races']) and {r['key'] for r in out['races']} == set(prior), 'NIGHT_DELTA_RACE_SET')
     changes = []
     for row, restored in zip(out['races'], protected['races']):
         old = prior[row['key']]
@@ -1003,7 +1034,7 @@ def rescue_night_delta(accepted, out, base_sha):
         for k in ('result_trifecta', 'payout', 'result_meta'):
             restored[k] = deepcopy(old[k])
     require(protected == accepted and out['status'] == 'PASS'
-        and out['counts'] == {**accepted['counts'], 'results': 156, 'pending': 0}, 'NIGHT_DELTA_NONRESULT_MUTATION')
+        and out['counts'] == {**accepted['counts'], 'results': len(prior), 'pending': 0}, 'NIGHT_DELTA_NONRESULT_MUTATION')
     wire = canonical({'SCHEMA': 'G11_RESCUE_NIGHT_DELTA_V1', 'OPERATIONAL_DATE': out['operational_date_jst'],
         'BASE_FEED_SHA': base_sha, 'TARGET_FEED_SHA': sha(canonical(out)+b'\n'),
         'AUTHORITY_SHA256': out['same_day_rescue']['authority_sha256'],
@@ -1091,7 +1122,7 @@ def run_delayed_night(state, day, output, origin):
         'HELD_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='HELD_INVALID_FIXED_PREDICTION' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
         'GORIPAN':'SEPARATE_SAVED_LOCK_LEDGER_NO_BACKFILL','PROTECTED_UNCHANGED':True,'FIXED_BUT_NOT_PUBLISHED_LIVE':unpublished}
     data=canonical(out)+b'\n'
-    if day in {'2026-10-18', '2026-10-21'}:
+    if uses_rescue_delta(day):
         rescue_night_delta(accepted, out, sha(raw))
     else:
         require(len(data)<=2097152,'NIGHT_DELIVERY_SIZE')
@@ -1127,7 +1158,7 @@ def deliver_delayed_night(state,feed_path,origin):
     if accepted['stage']=='NIGHT':require(accepted==out,'NIGHT_ALREADY_SETTLED_CONFLICT')
     else:
         with tempfile.TemporaryDirectory() as directory:
-            wire = rescue_night_delta(accepted,out,base_sha) if day in {'2026-10-18', '2026-10-21'} else data
+            wire = rescue_night_delta(accepted,out,base_sha) if uses_rescue_delta(day) else data
             p=Path(directory)/'feed.json';resp=Path(directory)/'response.json';p.write_bytes(wire)
             r=subprocess.run(['curl','--silent','--show-error','--max-time','45','-X','POST',origin+'/api/g11-sync',
               '-H','Authorization: Bearer '+os.environ['G11_SYNC_OIDC'],'-H','Content-Type: application/json',

@@ -186,9 +186,15 @@ def _get(url: str, token: str | None = None) -> dict:
 
 
 def _last_deadline(feed: dict, day: str) -> datetime:
+    rescue = feed.get("same_day_rescue", {})
+    rescue_ready = (feed.get("SNAPSHOT_CLASS") == "SAME_DAY_RESCUE_BOUNDARY"
+        and rescue.get("operational_date_jst") == day and rescue.get("immutable") is True
+        and rescue.get("canonical_morning_promoted") is False
+        and rescue.get("research_eligible") is False and rescue.get("same_day_results_used") is False
+        and feed.get("counts", {}).get("formal") == 0)
     if (feed.get("operational_date_jst") != day or feed.get("status") != "PASS"
             or feed.get("stage") not in {"MORNING", "PREDEADLINE"}
-            or feed.get("canonical_authorities", {}).get("growth_p3", {}).get("status") != "LOCKED"):
+            or (not rescue_ready and feed.get("canonical_authorities", {}).get("growth_p3", {}).get("status") != "LOCKED")):
         raise ValueError("WATCHDOG_ACCEPTED_MORNING_BINDING")
     races = feed.get("races")
     if not isinstance(races, list) or not races:
@@ -200,6 +206,39 @@ def _last_deadline(feed: dict, day: str) -> datetime:
            for value in deadlines):
         raise ValueError("WATCHDOG_DEADLINE_BINDING")
     return max(deadlines)
+
+
+def daytime_recovery_decision(feed: dict, runs: list[dict], now: datetime) -> str:
+    """Request the existing isolated lane; its saved-authority guards still decide eligibility."""
+    day = now.date().isoformat()
+    if now.utcoffset() != timedelta(hours=9) or not 8 <= now.hour < 22:
+        return "OUTSIDE_RESCUE_WINDOW"
+    if any(run.get("status") in ACTIVE for run in runs):
+        return "ACTIVE_RUNTIME"
+    if feed and (feed.get("status") != "WAITING_FOR_FIRST_VERIFIED_FEED" or feed.get("races")):
+        return "FEED_REQUIRES_VERIFICATION"
+    since = now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if len(runs) >= 100 and str(runs[-1].get("created_at", since)) >= since:
+        return "RECOVERY_HISTORY_INCOMPLETE"
+    attempts = [run for run in runs if run.get("event") == "workflow_dispatch"
+                and run.get("display_title") == "LIVE-same-day-rescue-" + day
+                and str(run.get("created_at", "")) >= since]
+    if len(attempts) >= 2:
+        return "RESCUE_RETRY_LIMIT"
+    if attempts:
+        ended = datetime.fromisoformat(attempts[0]["updated_at"].replace("Z", "+00:00"))
+        if now - ended < timedelta(minutes=15):
+            return "RESCUE_RETRY_COOLDOWN"
+    return "DISPATCH_SAME_DAY_RESCUE"
+
+
+def day_feed(origin: str, day: str) -> dict:
+    try:
+        return _get(f"{origin}/api/g11-feed?date={day}")
+    except HTTPError as exc:
+        if exc.code != 404:
+            raise
+        return {}
 
 
 def decide(runs: list[dict], jobs_for_run, now: datetime, day: str) -> str:
@@ -233,7 +272,21 @@ def main(now: datetime | None = None) -> None:
     if now.hour < 8 or now.hour > 22:
         print("G11_CRITICAL_WATCHDOG=OUTSIDE_WINDOW")
         return
-    feed = _get(f"{origin}/api/g11-feed?date={day}")
+    feed = day_feed(origin, day)
+    base = f"https://api.github.com/repos/{repository}/actions/workflows/g11-free-runner.yml"
+    if not feed or feed.get("status") == "WAITING_FOR_FIRST_VERIFIED_FEED":
+        url = base + "/runs?branch=main&per_page=100"
+        status = daytime_recovery_decision(feed, _get(url, token)["workflow_runs"], now)
+        if status == "DISPATCH_SAME_DAY_RESCUE":
+            status = daytime_recovery_decision(day_feed(origin, day), _get(url, token)["workflow_runs"], now)
+            if status == "DISPATCH_SAME_DAY_RESCUE":
+                _post(base + "/dispatches", token,
+                      {"ref": "main", "inputs": {"phase": "same-day-rescue", "operational_date": day}})
+        print("G11_DAYTIME_RECOVERY=" + status)
+        return
+    if feed.get("stage") == "NIGHT" and feed.get("operational_date_jst") == day:
+        print("G11_CRITICAL_WATCHDOG=NIGHT_ALREADY_PUBLISHED")
+        return
     if now >= _last_deadline(feed, day):
         print("G11_CRITICAL_WATCHDOG=NIGHT_HANDOFF")
         return
@@ -264,3 +317,4 @@ def main(now: datetime | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
