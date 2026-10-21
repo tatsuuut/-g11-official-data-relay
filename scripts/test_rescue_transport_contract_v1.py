@@ -174,6 +174,7 @@ class RescueTransportContractTests(unittest.TestCase):
             receipt=delivery.deliver(state,payload,delivery.ORIGIN)
             self.assertEqual(receipt['site_get_readback'],'PASS')
             append.assert_called_once_with(state/'rescue/store',json.loads(site.raw),origin=delivery.ORIGIN)
+            self.assertIn(str(Path('.g11-private').resolve()),rescue.sys.path)
             self.assert_preserved(saved)
         with scenario() as (state, payload, site, saved), patch.object(inputs,'deliver_optional',side_effect=RuntimeError('fixture')):
             self.assertEqual(delivery.deliver(state,payload,delivery.ORIGIN)['site_get_readback'],'PASS')

@@ -868,6 +868,8 @@ def deliver(state, feed_path, origin):
     # sidecar cannot regenerate a LOCK or cancel verified operational delivery.
     try:
         import selective_alert_input_v1
+        # Match the normal delivery reader's frozen private checkout import path.
+        sys.path.insert(0, str(Path(".g11-private").resolve()))
         selective_alert_input_v1.deliver_optional(state / "rescue/store", readback, origin=origin)
     except Exception as exc:
         print("G11_RESCUE_SELECTIVE_INPUT=HELD:" + type(exc).__name__)
