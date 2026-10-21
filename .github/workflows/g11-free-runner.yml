@@ -1761,6 +1761,22 @@ jobs:
         with:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
+      - name: Trigger independent Goripan prospective observation
+        if: steps.due.outputs.phase == 'predeadline' && steps.publish.outcome == 'success' && steps.delivery-state.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{github.token}}
+          G11_DAY: ${{steps.due.outputs.operational_date}}
+        run: |
+          set -euo pipefail
+          payload="$(jq -nc --arg day "${G11_DAY}" '{ref:"main",inputs:{mode:"wild4",operational_date:$day}}')"
+          curl --fail-with-body --silent --show-error --max-time 20 -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml/dispatches" \
+            -d "${payload}"
+          echo G11_GORIPAN_INDEPENDENT_DISPATCH=PASS
       - name: Verify source identity and projected app readback
         id: readback
         if: steps.publish.outcome=='success'&&steps.publish.outputs.immutable_night!='true'
