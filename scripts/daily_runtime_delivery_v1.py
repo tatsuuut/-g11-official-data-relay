@@ -1,6 +1,6 @@
 """Daily transport adapter: locked feeds in, verified Site receipts out.
 
-No private runner, acquisition, prediction or settlement is imported here.
+No acquisition, prediction or settlement is executed by delivery.
 NIGHT retries use exactly the immutable checkpoint bytes and transaction plan.
 """
 from __future__ import annotations
@@ -752,6 +752,9 @@ if __name__ == "__main__":
     else:
         deliver(args.state_root, args.feed, args.origin)
         if not n13_transport_only():
+            from official_result_delivery_v1 import optional_publish as publish_official_results
+            if publish_official_results(args.state_root, args.feed, args.origin)['status'] == 'HELD':
+                raise SystemExit('OFFICIAL_RESULT_PUBLICATION_INCOMPLETE')
             from deme_research_delivery_v1 import optional_publish
             optional_publish(args.state_root, args.feed, args.origin)
 
