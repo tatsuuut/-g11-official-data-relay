@@ -1,4 +1,4 @@
-name: runtime sync # L1
+name: runtime sync
 run-name: ${{github.event_name == 'workflow_dispatch' && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
@@ -864,8 +864,8 @@ jobs:
               "WILD_BET_ELIGIBLE_RACES": bet_status["BET_ELIGIBLE_RACES"],
           }, sort_keys=True))
           PY
-      - name: Checkout P3 research
-        if: steps.runtime.outcome=='success'&&steps.due.outputs.phase!='dry-run'&&hashFiles('.relay-output/feed.json')!=''&&env.G11_R13!='true'&&!steps.authority.outputs.d16
+      - name: P3 research source
+        if: steps.runtime.outcome=='success'&&steps.due.outputs.phase!='dry-run'&&hashFiles('.relay-output/feed.json')!=''&&env.G11_R13!='true'&&!contains('2026-10-16,2026-10-18',steps.due.outputs.operational_date)
         id: deme-source
         continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
