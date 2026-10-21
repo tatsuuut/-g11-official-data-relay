@@ -11,7 +11,7 @@ LATE_ROW=re.compile(
     r'(\d{1,3})\s+(\d{1,3})\s+(\d+\.\d{2})\s+L\s*\.\s+\.\s*\.\s*$'
 )
 
-def parse_night_results(text,target,official,parser):
+def parse_night_results(text,target,official,parser,*,require_full_races=False):
     normalized=official._normalize(text)
     extra={}
     venues=list(re.finditer(r'(?m)^(\d{2})KBGN\s*$',normalized))
@@ -31,7 +31,7 @@ def parse_night_results(text,target,official,parser):
         def match(self,line):return original.match(line) or LATE_ROW.fullmatch(line)
     try:
         official._K_INVALID_ENTRY_RE=InvalidEntries()
-        results=parser(normalized,target,require_full_races=False)
+        results=parser(normalized,target,require_full_races=require_full_races)
     finally:official._K_INVALID_ENTRY_RE=original
     seen=set();output=[]
     for race in results:
@@ -48,3 +48,35 @@ def parse_night_results(text,target,official,parser):
         output.append(replace(race,entries=tuple(entries)))
     if seen!=set(extra):raise ValueError('NIGHT_LATE_ROW_NOT_PARSED')
     return output
+
+
+def run_relay():
+    """Apply the same official-input decoder to normal MORNING/NIGHT reads.
+
+    Frozen source, model identity, prediction rules, clocks and LOCK gates are
+    unchanged. Restore both parser references even when the relay fails.
+    """
+    import runpy
+    import sys
+    from pathlib import Path
+    if sys.argv[1:2] != ['--relay']:
+        raise SystemExit('EXPECTED_RELAY_MODE')
+    sys.path.insert(0, str(Path.cwd()))
+    from g11.canonical import official_pipeline as official
+    parser = official.parse_result_text
+    def adapted(text, target_date, *, require_full_races=False):
+        return parse_night_results(text, target_date, official, parser,
+                                  require_full_races=require_full_races)
+    original_argv = sys.argv[:]
+    try:
+        official.parse_result_text = adapted
+        sys.argv = ['g11.relay.v1', *original_argv[2:]]
+        print('G11_OFFICIAL_L_ROW_ADAPTER_V1:ACTIVE', file=sys.stderr)
+        runpy.run_module('g11.relay.v1', run_name='__main__')
+    finally:
+        official.parse_result_text = parser
+        sys.argv = original_argv
+
+
+if __name__ == '__main__':
+    run_relay()

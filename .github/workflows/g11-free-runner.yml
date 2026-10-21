@@ -736,7 +736,7 @@ jobs:
             if [[ "${{steps.due.outputs.operational_date}}" =~ ^2026-10-(04|06|21)$ ]] || { [ "${{steps.authority.outputs.d16}}" = "true" ] && [ "${{steps.due.outputs.phase}}" = "night" ]; }; then
               python3 ../scripts/daily_predeadline_authority_recovery_v1.py night "${args[@]}" | tee "${runtime_stdout}"
             else
-              python3 -m g11.relay.v1 "${args[@]}" | tee "${runtime_stdout}"
+              python3 ../scripts/rescue_night_result_parser_v1.py --relay "${args[@]}" | tee "${runtime_stdout}"
             fi
           fi
           python3 - "${runtime_stdout}" ../.relay-output/result.json <<'PY'
