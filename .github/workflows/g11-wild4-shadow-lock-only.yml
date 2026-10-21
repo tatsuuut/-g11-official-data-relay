@@ -282,15 +282,52 @@ jobs:
               cert=json.loads(path.read_bytes()); unsigned=dict(cert)
               sha=unsigned.pop('authority_sha256',None)
               canonical=json.dumps(unsigned,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
-              rescue=(cert.get('operational_date_jst')==os.environ['OPERATIONAL_DATE'] and os.environ['OPERATIONAL_DATE'] in {'2026-10-06','2026-10-21'}
-                  and cert.get('schema')==('G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1' if os.environ['OPERATIONAL_DATE']=='2026-10-21' else 'G11_SAME_DAY_RESCUE_BOUNDARY_V1')
+              rescue=(cert.get('operational_date_jst')==os.environ['OPERATIONAL_DATE'] and (os.environ['OPERATIONAL_DATE'] in {'2026-10-06','2026-10-21'} or os.environ['OPERATIONAL_DATE'] >= '2026-10-22')
+                  and cert.get('schema')==('G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1' if os.environ['OPERATIONAL_DATE']>='2026-10-21' else 'G11_SAME_DAY_RESCUE_BOUNDARY_V1')
                   and cert.get('canonical_morning_promoted') is False
                   and cert.get('research_eligible') is False
                   and cert.get('same_day_results_used') is False
                   and sha==hashlib.sha256(canonical).hexdigest()
                   and not pathlib.Path('.relay-state/store/snapshots/morning/official-day-input.json').exists()
-                  and (os.environ['OPERATIONAL_DATE']=='2026-10-21' or not pathlib.Path('.relay-state/daily-runtime/2026-10-06/authority.json').exists()))
+                  and (os.environ['OPERATIONAL_DATE']>='2026-10-21' or not pathlib.Path('.relay-state/daily-runtime/2026-10-06/authority.json').exists()))
               if not rescue: raise SystemExit('WILD4_RESCUE_BOUNDARY_INVALID')
+          AUTONOMOUS_FROM = "2026-10-22"
+          from datetime import datetime
+          def is_future_rescue_day(day):
+              try:
+                  return isinstance(day, str) and datetime.fromisoformat(day).date().isoformat() == day and day >= AUTONOMOUS_FROM
+              except ValueError:
+                  return False
+          def require(ok, reason):
+              if not ok:
+                  raise RuntimeError("DELAYED_LIVE:" + reason)
+          def canonical(value):
+              return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                separators=(",", ":"), allow_nan=False).encode()
+          def sha(data):
+              return hashlib.sha256(data).hexdigest()
+          def validate_future_boundary(cert, parent, day):
+              """Future automatic continuation cannot change the day's frozen runtime."""
+              require(is_future_rescue_day(day), "FUTURE_DAY")
+              require(parent.get("schema") == "G11_DAILY_RUNTIME_AUTHORITY_V1"
+                      and cert.get("runtime_source_sha") == parent.get("runtime_source_sha")
+                      and cert.get("source_files") == parent.get("source_files")
+                      and cert.get("source_delta") == [], "FUTURE_PINNED_SOURCE")
+              require(bool(cert.get("model_files")) and cert["model_files"] == parent.get("model_files")
+                      and cert.get("model_set_sha256") == sha(canonical(cert["model_files"])), "FUTURE_PINNED_MODELS")
+              require(cert.get("safety_margin_seconds") == 300
+                      and all(cert.get(k) == parent.get(k) and isinstance(cert.get(k), dict)
+                              and cert[k].get("source_sha") == cert["runtime_source_sha"]
+                              for k in ("p3", "abeken_v53", "wild", "true_ai")), "FUTURE_RUNTIME_BINDINGS")
+          if os.environ['OPERATIONAL_DATE'] >= AUTONOMOUS_FROM and rescue:
+              parent_path=pathlib.Path('.relay-state/daily-runtime')/os.environ['OPERATIONAL_DATE']/'authority.json'
+              parent=json.loads(parent_path.read_bytes()); unsigned_parent=dict(parent)
+              parent_sha=unsigned_parent.pop('authority_sha256',None)
+              require(parent_sha==sha(canonical(unsigned_parent))==cert.get('parent_authority_sha256')
+                  and parent.get('operational_date_jst')==os.environ['OPERATIONAL_DATE'] and parent.get('immutable') is True
+                  and cert.get('immutable') is True
+                  and not any(pathlib.Path('.relay-state/store/snapshots/morning').glob('*.json')), 'FUTURE_PARENT_AUTHORITY')
+              validate_future_boundary(cert,parent,os.environ['OPERATIONAL_DATE'])
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('canonical_ready='+str(ready).lower()+'\n')
               out.write('runtime_ready='+str(ready or rescue).lower()+'\n')
@@ -1065,7 +1102,7 @@ jobs:
           import hashlib,json,os,pathlib
           path=pathlib.Path(os.environ["RUNNER_TEMP"])/"goripan-public-projection.json"
           boundary=json.loads(pathlib.Path("../.relay-state/rescue/boundary.json").read_bytes())
-          if boundary.get("schema")!="G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1" or boundary.get("operational_date_jst")!="2026-10-21" or boundary.get("canonical_morning_promoted") is not False or boundary.get("research_eligible") is not False or boundary.get("same_day_results_used") is not False:
+          if boundary.get("schema")!="G11_DELAYED_MORNING_RECOVERY_BOUNDARY_V1" or (boundary.get("operational_date_jst")!=os.environ["OPERATIONAL_DATE"] or not (os.environ["OPERATIONAL_DATE"]=="2026-10-21" or os.environ["OPERATIONAL_DATE"]>="2026-10-22")) or boundary.get("canonical_morning_promoted") is not False or boundary.get("research_eligible") is not False or boundary.get("same_day_results_used") is not False:
               raise SystemExit("WILD4_RESCUE_PROJECTION_BOUNDARY")
           cert=dict(boundary);sha=cert.pop("authority_sha256",None)
           if sha!=hashlib.sha256(json.dumps(cert,ensure_ascii=False,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest():
