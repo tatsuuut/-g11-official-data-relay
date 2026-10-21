@@ -1,4 +1,3 @@
-# Resume the October 21 per-race rescue continuation (prospective odds isolated).
 name: runtime sync
 run-name: ${{github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
@@ -265,7 +264,7 @@ jobs:
       - name: Select verified morning recovery
         id: due
         run: python3 scripts/daily_runtime_bootstrap_v1.py route --state-root .relay-state --operational-date "${{steps.scheduled.outputs.operational_date}}" --phase "${{steps.scheduled.outputs.phase}}"
-      - name: Restore the immutable daily source before any private imports
+      - name: Restore frozen daily source
         id: authority
         run: |
           python3 scripts/daily_runtime_bootstrap_v1.py prepare \
@@ -507,7 +506,7 @@ jobs:
               if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha:
                   raise SystemExit(f"{wild_id}_MATERIALIZED_MODEL_HASH")
           PY
-      - name: Freeze and read back daily runtime authority before prediction
+      - name: Freeze daily authority
         if: steps.due.outputs.phase!='predeadline'&&steps.authority.outputs.rescue_bootstrap!='true'
         id: freeze
         run: |
@@ -1755,28 +1754,13 @@ jobs:
           mv .relay-cache/state-delivery.tgz.gpg.tmp .relay-cache/state-delivery.tgz.gpg
           cp .relay-cache/state-delivery.tgz.gpg .relay-cache/state.tgz.gpg
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
+          [ '${{steps.due.outputs.phase}}' != predeadline ] || GH_TOKEN="${{github.token}}" gh workflow run g11-morning-odds-footprint-4bet-shadow-v1.yml --ref main -f mode=wild4 -f operational_date='${{steps.due.outputs.operational_date}}' || echo WILD4_DISPATCH_RETRY
       - name: Save encrypted delivery state
         if: always()&&steps.delivery-state.outputs.ready=='true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
-      - name: Trigger independent Goripan prospective observation
-        if: steps.due.outputs.phase == 'predeadline' && steps.publish.outcome == 'success' && steps.delivery-state.outputs.ready == 'true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{github.token}}
-          G11_DAY: ${{steps.due.outputs.operational_date}}
-        run: |
-          set -euo pipefail
-          payload="$(jq -nc --arg day "${G11_DAY}" '{ref:"main",inputs:{mode:"wild4",operational_date:$day}}')"
-          curl --fail-with-body --silent --show-error --max-time 20 -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml/dispatches" \
-            -d "${payload}"
-          echo G11_GORIPAN_INDEPENDENT_DISPATCH=PASS
       - name: Verify source identity and projected app readback
         id: readback
         if: steps.publish.outcome=='success'&&steps.publish.outputs.immutable_night!='true'
