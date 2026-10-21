@@ -49,6 +49,45 @@ class EvidenceTest(unittest.TestCase):
         with patch.object(m.subprocess,'run',side_effect=AssertionError('network forbidden')):
             with self.assertRaises(ValueError):m.post_batch(m.ORIGIN,'mock',{'date':'2026-10-13','records':['x'*m.WIRE_LIMIT]})
 
+    def test_rescue_lineage_uses_same_saved_packet_and_official_byte_verifier(self):
+        row={**self.row,'classification':'LINEAGE'}
+        source={'schema':'G11_WILD4_PUBLIC_PROJECTION_V1','date':'2026-10-22',
+                'rescue_boundary_sha256':'d'*64,'races':[row]}
+        before=copy.deepcopy(source);calls=[]
+        def reader(store,key):
+            calls.append((store,key));return self.saved,self.receipt,self.odds
+        payload,held=m.collect(Path('/saved/rescue/store'),source,odds_day=self.day,reader=reader)
+        self.assertEqual(len(payload['records']),1);self.assertEqual(held,[])
+        self.assertEqual(calls,[(Path('/saved/rescue/store'),row['race_key'])]);self.assertEqual(source,before)
+        self.assertEqual(payload['records'][0]['packet_sha256'],row['upstream_packet_sha256'])
+        for edit in [lambda s:s.pop('rescue_boundary_sha256'),lambda s:s.update(date='2026-10-20')]:
+            bad=copy.deepcopy(source);edit(bad)
+            self.assertEqual(m.collect(Path('/unused'),bad,odds_day=self.day,reader=reader)[0]['records'],[])
+        broken=copy.deepcopy(self.packet);broken['ODDS_120']['1-2-3']=999
+        day={'RESULT_DATA_PRESENT':False,'RECORDS':[broken]};day['CONTENT_SHA256']=m.sha(day)
+        payload,held=m.collect(Path('/unused'),source,odds_day=day,reader=reader)
+        self.assertEqual(payload['records'],[]);self.assertEqual(len(held),1)
+
+    def test_rescue_abeken_requires_saved_live_and_exclusion_boundary_without_formal_promotion(self):
+        source={'operational_date_jst':'2026-10-22','SNAPSHOT_CLASS':'SAME_DAY_RESCUE_BOUNDARY',
+                'ACCOUNTING_CLASS':'TODAY_RESCUE','CANONICAL_MORNING_PROMOTED':False,'RESEARCH_ELIGIBLE_AS_MORNING':False,
+                'same_day_rescue':{'immutable':True,'operational_date_jst':'2026-10-22','canonical_morning_promoted':False,
+                                  'research_eligible':False,'same_day_results_used':False,'authority_sha256':'d'*64},
+                'races':[{'key':self.row['race_key'],'deadline_jst':self.row['deadline_at'],'formal_status':'EXCLUDED',
+                          'research_eligible':False,'same_day_rescue_lock':{'v4_snapshot_sha256':'e'*64},
+                          'abeken_shadow':{'immutable_prediction_snapshots':True,'v53':{'formal_use':False,'legacy_45_fallback':False,
+                          'live':{'practical_bets':self.row['bets'],'buy_count':2,'snapshot_sha256':self.row['lock_sha256'],
+                                  'locked_at_jst':self.row['locked_at']}}}}]}
+        reader=lambda *_:(self.saved,self.receipt,self.odds)
+        before=copy.deepcopy(source);payload,held=m.collect(Path('/saved/rescue/store'),source,reader=reader)
+        self.assertEqual(len(payload['records']),1);self.assertEqual(held,[]);self.assertEqual(source,before)
+        for edit in [lambda s:s['same_day_rescue'].update(same_day_results_used=True),
+                     lambda s:s['races'][0].pop('same_day_rescue_lock'),
+                     lambda s:s['races'][0]['abeken_shadow']['v53'].pop('live'),
+                     lambda s:s['races'][0].update(research_eligible=True)]:
+            bad=copy.deepcopy(source);edit(bad)
+            self.assertEqual(m.collect(Path('/unused'),bad,reader=reader)[0]['records'],[])
+
     def test_relative_saved_store_and_symlink_boundary(self):
         # Real files and the existing verifier's canonical-path requirement.
         class Store:
@@ -79,3 +118,4 @@ class EvidenceTest(unittest.TestCase):
                     m.read_official(link,self.row['race_key'])
 
 if __name__=='__main__':unittest.main()
+

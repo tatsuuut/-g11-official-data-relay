@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -20,6 +21,23 @@ import urllib.request
 SCHEMA = "G11_DUAL_ALERT_ODDS_TRANSPORT_V1"
 ORIGIN = "https://g11-race-lab.higatatsunori2.chatgpt.site"
 WIRE_LIMIT = 240_000
+RESCUE_FROM_DAY = "2026-10-21"
+
+def rescue_source(source, day, is_gori):
+    """Input transport scope only; the Site revalidates its accepted boundary."""
+    if day < RESCUE_FROM_DAY:
+        return False
+    if is_gori:
+        return bool(re.fullmatch(r"[a-f0-9]{64}", str(source.get("rescue_boundary_sha256", ""))))
+    boundary = source.get("same_day_rescue") or {}
+    return (source.get("SNAPSHOT_CLASS") == "SAME_DAY_RESCUE_BOUNDARY" and
+            source.get("ACCOUNTING_CLASS") == "TODAY_RESCUE" and
+            source.get("CANONICAL_MORNING_PROMOTED") is False and
+            source.get("RESEARCH_ELIGIBLE_AS_MORNING") is False and
+            boundary.get("immutable") is True and boundary.get("operational_date_jst") == day and
+            boundary.get("canonical_morning_promoted") is False and boundary.get("research_eligible") is False and
+            boundary.get("same_day_results_used") is False and
+            bool(re.fullmatch(r"[a-f0-9]{64}", str(boundary.get("authority_sha256", "")))))
 
 def require(ok, code):
     if not ok:
@@ -68,6 +86,7 @@ def make_proof(engine, row, saved, receipt, odds, odds_day=None, packet=None):
 def collect(store_path, source, *, odds_day=None, reader=read_official):
     is_gori = source.get("schema") == "G11_WILD4_PUBLIC_PROJECTION_V1"
     day = source["date"] if is_gori else source["operational_date_jst"]
+    rescue = rescue_source(source, day, is_gori)
     if is_gori:
         require(odds_day and odds_day.get("RESULT_DATA_PRESENT") is False and
                 odds_day["CONTENT_SHA256"] == sha({k:v for k,v in odds_day.items() if k != "CONTENT_SHA256"}), "GORE_ODDS_DAY_HASH")
@@ -76,14 +95,16 @@ def collect(store_path, source, *, odds_day=None, reader=read_official):
     for race in source["races"]:
         key = race["race_key"] if is_gori else race["key"]
         if is_gori:
-            if race.get("classification") != "FORMAL":
+            if race.get("classification") != ("LINEAGE" if rescue else "FORMAL"):
                 continue
             row = race
         else:
             ab = race.get("abeken_shadow", {}) or {}
             v = ab.get("v53", {}) or {}
             live = v.get("live")
-            if not (ab.get("immutable_prediction_snapshots") is True and v.get("formal_use") is True and
+            eligible = (v.get("formal_use") is False and race.get("formal_status") == "EXCLUDED" and
+                        race.get("research_eligible") is False and bool(race.get("same_day_rescue_lock"))) if rescue else v.get("formal_use") is True
+            if not (ab.get("immutable_prediction_snapshots") is True and eligible and
                     v.get("legacy_45_fallback") is False and isinstance(live, dict) and live.get("buy_count", 0) > 0):
                 continue
             row = {"race_key": key, "bets": live["practical_bets"], "bet_count": live["buy_count"],
@@ -146,3 +167,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
