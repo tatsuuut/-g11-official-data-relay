@@ -10,6 +10,7 @@ import json
 import re
 import sys
 import textwrap
+import types
 
 
 def isolated_results(text, target, official, parser):
@@ -173,16 +174,36 @@ def valid_quarantine(payload):
 
 
 def replace_pinned(function, digest, substitutions, additions):
-    source=inspect.getsource(function)
+    original=inspect.unwrap(function)
+    source=inspect.getsource(original)
     if hashlib.sha256(source.encode()).hexdigest()!=digest:
         return function
     for before,after in substitutions:
         if source.count(before)!=1:
             raise ValueError('MORNING_ISOLATION_SOURCE_CONTRACT_CHANGED')
         source=source.replace(before,after,1)
-    namespace=dict(function.__globals__);namespace.update(additions)
-    exec(compile(textwrap.dedent(source),function.__code__.co_filename,'exec'),namespace)
-    return namespace[function.__name__]
+    namespace=dict(original.__globals__);namespace.update(additions)
+    exec(compile(textwrap.dedent(source),original.__code__.co_filename,'exec'),namespace)
+    replacement=namespace[original.__name__]
+    def rewrap(wrapper):
+        if wrapper is original:return replacement
+        inner=wrapper.__wrapped__
+        patched_inner=rewrap(inner)
+        cells=wrapper.__closure__ or ()
+        if sum(cell.cell_contents is inner for cell in cells)!=1:
+            raise ValueError('MORNING_ISOLATION_WRAPPER_CONTRACT_CHANGED')
+        def cell_for(value):
+            return (lambda:value).__closure__[0]
+        # Keep the existing authority/LOCK boundary's exact code, globals and
+        # every other closure cell. Only its wrapped input decoder changes.
+        copy=types.FunctionType(wrapper.__code__,wrapper.__globals__,wrapper.__name__,
+            wrapper.__defaults__,tuple(cell_for(patched_inner) if cell.cell_contents is inner else cell for cell in cells))
+        copy.__dict__.update(wrapper.__dict__)
+        copy.__wrapped__=patched_inner
+        copy.__kwdefaults__=wrapper.__kwdefaults__
+        copy.__annotations__=wrapper.__annotations__
+        return copy
+    return rewrap(function)
 
 
 def adapted_morning(official, parser):

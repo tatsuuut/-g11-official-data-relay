@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from g11.canonical import official_pipeline as official
 from g11.canonical import test_official_pipeline as fixtures
@@ -138,6 +139,21 @@ class MorningIsolationTests(unittest.TestCase):
             with official_input_compatibility():raise RuntimeError('injected')
         self.assertEqual(originals,(official.parse_result_text,official.CanonicalRunner.run_morning,
             official.FORMAL_GATE.build_canonical_official_morning_input,official._night_sg_race_keys_from_saved_b))
+
+    def test_daily_authority_boundary_still_runs_before_any_acquisition(self):
+        original=official.CanonicalRunner.run_morning
+        with official_input_compatibility():
+            current=official.CanonicalRunner.run_morning
+            self.assertIs(current.__code__,original.__code__)
+            self.assertTrue(current._g11_daily_authority_boundary)
+            store=official.OfficialArtifactStore.initialize(Path(self.tmp.name)/'guard',DAY.isoformat(),None,fixtures.at(0).isoformat())
+            client=SavedSourceClient(store)
+            runner=official.CanonicalRunner(store,client=client,extractor=fixtures.IdentityArchiveExtractor())
+            with patch('g11.relay.daily_runtime_authority_v1.verify_runtime',side_effect=RuntimeError('authority-check')) as guard:
+                with self.assertRaisesRegex(RuntimeError,'authority-check'):
+                    runner.run_morning(date(2026,10,22),'unused','unused')
+                guard.assert_called_once()
+            self.assertEqual(client.reads,[])
 
 
 if __name__=='__main__':unittest.main()
