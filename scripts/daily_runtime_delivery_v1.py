@@ -751,6 +751,9 @@ if __name__ == "__main__":
         emit_saved_n13(args.state_root, args.feed)
     else:
         deliver(args.state_root, args.feed, args.origin)
+        if not n13_transport_only():
+            from deme_research_delivery_v1 import optional_publish
+            optional_publish(args.state_root, args.feed, args.origin)
 
 
 

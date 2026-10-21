@@ -865,13 +865,13 @@ jobs:
           }, sort_keys=True))
           PY
       - name: Checkout P3 research
-        if: steps.runtime.outcome=='success'&&steps.due.outputs.phase!='dry-run'&&steps.due.outputs.phase!='same-day-rescue'&&steps.critical.outputs.rescue!='true'&&hashFiles('.relay-output/feed.json')!=''&&env.G11_R13!='true'&&!steps.authority.outputs.d16
+        if: steps.runtime.outcome=='success'&&steps.due.outputs.phase!='dry-run'&&hashFiles('.relay-output/feed.json')!=''&&env.G11_R13!='true'&&!steps.authority.outputs.d16
         id: deme-source
         continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{env.G11_PRIVATE_REPOSITORY}}
-          ref: df0a4d5b375dcdd0f2dff1f6ed9757087b1aafda
+          ref: 06fe8f9492bf3a900a977f9ac45b252869e0eb2c
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .g11-deme-research
           persist-credentials: false
@@ -886,7 +886,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f .relay-output/deme-discovery-public.json
-          timeout 120 python3 .g11-deme-research/g11/canonical/deme_discovery_v4.py \
+          timeout 120 python3 .g11-deme-research/g11/canonical/deme_discovery_v5.py \
             --store .relay-state/store --feed .relay-output/feed.json \
             --projection-output .relay-output/deme-discovery-public.json
       - name: Encrypt changed state before persistence
