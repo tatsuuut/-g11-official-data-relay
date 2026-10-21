@@ -15,6 +15,8 @@ on:
       - ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml"
       - "scripts/daily_predeadline_authority_recovery_v1.py"
       - "scripts/test_daily_predeadline_authority_recovery_v1.py"
+      - "scripts/predeadline_watchdog_v1.py"
+      - "scripts/test_predeadline_watchdog_v1.py"
   push:
     branches:
       - main
@@ -29,6 +31,8 @@ on:
       - ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml"
       - "scripts/daily_predeadline_authority_recovery_v1.py"
       - "scripts/test_daily_predeadline_authority_recovery_v1.py"
+      - "scripts/predeadline_watchdog_v1.py"
+      - "scripts/test_predeadline_watchdog_v1.py"
   workflow_dispatch:
 
 permissions:
@@ -99,6 +103,7 @@ jobs:
           PYTHONPATH: .g11-private
         run: |
           python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py -q
+          python3 -m unittest discover -s scripts -p test_predeadline_watchdog_v1.py -q
           python3 -m unittest discover -s scripts -p test_daily_runtime_delivery_v1.py -q
 
       - name: Checkout pinned rescue settlement source
@@ -116,6 +121,29 @@ jobs:
           python3 -m unittest
           g11.wild_pack.v1.test_wild4_rescue_settlement_v1
           g11.wild_pack.v1.test_wild4_official_settlement_v1
+
+      - name: Checkout pinned isolated WILD4 guard
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 30d0f8f10161a054b0a7249822175fc854e6b335
+          path: .g11-isolated-guard
+          persist-credentials: false
+
+      - name: Verify isolated future boundary uses the tested contract
+        run: |
+          python3 - <<'PYGUARD'
+          import ast,pathlib,sys,unittest
+          sys.path.insert(0,'scripts')
+          import test_daily_predeadline_authority_recovery_v1 as t
+          lines=pathlib.Path('.g11-isolated-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text().splitlines()
+          start=next(i for i,s in enumerate(lines) if s.strip().startswith('def validate_future_boundary('))
+          end=next(i for i in range(start+1,len(lines)) if lines[i].startswith('          if '))
+          code='\n'.join(s[10:] for s in lines[start:end])
+          scope=dict(vars(t.live));exec(compile(ast.parse(code),'<pinned-reusable-guard>','exec'),scope)
+          with t.patch.object(t.live,'validate_future_boundary',scope['validate_future_boundary']):
+              result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(t.FuturePinnedRescueTests))
+          if not result.wasSuccessful(): raise SystemExit(1)
+          PYGUARD
 
       - name: Gate summary
         run: |

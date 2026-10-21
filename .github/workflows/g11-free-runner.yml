@@ -1,5 +1,5 @@
 name: runtime sync
-run-name: ${{github.event_name == 'workflow_dispatch' && (inputs.phase == 'predeadline' || inputs.phase == 'night' || inputs.phase == 'night-transport') && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
+run-name: ${{github.event_name == 'workflow_dispatch' && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
     branches:
@@ -2145,7 +2145,7 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/g11-free-runner.yml/runs" -q '[.workflow_runs[]|select(.status|test("^(queued|in_progress)$"))|select(.event!="push" or (.head_commit.message//""|contains("[daily-runtime-freeze]")|not))]|length')" -le 1 || exit 0
           gh workflow run g11-free-runner.yml -f phase=predeadline -f operational_date="$d"
       - name: WILD4 shadow
-        if: (!steps.authority.outputs.d16)&&steps.runtime.outcome=='success'&&(steps.due.outputs.phase=='predeadline'||(steps.due.outputs.phase=='night'&&steps.night-ready.outputs.allowed=='true'&&steps.publication-state-verified.outputs.ready=='true'&&(steps.readback.outcome=='success'||steps.immutable-readback.outcome=='success')))
+        if: steps.runtime.outcome=='success'&&((!steps.authority.outputs.d16&&steps.due.outputs.phase=='predeadline')||(steps.due.outputs.phase=='night'&&steps.night-ready.outputs.allowed=='true'&&steps.publication-state-verified.outputs.ready=='true'&&(steps.readback.outcome=='success'||steps.immutable-readback.outcome=='success')))
         continue-on-error: true
         env:
           GH_TOKEN: ${{github.token}}
@@ -2233,3 +2233,4 @@ jobs:
               raise SystemExit('HISTORICAL_PRE_RACE_OR_SCHEMA_MUTATION')
           print('HISTORICAL_RESULT_OVERLAY_READBACK=PASS:2026-09-28:144')
           CHECK
+

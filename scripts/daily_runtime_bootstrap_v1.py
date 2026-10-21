@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 
 EFFECTIVE_FROM = "2026-10-04"
 MODULE_PATH = "g11/relay/daily_runtime_authority_v1.py"
+from daily_predeadline_authority_recovery_v1 import is_delayed_day
 
 
 def canonical(value):
@@ -116,7 +117,7 @@ def prepare(state: Path, day: str, phase: str, source: Path) -> dict:
         return {"checkout_candidate":"true", "frozen":"true", "source_sha":source_sha}
     if day < EFFECTIVE_FROM or phase == "dry-run":
         return {"checkout_candidate": "true", "frozen": "false"}
-    if phase in {"predeadline", "night"} and day in {"2026-10-16", "2026-10-18", "2026-10-21"} and (state / "rescue/feed.json").is_file():
+    if phase in {"predeadline", "night"} and is_delayed_day(day) and (state / "rescue/feed.json").is_file():
         from daily_predeadline_authority_recovery_v1 import certificate
         cert = certificate(state, day, allow_night_rollover=(phase == "night"))
         return {"checkout_candidate": "true", "frozen": "true", "rescue_bootstrap": "true",
@@ -155,8 +156,8 @@ def recovery_route(state, day, phase, now=None):
     if (state / "rescue/feed.json").is_file():
         # A delayed MORNING cron must continue the saved rescue, not enter
         # the closed MORNING window and strand the predeadline self-chain.
-        from daily_predeadline_authority_recovery_v1 import DELAYED_DAYS, certificate
-        if day in DELAYED_DAYS and phase in {"morning", "auto"}:
+        from daily_predeadline_authority_recovery_v1 import certificate
+        if is_delayed_day(day) and phase in {"morning", "auto"}:
             certificate(state, day, now=now)
             return {**result, "phase":"predeadline",
                     "recovery_route":"SAVED_RESCUE_PREDEADLINE_CONTINUATION"}
@@ -251,4 +252,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
