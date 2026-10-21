@@ -431,18 +431,20 @@ def main():
     sys.path.insert(0, str(Path.cwd()))
     from g11.relay import daily_runtime_authority_v1 as implementation
     apply(implementation, day)
-    if mode == "critical":
-        from g11.relay import predeadline_critical_v1
-        predeadline_critical_v1.main()
-    elif mode == "predeadline":
-        guard_optional_mashiro_shadow()
-        from g11.relay import predeadline_nowait_v1
-        return predeadline_nowait_v1.main(sys.argv[1:])
-    elif mode == "night":
-        from g11.relay import v1
-        return v1.main(sys.argv[1:])
-    else:
-        raise RuntimeError("PREDEADLINE_RECOVERY_MODE")
+    from rescue_night_result_parser_v1 import official_input_compatibility
+    with official_input_compatibility():
+        if mode == "critical":
+            from g11.relay import predeadline_critical_v1
+            predeadline_critical_v1.main()
+        elif mode == "predeadline":
+            guard_optional_mashiro_shadow()
+            from g11.relay import predeadline_nowait_v1
+            return predeadline_nowait_v1.main(sys.argv[1:])
+        elif mode == "night":
+            from g11.relay import v1
+            return v1.main(sys.argv[1:])
+        else:
+            raise RuntimeError("PREDEADLINE_RECOVERY_MODE")
 
 
 """Continue accepted delayed recovery through the unchanged LIVE engines.
@@ -1199,6 +1201,7 @@ def deliver_delayed_night(state,feed_path,origin):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 
