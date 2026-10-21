@@ -31,6 +31,7 @@ ALLOWED_FILES = {
     "scripts/selective_alert_input_v1.py",
     "scripts/test_selective_alert_input_v1.py",
     "scripts/test_daily_runtime_delivery_v1.py",
+    "scripts/test_rescue_transport_contract_v1.py",
     "scripts/test_daily_runtime_checkpoint_persistence_v1.py",
     "scripts/daily_predeadline_authority_recovery_v1.py",
     "scripts/test_daily_predeadline_authority_recovery_v1.py",
@@ -967,4 +968,5 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
+
 
