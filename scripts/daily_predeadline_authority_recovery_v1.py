@@ -1095,7 +1095,9 @@ def run_delayed_night(state, day, output, origin):
     expected={r['operational_date'].replace('-','')+f"-{r['venue_code']}-{r['race_no']:02d}" for r in morning['RACES']}
     require(expected=={r['key'] for r in accepted['races']},'NIGHT_INPUT_SCOPE')
     def parse(raw):
-        results=parse_result_text(decode_cp932(runner.extractor.extract_one(raw,runner._archive_member(url))),target,require_full_races=False)
+        from g11.canonical import official_pipeline
+        from rescue_night_result_parser_v1 import parse_night_results
+        results=parse_night_results(decode_cp932(runner.extractor.extract_one(raw,runner._archive_member(url))),target,official_pipeline,parse_result_text)
         require(len(results)==len(expected) and {r.race_key for r in results}==expected,'NIGHT_OFFICIAL_INCOMPLETE')
         return results
     receipt,results=runner.client.fetch_validated_once(f'result-k-{target:%Y%m%d}',url,parse)

@@ -1,4 +1,5 @@
 name: runtime sync
+# NIGHT result adapter accepts verified L rows with a missing course field.
 run-name: ${{github.event_name == 'workflow_dispatch' && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
