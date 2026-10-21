@@ -70,6 +70,11 @@ jobs:
       - name: Audit three runtime phases
         run: python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-private
 
+      - name: Verify one-race input isolation through saved morning admission
+        env:
+          PYTHONPATH: .g11-private:scripts
+        run: python3 -m unittest discover -s scripts -p test_morning_race_isolation_v1.py -v
+
       - name: Run bounded private regression
         working-directory: .g11-private
         run: |
@@ -138,6 +143,7 @@ jobs:
           echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
           echo 'G11_LIVE_ACQUISITION_PUBLICATION_UI=NOT_TESTED_BY_THIS_GATE'
           echo 'MERGE_POLICY=DO_NOT_MERGE_RUNTIME_CHANGES_UNLESS_THIS_GATE_PASSES'
+
 
 
 

@@ -51,13 +51,10 @@ def parse_night_results(text,target,official,parser,*,require_full_races=False):
 
 
 def morning_metadata_bridge(gate):
-    """Accept the producer's empty quarantine metadata, preserving all checks.
-
-    Nonempty quarantine remains unsupported by this frozen bridge. No fields
-    or hashes in the verified snapshot are removed or rewritten.
-    """
+    """Admit validated isolation metadata without changing snapshot bytes."""
     import hashlib
     import inspect
+    from morning_race_isolation_v1 import valid_quarantine
     original = gate.build_canonical_official_morning_input
     source = inspect.getsource(original)
     if hashlib.sha256(source.encode()).hexdigest() != '569abba9258f903f432be33b3e7905351e84b27f900251e9e5ecf61d3aaa59e1':
@@ -65,10 +62,10 @@ def morning_metadata_bridge(gate):
     old = 'and set(payload)\n'
     if source.count(old) != 1:
         raise ValueError('MORNING_METADATA_BRIDGE_CONTRACT_CHANGED')
-    source = source.replace(old, 'and type(payload.get("QUARANTINED_RACES", [])) is list\n'
-        '        and not payload.get("QUARANTINED_RACES", [])\n'
-        '        and (set(payload) - {"QUARANTINED_RACES"})\n', 1)
+    source = source.replace(old, 'and _valid_quarantine(payload)\n'
+        '        and (set(payload) - {"QUARANTINED_RACES", "RESULT_QUARANTINE"})\n', 1)
     namespace = dict(original.__globals__)
+    namespace['_valid_quarantine'] = valid_quarantine
     exec(compile(source, original.__code__.co_filename, 'exec'), namespace)
     return namespace[original.__name__]
 
@@ -77,18 +74,25 @@ from contextlib import contextmanager
 @contextmanager
 def official_input_compatibility():
     from g11.canonical import official_pipeline as official
+    from morning_race_isolation_v1 import adapted_morning, adapted_night_binding
     parser=official.parse_result_text
     gate=official.FORMAL_GATE
     bridge=gate.build_canonical_official_morning_input
+    morning=official.CanonicalRunner.run_morning
+    night_binding=official._night_sg_race_keys_from_saved_b
     def adapted(text,target_date,*,require_full_races=False):
         return parse_night_results(text,target_date,official,parser,require_full_races=require_full_races)
     try:
         official.parse_result_text=adapted
         gate.build_canonical_official_morning_input=morning_metadata_bridge(gate)
+        official.CanonicalRunner.run_morning=adapted_morning(official,parser)
+        official._night_sg_race_keys_from_saved_b=adapted_night_binding(official,parser)
         yield
     finally:
         official.parse_result_text=parser
         gate.build_canonical_official_morning_input=bridge
+        official.CanonicalRunner.run_morning=morning
+        official._night_sg_race_keys_from_saved_b=night_binding
 
 
 def run_relay():
@@ -107,7 +111,7 @@ def run_relay():
     try:
         sys.argv = ['g11.relay.v1', *original_argv[2:]]
         print('G11_OFFICIAL_L_ROW_ADAPTER_V1:ACTIVE', file=sys.stderr)
-        print('G11_MORNING_EMPTY_QUARANTINE_BRIDGE_V1:ACTIVE', file=sys.stderr)
+        print('G11_MORNING_RACE_ISOLATION_V1:ACTIVE', file=sys.stderr)
         with official_input_compatibility():
             runpy.run_module('g11.relay.v1', run_name='__main__')
     finally:
