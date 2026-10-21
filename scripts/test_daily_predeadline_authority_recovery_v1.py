@@ -309,6 +309,50 @@ class Boundaries(unittest.TestCase):
 if __name__ == '__main__': unittest.main()
 
 class Oct18ContinuationScopeTests(unittest.TestCase):
+    def test_one_invalid_night_lock_keeps_other_engine_and_race(self):
+        from types import SimpleNamespace
+        day='2026-10-21'
+        feed={'races':[]}; results=[]
+        for number in (1,2):
+            key=f'20261021-04-{number:02d}'
+            feed['races'].append({'key':key,'deadline_jst':day+'T12:00:00+09:00',
+                'practical_bets':['1-2-3'],
+                'same_day_rescue_lock':{'p3_locked_at_jst':day+('T12:01:00+09:00' if number==1 else 'T08:00:00+09:00'),
+                    'v4_locked_at_jst':day+'T08:00:00+09:00'},
+                'abeken_shadow':{'v53':{'morning':{'practical_bets':['1-2-3']}}}})
+            results.append(SimpleNamespace(race_key=key,trifecta_combination='1-2-3',trifecta_payout=1230,
+                refund_boats=[],trifecta_settlements=[SimpleNamespace(combination='1-2-3',payout=1230)]))
+        before=deepcopy(feed); scores=live.night_scores(feed,results)
+        self.assertEqual(scores['20261021-04-01']['engines']['p3_rescue']['status'],'HELD_INVALID_FIXED_PREDICTION')
+        self.assertEqual(scores['20261021-04-01']['engines']['abeken_rescue']['status'],'SETTLED')
+        self.assertEqual(scores['20261021-04-02']['engines']['p3_rescue']['virtual_profit'],1130)
+        self.assertEqual(scores['20261021-04-02']['engines']['goripan']['status'],'SEPARATE_SAVED_LOCK_LEDGER_NO_BACKFILL')
+        self.assertEqual(feed,before)
+
+    def test_saved_live_read_failure_is_local_and_never_mutates_public_feed(self):
+        from types import SimpleNamespace
+        day='2026-10-21';keys=['20261021-04-01','20261021-04-02']
+        feed={'races':[{'key':key,'deadline_jst':day+'T12:00:00+09:00'} for key in keys]}
+        before=deepcopy(feed)
+        def loader(engine):
+            def load(key):
+                if engine=='p3' and key==keys[0]:raise ValueError('BAD_SAVED_LOCK')
+                return {'snapshot_sha256':key+engine,'captured_at_jst':day+'T11:50:00+09:00','practical_bets':['1-2-3']},key+engine
+            return load
+        receipts={key+engine:{'snapshot_sha256':key+engine,'saved_at_jst':day+'T11:51:00+09:00'} for key in keys for engine in ('p3','abeken')}
+        audit,unpublished,held=live.night_saved_live_audit(feed,set(keys),receipts,set(receipts),{e:loader(e) for e in ('p3','abeken')})
+        results=[SimpleNamespace(race_key=key,trifecta_combination='1-2-3',trifecta_payout=1230,refund_boats=[],trifecta_settlements=[SimpleNamespace(combination='1-2-3',payout=1230)]) for key in keys]
+        scores=live.night_scores(audit,results,held)
+        self.assertEqual(feed,before)
+        self.assertEqual(len(unpublished),3)
+        self.assertEqual(scores[keys[0]]['engines']['p3_live']['status'],'HELD_INVALID_FIXED_PREDICTION')
+        for key,engine in ((keys[0],'abeken_live'),(keys[1],'p3_live'),(keys[1],'abeken_live')):
+            self.assertEqual(scores[key]['engines'][engine]['virtual_profit'],1130)
+        receipts[keys[1]+'p3']['saved_at_jst']=day+'T12:01:00+09:00'
+        _,_,held=live.night_saved_live_audit(feed,set(keys),receipts,set(receipts),{e:loader(e) for e in ('p3','abeken')})
+        self.assertIn('p3_live',held[keys[1]])
+        self.assertNotIn('abeken_live',held[keys[1]])
+
     def test_only_explicit_days_are_admitted(self):
         self.assertEqual(live.DELAYED_DAYS, {'2026-10-16','2026-10-18','2026-10-21'})
         for day in ('2026-10-17','2026-10-19'):
@@ -342,3 +386,4 @@ class Oct18ContinuationScopeTests(unittest.TestCase):
         result.operational_date='2026-10-17'
         with self.assertRaisesRegex(RuntimeError,'NIGHT_RESULT_IDENTITY'):
             live.night_overlay(feed,[result],datetime.fromisoformat(day+'T20:00:00+09:00'))
+

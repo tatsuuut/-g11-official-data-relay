@@ -414,11 +414,12 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@c4f7f9e2e4ac634d53711b79ab9700ad09db0ce6
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@1f0dfa6448950b006578db31a0c2ad9baffd9a9c
     with:
       night_checkpoint_key: ${{ inputs.night_checkpoint_key || '' }}
       lineage_readback_date: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[goripan-promotion]') && '2026-10-07' || '' }}
     secrets: inherit
+
 
 
 

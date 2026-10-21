@@ -12,6 +12,9 @@ on:
       - "scripts/audit_three_phase_runtime_contract.py"
       - "scripts/daily_runtime_bootstrap_v1.py"
       - "scripts/test_daily_runtime_delivery_v1.py"
+      - ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml"
+      - "scripts/daily_predeadline_authority_recovery_v1.py"
+      - "scripts/test_daily_predeadline_authority_recovery_v1.py"
   push:
     branches:
       - main
@@ -23,6 +26,9 @@ on:
       - "scripts/audit_three_phase_runtime_contract.py"
       - "scripts/daily_runtime_bootstrap_v1.py"
       - "scripts/test_daily_runtime_delivery_v1.py"
+      - ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml"
+      - "scripts/daily_predeadline_authority_recovery_v1.py"
+      - "scripts/test_daily_predeadline_authority_recovery_v1.py"
   workflow_dispatch:
 
 permissions:
@@ -95,8 +101,25 @@ jobs:
           python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py -q
           python3 -m unittest discover -s scripts -p test_daily_runtime_delivery_v1.py -q
 
+      - name: Checkout pinned rescue settlement source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: 4cccd89537ea98fc41ddbe55ff204ac7c0f6c02e
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-rescue-settlement
+          persist-credentials: false
+
+      - name: Verify rescue joins and unchanged canonical settlement
+        working-directory: .g11-rescue-settlement
+        run: >-
+          python3 -m unittest
+          g11.wild_pack.v1.test_wild4_rescue_settlement_v1
+          g11.wild_pack.v1.test_wild4_official_settlement_v1
+
       - name: Gate summary
         run: |
           echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
           echo 'G11_LIVE_ACQUISITION_PUBLICATION_UI=NOT_TESTED_BY_THIS_GATE'
           echo 'MERGE_POLICY=DO_NOT_MERGE_RUNTIME_CHANGES_UNLESS_THIS_GATE_PASSES'
+

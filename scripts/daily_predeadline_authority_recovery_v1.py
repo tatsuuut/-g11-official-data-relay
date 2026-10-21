@@ -871,7 +871,7 @@ def night_overlay(accepted, results, now):
     return out
 
 
-def night_scores(feed, results):
+def night_scores(feed, results, held=None):
     """Separate rescue audit, never a formal BET or research ledger."""
     official={r.race_key:r for r in results};audit={}
     for row in feed['races']:
@@ -884,17 +884,53 @@ def night_scores(feed, results):
           'abeken_live':((v4.get('live') or {}).get('practical_bets'),(v4.get('live') or {}).get('locked_at_jst'))}
         entries={}
         for system,(bets,at) in selections.items():
+            reason=(held or {}).get(row['key'],{}).get(system)
+            if reason:
+                entries[system]={'status':'HELD_INVALID_FIXED_PREDICTION','reason':reason};continue
             if not bets or not at:
                 entries[system]={'status':'NO_FIXED_PREDICTION'};continue
-            require(len(set(bets))==len(bets) and datetime.fromisoformat(at)<datetime.fromisoformat(row['deadline_jst']), 'NIGHT_FIXED_PROOF')
-            require(all(re.fullmatch(r'[1-6]-[1-6]-[1-6]',b) and len(set(b.split('-')))==3 for b in bets), 'NIGHT_BETS')
-            gross=100*len(bets);refund=100*sum(bool(set(map(int,b.split('-')))&set(r.refund_boats)) for b in bets)
-            payout=sum(s.payout for s in r.trifecta_settlements if s.combination in bets)
-            entries[system]={'status':'SETTLED','fixed_at':at,'bets':bets,'hit':any(s.combination in bets for s in r.trifecta_settlements),
-              'virtual_investment':gross,'virtual_refund':refund,'virtual_payout':payout,'virtual_profit':payout+refund-gross}
-        entries['goripan']={'status':'NO_FIXED_BET_NO_BACKFILL'}
+            try:
+                fixed,deadline=datetime.fromisoformat(at),datetime.fromisoformat(row['deadline_jst'])
+                require(type(bets) is list and len(set(bets))==len(bets)
+                    and fixed.tzinfo is not None and deadline.tzinfo is not None and fixed<deadline, 'NIGHT_FIXED_PROOF')
+                require(all(type(b) is str and re.fullmatch(r'[1-6]-[1-6]-[1-6]',b) and len(set(b.split('-')))==3 for b in bets), 'NIGHT_BETS')
+                gross=100*len(bets);refund=100*sum(bool(set(map(int,b.split('-')))&set(r.refund_boats)) for b in bets)
+                payout=sum(s.payout for s in r.trifecta_settlements if s.combination in bets)
+                entries[system]={'status':'SETTLED','fixed_at':at,'bets':bets,'hit':any(s.combination in bets for s in r.trifecta_settlements),
+                  'virtual_investment':gross,'virtual_refund':refund,'virtual_payout':payout,'virtual_profit':payout+refund-gross}
+            except (ValueError,TypeError,KeyError,RuntimeError) as exc:
+                entries[system]={'status':'HELD_INVALID_FIXED_PREDICTION','reason':str(exc)}
+        entries['goripan']={'status':'SEPARATE_SAVED_LOCK_LEDGER_NO_BACKFILL'}
         audit[row['key']]={'official_result':r.trifecta_combination,'official_payout':r.trifecta_payout,'engines':entries}
     return audit
+
+
+def night_saved_live_audit(feed, rescued, receipts, snapshot_hashes, loaders):
+    """Read each saved engine/race independently; never rewrite public forecasts."""
+    audit_feed=deepcopy(feed);unpublished=[];held={}
+    for row in audit_feed['races']:
+        key=row['key']
+        if key not in rescued:continue
+        for engine,loader in loaders.items():
+            try:
+                live,name=loader(key)
+                v53=((row.get('abeken_shadow') or {}).get('v53') or {})
+                published=row.get('predeadline') if engine=='p3' else v53.get('live')
+                if not live:
+                    require(not published,'NIGHT_PUBLIC_LIVE_WITHOUT_SAVED_LOCK');continue
+                receipt_live=receipts[name];at=receipt_live['saved_at_jst']
+                require(receipt_live['snapshot_sha256']==live['snapshot_sha256']
+                    and live['snapshot_sha256'] in snapshot_hashes
+                    and datetime.fromisoformat(live['captured_at_jst'])<=datetime.fromisoformat(at)<datetime.fromisoformat(row['deadline_jst']), 'NIGHT_STORED_LIVE_PROOF')
+                if published:require(published['snapshot_sha256']==live['snapshot_sha256'],'NIGHT_PUBLIC_LIVE_CONFLICT')
+                else:unpublished.append(key+':'+engine)
+                if engine=='p3':
+                    row['predeadline']=deepcopy(live);row['pre_race_v2']={'final':{'locked_at_jst':at}}
+                else:
+                    row.setdefault('abeken_shadow',{}).setdefault('v53',{})['live']={**deepcopy(live),'locked_at_jst':at}
+            except (ValueError,TypeError,KeyError,RuntimeError,OSError) as exc:
+                held.setdefault(key,{})[engine+'_live']=type(exc).__name__+':'+str(exc)
+    return audit_feed,unpublished,held
 
 
 def restore_night_baseline(state, archive):
@@ -1024,28 +1060,16 @@ def run_delayed_night(state, day, output, origin):
     from g11.growth_p3.v1_1 import current_runtime_v1 as p3
     from g11.canonical import public_app_feed as feedlib
     rescued={r['key'] for r in accepted['races'] if r.get('same_day_rescue_lock')}
-    p3_rows,_=p3.load_public_live_projection(store,sorted(rescued))
-    _,v4_rows=feedlib._abeken_public_projection(root,'PREDEADLINE',day,rescued)
-    receipts=json.loads((root/'live-write-receipts.json').read_bytes())
-    audit_feed=deepcopy(out);unpublished=[]
-    for row in audit_feed['races']:
-        key=row['key']
-        if key not in rescued:continue
-        for engine,live,name in [('p3',p3_rows.get(key),p3.live_snapshot_name(key)),
-              ('abeken',(v4_rows.get(key,{}).get('v53') or {}).get('live'),CanonicalRunner._abeken_v53_live_name(key))]:
-            if not live:continue
-            receipt_live=receipts[name];at=receipt_live['saved_at_jst']
-            require(receipt_live['snapshot_sha256']==live['snapshot_sha256']
-                and live['snapshot_sha256'] in before[3].values()
-                and datetime.fromisoformat(live['captured_at_jst'])<=datetime.fromisoformat(at)<datetime.fromisoformat(row['deadline_jst']), 'NIGHT_STORED_LIVE_PROOF')
-            published=row.get('predeadline') if engine=='p3' else row['abeken_shadow']['v53'].get('live')
-            if published:require(published['snapshot_sha256']==live['snapshot_sha256'],'NIGHT_PUBLIC_LIVE_CONFLICT')
-            else:unpublished.append(key+':'+engine)
-            if engine=='p3':
-                row['predeadline']=deepcopy(live);row['pre_race_v2']={'final':{'locked_at_jst':at}}
-            else:
-                row['abeken_shadow']['v53']['live']={**deepcopy(live),'locked_at_jst':at}
-    scores=night_scores(audit_feed,results)
+    try:receipts=json.loads((root/'live-write-receipts.json').read_bytes())
+    except (ValueError,OSError):receipts={}
+    def p3_live(key):
+        rows,_=p3.load_public_live_projection(store,[key])
+        return rows.get(key),p3.live_snapshot_name(key)
+    def v4_live(key):
+        _,rows=feedlib._abeken_public_projection(root,'PREDEADLINE',day,{key})
+        return (rows.get(key,{}).get('v53') or {}).get('live'),CanonicalRunner._abeken_v53_live_name(key)
+    audit_feed,unpublished,held=night_saved_live_audit(out,rescued,receipts,set(before[3].values()),{'p3':p3_live,'abeken':v4_live})
+    scores=night_scores(audit_feed,results,held)
     require(before==[inventory(p) for p in protected_roots] and boundary_bytes==(root/'boundary.json').read_bytes()
         and baseline_bytes==(root/'feed.json').read_bytes(),'NIGHT_PROTECTED_MUTATION')
     recovery.verify_boundary(root,day)
@@ -1053,7 +1077,8 @@ def run_delayed_night(state, day, output, origin):
         'RESULTS':len(results),'RACES':len(expected),'PENDING':0,'PREDICTION_RECALCULATION':0,
         'CANONICAL_MORNING_PROMOTED':False,'NIGHT_RESEARCH_CONNECTED':False,
         'SETTLED_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='SETTLED' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
-        'GORIPAN':'NO_FIXED_BET_NO_BACKFILL','PROTECTED_UNCHANGED':True,'FIXED_BUT_NOT_PUBLISHED_LIVE':unpublished}
+        'HELD_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='HELD_INVALID_FIXED_PREDICTION' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
+        'GORIPAN':'SEPARATE_SAVED_LOCK_LEDGER_NO_BACKFILL','PROTECTED_UNCHANGED':True,'FIXED_BUT_NOT_PUBLISHED_LIVE':unpublished}
     data=canonical(out)+b'\n'
     if day in {'2026-10-18', '2026-10-21'}:
         rescue_night_delta(accepted, out, sha(raw))
@@ -1111,4 +1136,5 @@ def deliver_delayed_night(state,feed_path,origin):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
