@@ -83,7 +83,12 @@ def make_proof(engine, row, saved, receipt, odds, odds_day=None, packet=None):
             "packet_sha256": packet["BET_PACKET_HASH"] if packet else None,
             "odds_day_sha256": odds_day["CONTENT_SHA256"] if odds_day else None}
 
-def collect(store_path, source, *, odds_day=None, reader=read_official):
+def read_player_context(store_path, race_key, readback_at, cache):
+    # Private runtime owns the official source schema; public relay only routes it.
+    from g11.canonical.condition_context_transport_v1 import read_player_context as read
+    return read(store_path, race_key, readback_at, cache)
+
+def collect(store_path, source, *, odds_day=None, reader=read_official, context_reader=read_player_context):
     is_gori = source.get("schema") == "G11_WILD4_PUBLIC_PROJECTION_V1"
     day = source["date"] if is_gori else source["operational_date_jst"]
     rescue = rescue_source(source, day, is_gori)
@@ -92,6 +97,8 @@ def collect(store_path, source, *, odds_day=None, reader=read_official):
                 odds_day["CONTENT_SHA256"] == sha({k:v for k,v in odds_day.items() if k != "CONTENT_SHA256"}), "GORE_ODDS_DAY_HASH")
     packets = {p["STANDARD_RACE_KEY"]: p for p in odds_day["RECORDS"]} if is_gori else {}
     records, held = [], []
+    context_cache = {}
+    readback_at = datetime.now(timezone.utc).isoformat()
     for race in source["races"]:
         key = race["race_key"] if is_gori else race["key"]
         if is_gori:
@@ -111,7 +118,16 @@ def collect(store_path, source, *, odds_day=None, reader=read_official):
                    "lock_sha256": live.get("snapshot_sha256"), "deadline_at": race["deadline_jst"], "locked_at": live["locked_at_jst"]}
         try:
             saved, receipt, odds = reader(store_path, key)
-            records.append(make_proof("WILD4" if is_gori else "ABEKEN_V4", row, saved, receipt, odds, odds_day, packets.get(key)))
+            proof = make_proof("WILD4" if is_gori else "ABEKEN_V4", row, saved, receipt, odds, odds_day, packets.get(key))
+            if datetime.fromisoformat(readback_at) < datetime.fromisoformat(row["deadline_at"]):
+                try:
+                    proof["player_context"] = context_reader(store_path, key, readback_at, context_cache)
+                except Exception as exc:
+                    # Optional context must not hold healthy odds or another engine.
+                    code = str(exc)
+                    held.append({"race_key": key, "scope": "PLAYER_CONTEXT_ONLY",
+                                 "reason": code if code.isupper() and len(code) < 100 else type(exc).__name__})
+            records.append(proof)
         except Exception as exc:
             # Reasons only; never dump decrypted input, tokens or stack traces.
             code = str(exc)
@@ -142,10 +158,19 @@ def deliver_optional(store_path, source, origin=ORIGIN, token=None, odds_day=Non
         records = payload["records"]
         acknowledgements = []
         # Existing update opportunity, bounded chunks; not a new retry/scheduler.
-        for i in range(0, len(records), 40):
-            acknowledgements.append(sender(origin, token or os.environ["G11_SYNC_OIDC"], {**payload, "records": records[i:i+40]}))
+        batch = []
+        for record in records:
+            candidate = {**payload, "records": batch + [record]}
+            if batch and (len(batch) >= 40 or len(canonical(candidate)) > WIRE_LIMIT):
+                acknowledgements.append(sender(origin, token or os.environ["G11_SYNC_OIDC"], {**payload, "records": batch}))
+                batch = []
+            require(len(canonical({**payload, "records": [record]})) <= WIRE_LIMIT, "INPUT_SINGLE_RECORD_BUDGET")
+            batch.append(record)
+        if batch:
+            acknowledgements.append(sender(origin, token or os.environ["G11_SYNC_OIDC"], {**payload, "records": batch}))
         result = {"status": "SAVED" if acknowledgements else "NO_VERIFIED_ODDS", "date": payload["date"],
-                  "sources": len(records), "held": held, "selection_enabled": False, "delivery_enabled": False,
+                  "sources": len(records), "player_context_sources": sum("player_context" in r for r in records),
+                  "held": held, "selection_enabled": False, "delivery_enabled": False,
                   "notification_send_count": 0, "last_ack": acknowledgements[-1] if acknowledgements else None}
     except Exception as exc:
         result = {"status": "HELD", "reason": type(exc).__name__, "selection_enabled": False, "delivery_enabled": False, "notification_send_count": 0}
@@ -167,4 +192,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

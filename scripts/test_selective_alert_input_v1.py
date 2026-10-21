@@ -10,6 +10,16 @@ from unittest.mock import patch
 import selective_alert_input_v1 as m
 
 class EvidenceTest(unittest.TestCase):
+    def test_context_wire_chunks_are_bounded_and_missing_context_keeps_odds(self):
+        records=[{"player_context":{"synthetic":"x"*20_000}} for _ in range(40)]
+        with patch.object(m,'collect',return_value=({'schema':m.SCHEMA,'date':'2026-10-22','records':records},[])):
+            sent=[]
+            def sender(origin,token,payload):
+                self.assertLessEqual(len(m.canonical(payload)),m.WIRE_LIMIT)
+                sent.extend(payload['records']);return {'status':'SAVED'}
+            result=m.deliver_optional(Path('/unused'),{},token='mock',sender=sender)
+        self.assertEqual(len(sent),40);self.assertEqual(result['player_context_sources'],40)
+
     def setUp(self):
         self.row={"race_key":"20261013-13-01","bets":["1-2-3","2-1-3"],"bet_count":2,"lock_sha256":"a"*64,
                   "deadline_at":"2026-10-13T10:45:00+09:00","locked_at":"2026-10-13T10:42:00+09:00",
@@ -118,4 +128,5 @@ class EvidenceTest(unittest.TestCase):
                     m.read_official(link,self.row['race_key'])
 
 if __name__=='__main__':unittest.main()
+
 
