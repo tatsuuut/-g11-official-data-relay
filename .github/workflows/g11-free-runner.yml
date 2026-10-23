@@ -135,6 +135,8 @@ jobs:
             elif [[ "${COMMIT_MESSAGE}" == *"[morning-20260923]"* ]]; then
               phase="morning"
               operational_date="2026-09-23"
+            elif [ "${now_hour}" -lt 8 ] || [ "${now_hour}" -gt 22 ]; then
+              phase="dry-run"
             else
               phase="predeadline"
             fi
