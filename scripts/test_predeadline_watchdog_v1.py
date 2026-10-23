@@ -340,3 +340,88 @@ class DaytimeMissingMorningTests(unittest.TestCase):
         self.assertEqual(_last_deadline(f,DAY).hour,22)
         f['same_day_rescue']['canonical_morning_promoted']=True
         with self.assertRaises(ValueError): _last_deadline(f,DAY)
+
+
+class PredeadlineChainTests(unittest.TestCase):
+    """Run the actual workflow shell against stale GitHub responses; no network."""
+    def exercise(self, runs, jobs=None, heartbeat='CONTINUE', post_status=0):
+        import json
+        import os
+        from pathlib import Path
+        import subprocess
+        import tempfile
+        import textwrap
+        source = (Path(__file__).resolve().parents[1] /
+                  '.github/workflows/g11-free-runner.yml').read_text()
+        step = source.split('        id: predeadline-chain\n', 1)[1].split(
+            '      - name: Checkout hash-locked research runtime', 1)[0]
+        script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        # Keep jq and the real shell control flow. Replace only external I/O
+        # and the deliberate delay; POST is recorded rather than sent.
+        stubs = '''
+python3() { printf '%s\\n' "$TEST_HEARTBEAT"; }
+sleep() { :; }
+curl() {
+  case "$*" in
+    *"-X POST"*) printf 'POST\\n' >> "$TEST_POSTS"; return "$TEST_POST_STATUS" ;;
+    *"/jobs?"*) printf '%s' "$TEST_JOBS" ;;
+    *) printf '%s' "$TEST_RUNS" ;;
+  esac
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            posts = Path(tmp) / 'posts'
+            env = dict(os.environ, GH_TOKEN='test', GITHUB_RUN_ID='39915815315',
+                       GITHUB_RUN_NUMBER='200', GITHUB_REPOSITORY='example/relay',
+                       OPERATIONAL_DATE='2026-10-23', TEST_HEARTBEAT=heartbeat,
+                       TEST_POST_STATUS=str(post_status), TEST_POSTS=str(posts),
+                       TEST_RUNS=json.dumps({'workflow_runs': runs}),
+                       TEST_JOBS=json.dumps({'jobs': jobs or []}))
+            result = subprocess.run(['bash', '-c', stubs + script], env=env,
+                                    capture_output=True, text=True, timeout=10)
+            return result, posts.read_text().count('POST') if posts.exists() else 0
+
+    def run_row(self, number, day='2026-10-23'):
+        return {'id': 39915815315 + number - 200, 'run_number': number,
+                'head_branch': 'main', 'event': 'workflow_dispatch',
+                'status': 'in_progress', 'display_title': 'LIVE-predeadline-' + day}
+
+    def job(self, day='2026-10-23'):
+        return {'name': 'LIVE-predeadline-' + day, 'status': 'in_progress'}
+
+    def test_observed_stale_predecessor_cannot_end_chain(self):
+        result, posts = self.exercise([self.run_row(199), self.run_row(200)], [self.job()])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(posts, 1)
+        self.assertIn('DISPATCH_ACCEPTED', result.stdout)
+        self.assertNotIn('DEFER_', result.stdout)
+
+    def test_newer_live_successor_prevents_duplicate(self):
+        result, posts = self.exercise([self.run_row(201)], [self.job()])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(posts, 0)
+        self.assertIn('DEFER_ACTIVE_LIVE', result.stdout)
+
+    def test_newer_successor_before_job_allocation_prevents_duplicate(self):
+        result, posts = self.exercise([self.run_row(201)])
+        self.assertEqual(posts, 0)
+        self.assertIn('DEFER_QUEUED_LIVE', result.stdout)
+
+    def test_wrong_day_or_branch_cannot_own_current_continuation(self):
+        for row, jobs in [(self.run_row(201, '2026-10-22'), [self.job('2026-10-22')]),
+                          (dict(self.run_row(201), head_branch='experiment'), [self.job()])]:
+            result, posts = self.exercise([row], jobs)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(posts, 1)
+
+    def test_last_deadline_and_closed_window_never_dispatch(self):
+        for heartbeat in ('HANDOFF', 'RESCUE_HANDOFF', 'OUTSIDE_WINDOW'):
+            result, posts = self.exercise([], heartbeat=heartbeat)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(posts, 0)
+
+    def test_ambiguous_dispatch_failure_is_not_retried_or_reported_accepted(self):
+        result, posts = self.exercise([], post_status=22)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(posts, 1)
+        self.assertNotIn('DISPATCH_ACCEPTED', result.stdout)
