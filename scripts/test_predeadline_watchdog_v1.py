@@ -425,3 +425,50 @@ curl() {
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(posts, 1)
         self.assertNotIn('DISPATCH_ACCEPTED', result.stdout)
+
+
+class PushRoutingTests(unittest.TestCase):
+    def route(self, hour, event='push', message='runtime repair', phase='', schedule=''):
+        import os
+        from pathlib import Path
+        import subprocess
+        import tempfile
+        import textwrap
+        source = (Path(__file__).resolve().parents[1] /
+                  '.github/workflows/g11-free-runner.yml').read_text()
+        step = source.split('        id: scheduled\n', 1)[1].split(
+            '      - name: Restore only encrypted runtime state', 1)[0]
+        script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        stubs = '''
+date() {
+  case "$*" in
+    +%H) printf '%s' "$TEST_HOUR" ;;
+    +%M) printf '24' ;;
+    *yesterday*) printf '2026-10-23' ;;
+    *) printf '2026-10-24' ;;
+  esac
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'output'
+            env = dict(os.environ, TEST_HOUR=str(hour), EVENT_NAME=event,
+                       COMMIT_MESSAGE=message, REQUESTED_PHASE=phase,
+                       REQUESTED_DATE='', SCHEDULE_EXPRESSION=schedule,
+                       GITHUB_OUTPUT=str(out))
+            r = subprocess.run(['bash', '-c', stubs + script], env=env,
+                               capture_output=True, text=True, timeout=10)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return dict(line.split('=', 1) for line in out.read_text().splitlines())
+
+    def test_midnight_push_is_validation_only_and_daytime_push_still_captures(self):
+        for hour in (0, 1, 2, 7, 23):
+            self.assertEqual(self.route(hour)['phase'], 'dry-run')
+        for hour in (8, 16, 22):
+            self.assertEqual(self.route(hour)['phase'], 'predeadline')
+
+    def test_explicit_recovery_and_regular_schedule_keep_their_contract(self):
+        self.assertEqual(self.route(0, message='[night-current] repair')['phase'], 'night')
+        self.assertEqual(self.route(6, message='[morning-current] repair')['phase'], 'morning')
+        self.assertEqual(self.route(6, event='schedule', schedule='*/5 18-21 * * *')['phase'], 'morning')
+        self.assertEqual(self.route(8, event='schedule', schedule='*/5 23 * * *')['phase'], 'predeadline')
+        self.assertEqual(self.route(0, event='workflow_dispatch', phase='night')['phase'], 'night')
