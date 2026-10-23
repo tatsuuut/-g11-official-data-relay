@@ -127,6 +127,73 @@ class EvidenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'VERIFIED_SNAPSHOT_FILE'):
                     m.read_official(link,self.row['race_key'])
 
+class ProbabilityTransportTest(unittest.TestCase):
+    def fixture(self, root, number=1):
+        key=f"20261024-13-{number:02d}"
+        vector={f"{a}-{b}-{c}":1/120 for a in range(1,7) for b in range(1,7) for c in range(1,7) if len({a,b,c})==3}
+        lock={"SCHEMA":"G11_WILD_BET_FUTURE_OOS_SHADOW_LOCK_V1","STATUS":"LOCKED_BEFORE_RESULT",
+              "STANDARD_RACE_KEY":key,"OFFICIAL_RESULT_USED":False,"CANDIDATE_MODEL_SHA256":"a"*64,
+              "INPUT_PACKET_SHA256":"b"*64,"ODDS_SNAPSHOT_SHA256":"c"*64,"SELECTED_BETS":["1-2-3"],
+              "BUY_COUNT":1,"LOCKED_AT":"2026-10-24T10:40:00+09:00","RACE_DEADLINE_AT":"2026-10-24T10:45:00+09:00",
+              "CALIBRATED_PROBABILITIES":vector}
+        raw=m.canonical(lock)+b"\n";lock["CONTENT_SHA256"]=m.hashlib.sha256(raw).hexdigest()
+        path=root/(key+".json");path.write_bytes(m.canonical(lock)+b"\n")
+        row={"race_key":key,"classification":"FORMAL","abstain":False,"bet_count":1,"bets":["1-2-3"],
+             "model_sha256":"a"*64,"upstream_packet_sha256":"b"*64,"odds_snapshot_sha256":"c"*64,
+             "locked_at":lock["LOCKED_AT"],"deadline_at":lock["RACE_DEADLINE_AT"],"lock_sha256":lock["CONTENT_SHA256"]}
+        return row,path,raw
+    def source(self, rows):
+        return {"schema":"G11_WILD4_PUBLIC_PROJECTION_V1","date":"2026-10-24","races":rows}
+    def test_exact_original_hash_preimage_and_immutable_ledger(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row,path,raw=self.fixture(root);before=path.read_bytes()
+            payload,held=m.collect_probabilities(root,self.source([row]))
+            self.assertEqual(held,[]);self.assertEqual(payload["schema"],m.PROBABILITY_SCHEMA)
+            proof=payload["records"][0];self.assertEqual(proof["source_lock_json"].encode(),raw)
+            self.assertEqual(m.hashlib.sha256(raw).hexdigest(),row["lock_sha256"])
+            self.assertNotIn("CONTENT_SHA256",json.loads(raw));self.assertEqual(path.read_bytes(),before)
+    def test_one_corrupt_or_missing_race_does_not_stop_other_races(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);a,path,_=self.fixture(root);b,_,_=self.fixture(root,2)
+            path.write_text("broken")
+            payload,held=m.collect_probabilities(root,self.source([a,b]))
+            self.assertEqual(len(payload["records"]),1);self.assertEqual(len(held),1)
+            self.assertEqual(payload["records"][0]["source_lock_sha256"],b["lock_sha256"])
+            path.unlink();self.assertEqual(len(m.collect_probabilities(root,self.source([a,b]))[0]["records"]),1)
+    def test_wrong_hash_bets_model_and_path_are_held(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row,path,_=self.fixture(root)
+            for patch in [{"lock_sha256":"d"*64},{"bets":["3-2-1"]},{"model_sha256":"d"*64},{"race_key":"../secret"}]:
+                payload,held=m.collect_probabilities(root,self.source([{**row,**patch}]))
+                self.assertFalse(payload["records"]);self.assertEqual(len(held),1)
+            link=root/"link";link.symlink_to(root,target_is_directory=True)
+            self.assertFalse(m.collect_probabilities(link,self.source([row]))[0]["records"])
+    def test_bad_probability_vector_is_held_even_with_matching_hash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row,path,_=self.fixture(root)
+            lock=json.loads(path.read_bytes());lock.pop("CONTENT_SHA256")
+            lock["CALIBRATED_PROBABILITIES"]["1-2-3"]=.99
+            lock["CONTENT_SHA256"]=m.hashlib.sha256(m.canonical(lock)+b"\n").hexdigest()
+            row["lock_sha256"]=lock["CONTENT_SHA256"];path.write_bytes(m.canonical(lock))
+            payload,held=m.collect_probabilities(root,self.source([row]))
+            self.assertFalse(payload["records"]);self.assertEqual(held[0]["reason"],"PROBABILITY_VECTOR")
+    def test_rescue_and_abstain_are_not_promoted_to_formal_probability(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row,_,_=self.fixture(root)
+            rows=[{**row,"classification":"LINEAGE"},{**row,"abstain":True},{**row,"bet_count":0}]
+            self.assertEqual(m.collect_probabilities(root,self.source(rows))[0]["records"],[])
+    def test_bounded_batches_and_delivery_failure_are_optional(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row,_,_=self.fixture(root);sent=[]
+            def sender(origin,token,payload):
+                self.assertEqual(origin,m.ORIGIN);self.assertEqual(token,"test-only")
+                self.assertLessEqual(len(m.canonical(payload)),m.WIRE_LIMIT)
+                sent.append(payload);return {"status":"SAVED","sources_added":len(payload["records"]),"evaluations_added":0}
+            result=m.deliver_probabilities_optional(root,self.source([row]*80),token="test-only",sender=sender)
+            self.assertEqual(result["sources_sent"],80);self.assertGreater(len(sent),1)
+            failed=m.deliver_probabilities_optional(root,self.source([row]),token="test-only",sender=lambda *_:(_ for _ in ()).throw(RuntimeError()))
+            self.assertEqual(failed["status"],"HELD");self.assertEqual(failed["sources_sent"],0)
+
 if __name__=='__main__':unittest.main()
 
 
