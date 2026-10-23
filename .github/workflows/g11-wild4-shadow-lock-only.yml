@@ -8,6 +8,11 @@ on:
       - .github/workflows/g11-wild4-shadow-lock-only.yml
   workflow_call:
     inputs:
+      predeadline_checkpoint_key:
+        description: Exact verified early capture checkpoint; no stale fallback
+        type: string
+        required: false
+        default: ""
       night_checkpoint_key:
         description: Exact saved and read-back NIGHT checkpoint; no fallback when supplied
         type: string
@@ -75,6 +80,7 @@ jobs:
           REQUESTED_MODE: ${{ github.event.inputs.mode }}
           LINEAGE_READBACK_DATE: ${{ inputs.lineage_readback_date }}
           NIGHT_CHECKPOINT_KEY: ${{ inputs.night_checkpoint_key }}
+          PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
         run: |
           python3 - <<'PY'
           import os, re
@@ -112,6 +118,10 @@ jobs:
           if checkpoint and (os.environ.get('REQUESTED_MODE')!='wild4-settle' or readback
               or re.fullmatch(r'g11-state-v4-published-'+re.escape(day)+r'-[0-9]+-[0-9]+-checkpoint',checkpoint) is None):
               raise SystemExit('NIGHT_CHECKPOINT_IDENTITY')
+          live_checkpoint=os.environ.get('PREDEADLINE_CHECKPOINT_KEY','')
+          if live_checkpoint and (checkpoint or readback or os.environ.get('REQUESTED_MODE')!='wild4'
+              or re.fullmatch(r'g11-state-v4-critical-'+re.escape(day)+r'-[0-9]+',live_checkpoint) is None):
+              raise SystemExit('PREDEADLINE_CHECKPOINT_IDENTITY')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
               output.write('night_rollover='+str(night_rollover).lower()+'\n')
@@ -124,13 +134,13 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: ${{ inputs.night_checkpoint_key || format('g11-state-v4-{0}-isolated-shadow-no-exact-match', steps.day.outputs.day) }}
-          restore-keys: ${{ inputs.night_checkpoint_key == '' && format('g11-state-v4-published-{0}-', steps.day.outputs.day) || '' }}
+          key: ${{ inputs.predeadline_checkpoint_key || inputs.night_checkpoint_key || format('g11-state-v4-{0}-isolated-shadow-no-exact-match', steps.day.outputs.day) }}
+          restore-keys: ${{ inputs.predeadline_checkpoint_key == '' && inputs.night_checkpoint_key == '' && format('g11-state-v4-published-{0}-', steps.day.outputs.day) || '' }}
       - name: Verify current canonical state availability
         id: state-ready
         run: |
-          if [ -n '${{ inputs.night_checkpoint_key }}' ] && [ '${{ steps.canonical-cache.outputs.cache-hit }}' != true ]; then
-            echo 'WILD4_NIGHT_CHECKPOINT_MISSING' >&2
+          if [ -n '${{ inputs.predeadline_checkpoint_key || inputs.night_checkpoint_key }}' ] && [ '${{ steps.canonical-cache.outputs.cache-hit }}' != true ]; then
+            echo 'WILD4_REQUESTED_CHECKPOINT_MISSING' >&2
             exit 1
           fi
           if [ -s .relay-cache/state.tgz.gpg ]; then
@@ -243,6 +253,7 @@ jobs:
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
         run: |
           set -euo pipefail
           test -s .relay-cache/state.tgz.gpg
@@ -275,6 +286,35 @@ jobs:
           state=json.loads(pathlib.Path('.relay-state/relay-state.json').read_text())
           if state.get('OPERATIONAL_DATE_JST')!=os.environ['OPERATIONAL_DATE']:
               raise SystemExit('STATE_DATE_MISMATCH')
+          def verify_early_checkpoint(root, state, day, key):
+              if not key:
+                  return
+              import re
+              match=re.fullmatch(r'g11-state-v4-critical-'+re.escape(day)+r'-([0-9]+)',key)
+              critical=state.get('CRITICAL',{})
+              if (match is None or state.get('OPERATIONAL_DATE_JST')!=day
+                  or state.get('MORNING_COMPLETE') is not True
+                  or critical.get('SCHEMA')!='G11_PREDEADLINE_CRITICAL_CHECKPOINT_V1'
+                  or critical.get('CRITICAL_CHECKPOINT_STATUS')!='PASS'
+                  or critical.get('OPERATIONAL_DATE')!=day
+                  or critical.get('LAST_CRITICAL_RUN_ID')!=match.group(1)
+                  or critical.get('POST_DEADLINE_GENERATION')!=0):
+                  raise ValueError('WILD4_EARLY_CHECKPOINT_BINDING')
+              digest=hashlib.sha256()
+              for path in sorted(p for p in (root/'store').rglob('*') if p.is_file() and not p.is_symlink()):
+                  name=path.relative_to(root/'store').as_posix().encode()
+                  digest.update(len(name).to_bytes(8,'big')); digest.update(name)
+                  with path.open('rb') as handle:
+                      while chunk:=handle.read(1024*1024): digest.update(chunk)
+              if digest.hexdigest()!=critical.get('CRITICAL_CHECKPOINT_SHA'):
+                  raise ValueError('WILD4_EARLY_CHECKPOINT_HASH')
+              authority=json.loads((root/'daily-runtime'/day/'authority.json').read_bytes())
+              if (authority.get('operational_date_jst')!=day or authority.get('immutable') is not True
+                  or authority.get('authority_sha256')!=critical.get('AUTHORITY_SHA256')
+                  or authority.get('runtime_source_sha')!=critical.get('RUNTIME_SOURCE_SHA')):
+                  raise ValueError('WILD4_EARLY_CHECKPOINT_AUTHORITY')
+          verify_early_checkpoint(pathlib.Path('.relay-state'),state,os.environ['OPERATIONAL_DATE'],
+                                  os.environ.get('PREDEADLINE_CHECKPOINT_KEY',''))
           ready=state.get('MORNING_COMPLETE') is True
           rescue=False
           path=pathlib.Path('.relay-state/rescue/boundary.json')
