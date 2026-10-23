@@ -128,6 +128,19 @@ class EarlyDispatchTests(unittest.TestCase):
         self.assertNotIn('sent=true', output)
         self.assertEqual(calls.splitlines().count('workflow'), 1)
 
+    def test_published_dispatch_is_skipped_only_after_accepted_early_handoff(self):
+        workflow = (ROOT / '.github/workflows/g11-free-runner.yml').read_text()
+        line = next(line for line in workflow.splitlines() if 'WILD4_DISPATCH_RETRY' in line)
+        for sent, phase, expected in [('true', 'predeadline', False), ('', 'predeadline', True),
+                                      ('', 'night', False)]:
+            script = line.replace('${{steps.wild4-early.outputs.sent}}', sent).replace(
+                '${{steps.due.outputs.phase}}', phase).replace('${{github.token}}', 'test').replace(
+                '${{steps.due.outputs.operational_date}}', DAY)
+            result = subprocess.run(['bash', '-c', 'gh() { echo DISPATCH; }; ' + script],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual('DISPATCH' in result.stdout, expected)
+
     def test_normal_and_night_keys_still_use_existing_fallback_contract(self):
         source = WORKFLOW.read_text()
         self.assertIn("inputs.predeadline_checkpoint_key == '' && inputs.night_checkpoint_key == ''", source)
