@@ -118,9 +118,16 @@ jobs:
       - name: Checkout pinned isolated WILD4 guard
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 30d0f8f10161a054b0a7249822175fc854e6b335
+          ref: 1dc572db2bf47087ea1ef2549687eae667600440
           path: .g11-isolated-guard
           persist-credentials: false
+
+      - name: Verify early WILD4 checkpoint handoff and protected logic
+        env:
+          WILD4_WORKFLOW_PATH: .g11-isolated-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
+        run: |
+          "$(go env GOPATH)/bin/actionlint" .github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml "$WILD4_WORKFLOW_PATH"
+          python3 -m unittest discover -s scripts -p test_wild4_checkpoint_handoff_v1.py -v
 
       - name: Verify isolated future boundary uses the tested contract
         run: |

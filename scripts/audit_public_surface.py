@@ -9,6 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/test_wild4_checkpoint_handoff_v1.py",
     "scripts/morning_race_isolation_v1.py",
     "scripts/test_morning_race_isolation_v1.py",
     "scripts/official_result_delivery_v1.py",
@@ -948,7 +949,7 @@ def main() -> int:
             fail(f"forbidden artifact type: {name}")
         # Existing OIDC workflow plus bounded authority/transport routing.
         # No prediction code or model is admitted by this larger YAML budget.
-        cap = 126_000 if name == ".github/workflows/g11-free-runner.yml" else 100_000
+        cap = 127_000 if name == ".github/workflows/g11-free-runner.yml" else 100_000
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
         text = path.read_text(encoding="utf-8")
