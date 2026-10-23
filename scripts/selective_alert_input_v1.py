@@ -19,6 +19,8 @@ import urllib.parse
 import urllib.request
 
 SCHEMA = "G11_DUAL_ALERT_ODDS_TRANSPORT_V1"
+PROBABILITY_SCHEMA = "G11_WILD4_PROBABILITY_TRANSPORT_V1"
+PROBABILITY_PROOF_SCHEMA = "G11_WILD4_LOCK_PROBABILITY_PROOF_V1"
 ORIGIN = "https://g11-race-lab.higatatsunori2.chatgpt.site"
 WIRE_LIMIT = 240_000
 RESCUE_FROM_DAY = "2026-10-21"
@@ -177,18 +179,97 @@ def deliver_optional(store_path, source, origin=ORIGIN, token=None, odds_day=Non
     print("G11_SELECTIVE_INPUT=" + json.dumps(result, ensure_ascii=False, sort_keys=True))
     return result
 
+def collect_probabilities(ledger, source):
+    """Read immutable hash preimages; never infer, calibrate or select a BET."""
+    day = source["date"]
+    require(source.get("schema") == "G11_WILD4_PUBLIC_PROJECTION_V1", "PROBABILITY_PROJECTION")
+    root = Path(os.path.abspath(ledger))
+    records, held = [], []
+    for row in source["races"]:
+        if row.get("classification") != "FORMAL" or row.get("abstain") is True or row.get("bet_count", 0) <= 0:
+            continue
+        key = row.get("race_key")
+        try:
+            require(isinstance(key, str) and re.fullmatch(r"\d{8}-\d{2}-(?:0[1-9]|1[0-2])", key)
+                    and key[:8] == day.replace("-", ""), "PROBABILITY_RACE_KEY")
+            path = root / (key + ".json")
+            require(path.is_file() and not path.is_symlink() and path.resolve(strict=True) == path
+                    and path.stat().st_size <= 100_000, "PROBABILITY_LOCK_FILE")
+            lock = json.loads(path.read_bytes())
+            # Same Python canonical hash preimage (including LF) as the existing
+            # producer/ledger verifier. Keep floats intact through the wire string.
+            raw = canonical({k:v for k,v in lock.items() if k != "CONTENT_SHA256"}) + b"\n"
+            require(len(raw) <= 32_768 and hashlib.sha256(raw).hexdigest() ==
+                    lock.get("CONTENT_SHA256") == row["lock_sha256"], "PROBABILITY_LOCK_HASH")
+            require(lock.get("SCHEMA") == "G11_WILD_BET_FUTURE_OOS_SHADOW_LOCK_V1"
+                    and lock.get("STATUS") == "LOCKED_BEFORE_RESULT" and lock.get("OFFICIAL_RESULT_USED") is False
+                    and lock.get("STANDARD_RACE_KEY") == key and lock.get("SELECTED_BETS") == row["bets"]
+                    and lock.get("BUY_COUNT") == row["bet_count"] and lock.get("CANDIDATE_MODEL_SHA256") == row["model_sha256"]
+                    and lock.get("INPUT_PACKET_SHA256") == row["upstream_packet_sha256"]
+                    and lock.get("ODDS_SNAPSHOT_SHA256") == row["odds_snapshot_sha256"], "PROBABILITY_LOCK_BINDING")
+            require(datetime.fromisoformat(lock["LOCKED_AT"]) == datetime.fromisoformat(row["locked_at"])
+                    and datetime.fromisoformat(lock["RACE_DEADLINE_AT"]) == datetime.fromisoformat(row["deadline_at"])
+                    and datetime.fromisoformat(lock["LOCKED_AT"]) < datetime.fromisoformat(row["deadline_at"]),
+                    "PROBABILITY_LOCK_TIME")
+            vector = lock.get("CALIBRATED_PROBABILITIES")
+            require(isinstance(vector, dict) and len(vector) == 120
+                    and all(re.fullmatch(r"[1-6]-[1-6]-[1-6]", k) and len(set(k.split("-"))) == 3
+                            and type(v) in (int, float) and math.isfinite(v) and 0 <= v <= 1 for k,v in vector.items())
+                    and abs(sum(vector.values()) - 1) <= 1e-9, "PROBABILITY_VECTOR")
+            records.append({"schema": PROBABILITY_PROOF_SCHEMA, "source_lock_sha256": row["lock_sha256"],
+                            "source_lock_json": raw.decode("utf-8")})
+        except Exception as exc:
+            code = str(exc)
+            held.append({"race_key": key, "reason": code if code.isupper() and len(code) < 100 else type(exc).__name__})
+    return {"schema": PROBABILITY_SCHEMA, "date": day, "records": records}, held
+
+def deliver_probabilities_optional(ledger, source, *, token, origin=ORIGIN, sender=post_batch):
+    acknowledgements, held, sent = [], [], 0
+    try:
+        payload, held = collect_probabilities(ledger, source)
+        batches, batch = [], []
+        for record in payload["records"]:
+            if batch and (len(batch) >= 40 or len(canonical({**payload, "records": batch + [record]})) > WIRE_LIMIT):
+                batches.append(batch); batch = []
+            require(len(canonical({**payload, "records": [record]})) <= WIRE_LIMIT, "PROBABILITY_WIRE_BUDGET")
+            batch.append(record)
+        if batch: batches.append(batch)
+        for batch in batches:
+            try:
+                ack = sender(origin, token, {**payload, "records": batch})
+                acknowledgements.append({k:ack.get(k) for k in ("status", "sources_added", "evaluations_added")})
+                sent += len(batch)
+                held.extend(ack.get("rejected", []))
+            except Exception as exc:
+                held.append({"reason": type(exc).__name__, "records": len(batch)})
+        result = {"status": "SAVED" if acknowledgements else "HELD" if held else "NO_FORMAL_LOCKS",
+                  "date": payload["date"], "sources_sent": sent, "held": held, "acks": acknowledgements}
+    except Exception as exc:
+        result = {"status": "HELD", "reason": type(exc).__name__}
+    print("G11_LOCKED_PROBABILITY_INPUT=" + json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return result
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--projection", type=Path, required=True)
     parser.add_argument("--odds-day", type=Path, required=True)
+    parser.add_argument("--probability-ledger", type=Path)
     args = parser.parse_args()
     # Reuse the caller's existing GitHub OIDC audience and official projection.
     request = urllib.request.Request(os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=g11-race-lab",
                                     headers={"Authorization": "Bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})
     with urllib.request.urlopen(request, timeout=25) as response:
         token = json.load(response)["value"]
-    deliver_optional(args.store, json.loads(args.projection.read_bytes()), token=token, odds_day=json.loads(args.odds_day.read_bytes()))
+    source = json.loads(args.projection.read_bytes())
+    deliver_optional(args.store, source, token=token, odds_day=json.loads(args.odds_day.read_bytes()))
+    # Existing WILD4 observer already owns this immutable ledger. A missing
+    # optional source must never block ordinary projection/odds publication.
+    ledger = args.probability_ledger
+    if ledger is None and os.environ.get("RUNNER_TEMP"):
+        ledger = Path(os.environ["RUNNER_TEMP"]) / "g11-wild4-future-locks"
+    if ledger is not None and source.get("schema") == "G11_WILD4_PUBLIC_PROJECTION_V1":
+        deliver_probabilities_optional(ledger, source, token=token)
 
 if __name__ == "__main__":
     main()
