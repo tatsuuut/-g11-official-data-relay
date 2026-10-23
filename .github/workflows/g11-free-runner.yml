@@ -382,8 +382,10 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/runs?per_page=100")"
-          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_ID}" \
-            '.workflow_runs[] | select(.id != $current and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
+          # A completed predecessor can remain active in the API cache.
+          # Only a newer invocation can own the next capture in this chain.
+          active_ids="$(printf '%s' "${runs}" | jq -r --argjson current "${GITHUB_RUN_NUMBER}" \
+            '.workflow_runs[] | select(.run_number > $current and .head_branch == "main" and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending")) | .id')"
           for active_id in ${active_ids}; do
             active_title="$(printf '%s' "${runs}" | jq -r --argjson id "${active_id}" \
               '.workflow_runs[] | select(.id == $id) | .display_title')"
@@ -412,6 +414,7 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
             -d "${payload}"
+          echo "G11_PREDEADLINE_CHAIN=DISPATCH_ACCEPTED after=${GITHUB_RUN_ID}"
       - name: Checkout hash-locked research runtime
         if: (steps.due.outputs.phase!='predeadline'||steps.authority.outputs.rescue_bootstrap=='true')&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.authority.outputs.frozen!='true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
