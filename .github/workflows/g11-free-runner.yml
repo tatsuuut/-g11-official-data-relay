@@ -1018,25 +1018,9 @@ jobs:
         id: wild4-followup
         if: steps.due.outputs.phase=='predeadline'&&steps.runtime.outcome=='success'&&steps.publication-state-verified.outputs.ready=='true'&&steps.critical.outputs.rescue!='true'&&steps.authority.outputs.rescue_bootstrap!='true'
         continue-on-error: true
-        working-directory: .g11-private
         env:
           GH_TOKEN: ${{github.token}}
-          OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
-          EARLY_SENT: ${{steps.wild4-early.outputs.sent}}
-        run: |
-          set -euo pipefail
-          status=0
-          python3 ../scripts/predeadline_race_isolation_v1.py handoff \
-            --state-root ../.relay-state --operational-date "${OPERATIONAL_DATE}" \
-            --early-sent "${EARLY_SENT}" || status=$?
-          if [ "${status}" = 3 ]; then
-            echo 'WILD4_FOLLOWUP_HANDOFF=NO_NEW_UNEXPIRED_INPUT'
-            exit 0
-          fi
-          test "${status}" = 0
-          gh workflow run 364923281 -f mode=wild4 -f operational_date="${OPERATIONAL_DATE}"
-          echo 'sent=true' >> "${GITHUB_OUTPUT}"
-          echo 'WILD4_FOLLOWUP_HANDOFF=DISPATCH_ACCEPTED'
+        run: python3 scripts/predeadline_race_isolation_v1.py handoff --state-root .relay-state --operational-date '${{steps.due.outputs.operational_date}}' --early-sent '${{steps.wild4-early.outputs.sent}}'
       - name: Publish a newly verified feed through OIDC
         if: steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!=''&&steps.night-ready.outputs.allowed=='true'&&(env.G11_NIGHT_TRANSPORT_ONLY=='true'||steps.publication-state-verified.outputs.ready=='true')
         id: publish

@@ -319,7 +319,31 @@ class FollowupTest(unittest.TestCase):
         self.assertLess(source.index('id: wild4-followup'), source.index('id: publish\n'))
         step = source.split('id: wild4-followup\n', 1)[1].split('      - name:', 1)[0]
         self.assertIn("steps.publication-state-verified.outputs.ready=='true'", step)
-        self.assertLess(step.index('gh workflow run'), step.index("echo 'sent=true'"))
+        self.assertIn('predeadline_race_isolation_v1.py handoff', step)
+
+    def test_dispatch_claims_sent_only_after_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/'output'; calls = []
+            adapter.dispatch_followup(self.choose(), '2026-10-24', output,
+                run=lambda args, **kw: calls.append((args, kw)))
+            self.assertEqual('needed=true\nsent=true\n', output.read_text())
+            self.assertEqual('operational_date=2026-10-24', calls[0][0][-1])
+            self.assertTrue(calls[0][1]['check'])
+
+    def test_failed_dispatch_retains_retry_signal_without_false_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/'output'
+            with self.assertRaises(RuntimeError):
+                adapter.dispatch_followup(self.choose(), '2026-10-24', output,
+                    run=lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('dispatch failed')))
+            self.assertEqual('needed=true\n', output.read_text())
+
+    def test_empty_followup_never_calls_receiver(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/'output'
+            adapter.dispatch_followup([], '2026-10-24', output,
+                run=lambda *a, **kw: self.fail('unexpected dispatch'))
+            self.assertEqual('needed=false\n', output.read_text())
 
 
 if __name__ == '__main__':

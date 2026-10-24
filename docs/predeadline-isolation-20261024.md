@@ -56,7 +56,7 @@ accept remains unavailable for that engine.
 
 ## Validation
 
-20 regression tests exercise the handoff and actual reviewed orchestration functions with
+23 regression tests exercise the handoff and actual reviewed orchestration functions with
 controlled source/clock/model doubles: one failed race followed by a healthy
 venue; byte-identical healthy predictions; immutable retry; deadline crossing;
 later-deadline continuation; source-hash and saved-LOCK corruption; global

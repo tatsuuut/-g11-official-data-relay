@@ -15,6 +15,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 import re
+import subprocess
 
 COLLECT_SHA = 'a1d5c2166a4e305825d593f6f48ffa76717bc5998226d5522eb0bde38ff6e42b'
 BET_HANDOFF_SHA = 'ed14b607cb6b590be3a03eff2d08ddc153bc204df6d8ef6c32feffe731adedd6'
@@ -188,6 +189,21 @@ def followup_odds(morning, critical, load_snapshot, now, early_sent):
     return sorted(rows, key=lambda row: row['RACE_KEY'])
 
 
+def dispatch_followup(rows, day, output_path, run=subprocess.run):
+    if output_path:
+        with open(output_path, 'a') as output:
+            output.write('needed=' + str(bool(rows)).lower() + '\n')
+    if not rows:
+        print('WILD4_FOLLOWUP_HANDOFF=NO_NEW_UNEXPIRED_INPUT')
+        return
+    run(['gh', 'workflow', 'run', '364923281', '-f', 'mode=wild4',
+         '-f', 'operational_date=' + day], check=True)
+    if output_path:
+        with open(output_path, 'a') as output:
+            output.write('sent=true\n')
+    print('WILD4_FOLLOWUP_HANDOFF=DISPATCH_ACCEPTED')
+
+
 def _handoff_main():
     import argparse
     import os
@@ -198,7 +214,7 @@ def _handoff_main():
     parser.add_argument('--operational-date', required=True)
     parser.add_argument('--early-sent', default='')
     args = parser.parse_args()
-    sys.path.insert(0, str(Path.cwd()))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'.g11-private'))
     from g11.canonical.official_pipeline import OfficialArtifactStore
     now = datetime.now(ZoneInfo('Asia/Tokyo'))
     if args.operational_date != now.date().isoformat():
@@ -216,10 +232,8 @@ def _handoff_main():
     rows = followup_odds(morning, metadata.get('CRITICAL', {}), load, now,
                          args.early_sent == 'true')
     print('G11_WILD4_FOLLOWUP_INPUTS=' + json.dumps(rows, sort_keys=True))
-    if 'GITHUB_OUTPUT' in os.environ:
-        with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-            output.write('needed=' + str(bool(rows)).lower() + '\n')
-    return 0 if rows else 3
+    dispatch_followup(rows, args.operational_date, os.environ.get('GITHUB_OUTPUT'))
+    return 0
 
 
 if __name__ == '__main__':
