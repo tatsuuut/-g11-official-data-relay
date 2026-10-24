@@ -37,6 +37,12 @@ Changes:
   six-second request and exact final-response hash. The former plain urllib
   read returned HTTP 403 while the canonical client succeeded; failures still
   preserve the original retry instead of suppressing an unpublished race.
+- When no eligible race is currently inside its capture window, a critical
+  invocation may wait once, at most five minutes, for the nearest saved official
+  T-7 boundary. This avoids starting optional work just before the first input
+  becomes due. An active or partially saved race never waits. The frozen
+  collector still has no between-race waits and its eight-source limit; no
+  input is acquired before the recorded official boundary.
 
 Protected: frozen private source cf2769886e857369630512d2301558f6c17188a6,
 existing forecast rules/models, saved morning and predeadline LOCKs/BETs,

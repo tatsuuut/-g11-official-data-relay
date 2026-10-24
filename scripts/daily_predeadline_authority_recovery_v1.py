@@ -434,6 +434,8 @@ def main():
     from rescue_night_result_parser_v1 import official_input_compatibility
     with official_input_compatibility():
         if mode == "critical":
+            from critical_saved_publication_v1 import align_empty_capture
+            align_empty_capture(Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve(), day)
             from g11.relay import predeadline_critical_v1
             predeadline_critical_v1.main()
         elif mode == "predeadline":
@@ -1203,6 +1205,7 @@ def deliver_delayed_night(state,feed_path,origin):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 

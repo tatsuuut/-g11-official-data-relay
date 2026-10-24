@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from urllib.request import Request, urlopen
 
 JST = timezone(timedelta(hours=9))
@@ -20,6 +21,60 @@ JST = timezone(timedelta(hours=9))
 def require(ok, code):
     if not ok:
         raise RuntimeError(code)
+
+
+def capture_boundary_delay(plan, saved_sources, now, maximum=300):
+    """Wait once for the nearest capture boundary only when no race is due.
+
+    Never wait between captures: the frozen collector keeps its eight-source,
+    no-future-wait policy. An active race, including a partially saved packet,
+    must return to capture/prediction/publication immediately.
+    """
+    require(now.utcoffset() == timedelta(hours=9), 'CAPTURE_BOUNDARY_TIMEZONE')
+    future = []
+    for task in plan:
+        due = datetime.fromisoformat(task['DUE_AT_JST'])
+        deadline = datetime.fromisoformat(task['MUST_FINISH_BEFORE_JST'])
+        require(due.utcoffset() == deadline.utcoffset() == timedelta(hours=9)
+                and due.date() == deadline.date() == now.date()
+                and deadline - due == timedelta(minutes=7), 'CAPTURE_BOUNDARY_PLAN')
+        if now >= deadline:
+            continue
+        if due <= now:
+            return 0
+        if task['SOURCE_ID'] not in saved_sources:
+            future.append((due - now).total_seconds())
+    delay = min(future, default=0)
+    return delay if 0 < delay <= maximum else 0
+
+
+def align_empty_capture(state, day, *, clock=None, sleeper=None):
+    """Read the verified saved plan; never request or rewrite official input."""
+    clock = clock or (lambda: datetime.now(JST))
+    sleeper = sleeper or time.sleep
+    try:
+        now = clock()
+        require(now.date().isoformat() == day, 'CAPTURE_BOUNDARY_DAY')
+        from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
+        artifact = OfficialArtifactStore(state / 'store')
+        morning = artifact.load_verified_snapshot('morning', 'official-day-input')
+        _, eligible, _ = CanonicalRunner._formal_prediction_scope(
+            morning, failure_prefix='CAPTURE_BOUNDARY_SCOPE')
+        eligible = set(eligible)
+        plan = [row for row in morning['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN']
+                if row['RACE_KEY'] in eligible]
+        saved = {path.stem for path in (state / 'store/snapshots/predeadline').glob('*.json')}
+        delay = capture_boundary_delay(plan, saved, now)
+    except Exception as exc:
+        # Optional alignment must never replace the critical lane's own guards.
+        print('G11_CAPTURE_BOUNDARY=SKIPPED TYPE=' + type(exc).__name__, flush=True)
+        return
+    print('G11_CAPTURE_BOUNDARY_WAIT_SECONDS=' + str(round(delay, 3)), flush=True)
+    # One fixed, bounded target. Do not extend the wait for subsequent races.
+    while delay > 0:
+        interval = min(delay, 30)
+        sleeper(interval)
+        delay -= interval
 
 
 def project_saved(state, day, run_id, source, output, *, authority_module=None,
