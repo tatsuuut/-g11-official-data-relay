@@ -505,7 +505,7 @@ class RescueDeliveryRoutingTests(unittest.TestCase):
     def test_publication_failure_cannot_stop_saved_rescue_and_observer(self):
         from types import SimpleNamespace as S
         workflow=(Path(__file__).resolve().parents[1]/".github/workflows/g11-free-runner.yml").read_text()
-        def allowed(name,persisted=True,cancelled=False,runtime="success",published="failure",early=False,followup=False,needed=False):
+        def allowed(name,persisted=True,cancelled=False,runtime="success",published="failure",early=False,followup=False,needed=None):
             block=workflow.split("      - name: "+name+"\n",1)[1]
             expr=block.split("if: ",1)[1].split("\n",1)[0]
             self.assertIn("always()",expr)
@@ -513,7 +513,7 @@ class RescueDeliveryRoutingTests(unittest.TestCase):
             expr=expr.replace("steps.publication-state-verified.outputs.ready",repr("true" if persisted else "false"))
             expr=expr.replace("steps.wild4-early.outputs.sent",repr("true" if early else ""))
             expr=expr.replace("steps.wild4-followup.outputs.sent",repr("true" if followup else ""))
-            expr=expr.replace("steps.wild4-followup.outputs.needed",repr("true" if needed else "false"))
+            expr=expr.replace("steps.wild4-followup.outputs.needed",repr("" if needed is None else "true" if needed else "false"))
             steps=S(runtime=S(outcome=runtime),publish=S(outcome=published),
                 authority=S(outputs=S(rescue_bootstrap="true")),due=S(outputs=S(phase="predeadline")))
             return eval(expr,{"__builtins__":{}},{"steps":steps,"always":lambda:True,"cancelled":lambda:cancelled})
@@ -525,6 +525,8 @@ class RescueDeliveryRoutingTests(unittest.TestCase):
         self.assertFalse(allowed("WILD4 shadow",early=True))
         self.assertTrue(allowed("WILD4 shadow",early=True,needed=True))
         self.assertFalse(allowed("WILD4 shadow",early=True,needed=True,followup=True))
+        self.assertFalse(allowed("WILD4 shadow",needed=False))
+        self.assertTrue(allowed("WILD4 shadow",needed=True))
         self.assertTrue(allowed("Rescue",early=True))
 
 

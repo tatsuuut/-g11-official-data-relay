@@ -189,6 +189,60 @@ def followup_odds(morning, critical, load_snapshot, now, early_sent):
     return sorted(rows, key=lambda row: row['RACE_KEY'])
 
 
+def exclude_published_goripan(rows, feed, day):
+    """A verified, immutable public LOCK needs no second observer job."""
+    if (feed.get('status') != 'PASS' or feed.get('operational_date_jst') != day
+            or feed.get('schema') not in {'G11_PUBLIC_APP_FEED_V1', 'G11_PUBLIC_APP_FEED_V2'}):
+        raise ValueError('FOLLOWUP_PUBLIC_DAY')
+    published = {}
+    for race in feed['races']:
+        key = race['key']
+        if key in published:
+            raise ValueError('FOLLOWUP_PUBLIC_DUPLICATE')
+        published[key] = race
+    remaining = []
+    for row in rows:
+        try:
+            race = published[row['RACE_KEY']]
+            lock = race['wild_pack']['wild4']['goripan']
+            deadline = datetime.fromisoformat(row['DEADLINE_AT_JST'])
+            locked = datetime.fromisoformat(lock['locked_at'])
+            valid = (race['date_jst'] == day and lock['race_key'] == row['RACE_KEY']
+                and lock['machine_identity'] == 'WILD4'
+                and lock['status'] == 'VIRTUAL_PREDEADLINE_LOCK'
+                and datetime.fromisoformat(lock['deadline_at']) == deadline
+                and datetime.fromisoformat(race['deadline_jst']) == deadline
+                and locked.utcoffset() is not None and locked < deadline
+                and all(re.fullmatch('[a-f0-9]{64}', lock[k]) for k in
+                        ('lock_sha256', 'model_sha256', 'odds_snapshot_sha256')))
+        except (KeyError, TypeError, ValueError):
+            valid = False
+        if not valid:
+            remaining.append(row)
+    return remaining
+
+
+def without_published_goripan(rows, day):
+    if not rows:
+        return rows
+    # Read-only optimisation. On timeout, bad identity or integrity, retain the
+    # existing retry path instead of assuming that an unpublished LOCK exists.
+    try:
+        from urllib.request import urlopen
+        import hashlib
+        url = 'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date=' + day
+        with urlopen(url, timeout=6) as response:
+            raw = response.read(20_000_001)
+            if len(raw) > 20_000_000 or hashlib.sha256(raw).hexdigest() != response.headers.get('x-g11-feed-sha256'):
+                raise ValueError('FOLLOWUP_PUBLIC_HASH')
+        remaining = exclude_published_goripan(rows, json.loads(raw), day)
+        print('WILD4_FOLLOWUP_ALREADY_PUBLIC=' + str(len(rows) - len(remaining)))
+        return remaining
+    except Exception:
+        print('WILD4_FOLLOWUP_PUBLIC_READBACK=UNAVAILABLE_RETRY_PRESERVED')
+        return rows
+
+
 def dispatch_followup(rows, day, output_path, run=subprocess.run):
     if output_path:
         with open(output_path, 'a') as output:
@@ -231,6 +285,7 @@ def _handoff_main():
         return store.load_verified_snapshot('predeadline', name)
     rows = followup_odds(morning, metadata.get('CRITICAL', {}), load, now,
                          args.early_sent == 'true')
+    rows = without_published_goripan(rows, args.operational_date)
     print('G11_WILD4_FOLLOWUP_INPUTS=' + json.dumps(rows, sort_keys=True))
     dispatch_followup(rows, args.operational_date, os.environ.get('GITHUB_OUTPUT'))
     return 0
