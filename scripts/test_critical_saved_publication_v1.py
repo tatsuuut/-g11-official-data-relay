@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -140,6 +140,57 @@ class EarlyPublicationTests(unittest.TestCase):
             self.assertEqual(payload, delivery.optional_deme_projection(DAY))
         finally:
             os.chdir(old)
+
+
+class CaptureBoundaryTests(unittest.TestCase):
+    def task(self, due, deadline, key='a'):
+        return {'DUE_AT_JST': DAY+'T'+due+'+09:00',
+                'MUST_FINISH_BEFORE_JST': DAY+'T'+deadline+'+09:00',
+                'SOURCE_ID': key, 'RACE_KEY': key}
+
+    def test_waits_once_for_nearest_allowed_capture_without_advancing_it(self):
+        plan = [self.task('20:34:00', '20:41:00'), self.task('20:35:00', '20:42:00', 'b')]
+        self.assertEqual(170, early.capture_boundary_delay(plan, set(), NOW))
+        self.assertEqual(0, early.capture_boundary_delay(
+            [self.task('20:37:00', '20:44:00')], set(), NOW))
+        self.assertEqual(0, early.capture_boundary_delay(plan, {'a', 'b'}, NOW))
+
+    def test_due_active_or_partially_saved_race_is_never_delayed(self):
+        plan = [self.task('20:31:00', '20:38:00'), self.task('20:34:00', '20:41:00', 'b')]
+        for saved in (set(), {'a'}):
+            self.assertEqual(0, early.capture_boundary_delay(plan, saved, NOW))
+        self.assertEqual(0, early.capture_boundary_delay(
+            [self.task('20:20:00', '20:27:00')], set(), NOW))
+
+    def test_invalid_window_or_day_cannot_create_a_wait(self):
+        with self.assertRaisesRegex(RuntimeError, 'CAPTURE_BOUNDARY_PLAN'):
+            early.capture_boundary_delay([self.task('20:34:00', '20:44:00')], set(), NOW)
+        task = self.task('20:34:00', '20:41:00')
+        task['DUE_AT_JST'] = '2026-10-25T20:34:00+09:00'
+        with self.assertRaisesRegex(RuntimeError, 'CAPTURE_BOUNDARY_PLAN'):
+            early.capture_boundary_delay([task], set(), NOW)
+
+    def test_alignment_remains_before_unchanged_frozen_critical_call(self):
+        source = (Path(__file__).resolve().parents[1] / 'scripts/daily_predeadline_authority_recovery_v1.py').read_text()
+        block = source.split('if mode == "critical":', 1)[1].split('elif mode == "predeadline":', 1)[0]
+        self.assertLess(block.index('align_empty_capture('), block.index('predeadline_critical_v1.main()'))
+
+    def test_verified_scope_wait_has_one_target_and_bounded_sleep_segments(self):
+        plan = [self.task('20:32:00', '20:39:00', 'excluded'),
+                self.task('20:34:00', '20:41:00'), self.task('20:35:00', '20:42:00', 'b')]
+        artifact = Mock()
+        artifact.load_verified_snapshot.return_value = {'SNAPSHOT': {'PAYLOAD': {'PREDEADLINE_PLAN': plan}}}
+        pipeline = SimpleNamespace(OfficialArtifactStore=Mock(return_value=artifact),
+            CanonicalRunner=SimpleNamespace(_formal_prediction_scope=Mock(return_value=({}, ['a', 'b'], []))))
+        sleeper, clock = Mock(), Mock(return_value=NOW)
+        with tempfile.TemporaryDirectory() as temp, patch.dict(sys.modules, {
+            'g11': ModuleType('g11'), 'g11.canonical': ModuleType('g11.canonical'),
+            'g11.canonical.official_pipeline': pipeline}):
+            early.align_empty_capture(Path(temp), DAY, clock=clock, sleeper=sleeper)
+        intervals = [call.args[0] for call in sleeper.call_args_list]
+        self.assertEqual(170, sum(intervals))
+        self.assertTrue(all(0 < part <= 30 for part in intervals))
+        clock.assert_called_once()
 
 
 class PublishedGoripanTests(unittest.TestCase):
