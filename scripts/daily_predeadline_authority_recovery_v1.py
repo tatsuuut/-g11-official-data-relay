@@ -439,7 +439,9 @@ def main():
         elif mode == "predeadline":
             guard_optional_mashiro_shadow()
             from g11.relay import predeadline_nowait_v1
-            return predeadline_nowait_v1.main(sys.argv[1:])
+            from predeadline_race_isolation_v1 import isolate_predeadline_inputs
+            with isolate_predeadline_inputs():
+                return predeadline_nowait_v1.main(sys.argv[1:])
         elif mode == "night":
             from g11.relay import v1
             return v1.main(sys.argv[1:])
