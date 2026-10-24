@@ -10,6 +10,19 @@ from unittest.mock import patch
 import selective_alert_input_v1 as m
 
 class EvidenceTest(unittest.TestCase):
+    def test_current_probability_group_precedes_history_and_every_lock_is_retained(self):
+        now = m.datetime.fromisoformat('2026-10-24T21:00:00+09:00')
+        source = {'schema': 'G11_WILD4_PUBLIC_PROJECTION_V1', 'date': '2026-10-24',
+            'races': [{'race_key': 'past', 'deadline_at': '2026-10-24T20:30:00+09:00'},
+                      {'race_key': 'future', 'deadline_at': '2026-10-24T21:05:00+09:00'},
+                      {'race_key': 'unknown'}]}
+        before = copy.deepcopy(source)
+        groups = m.delivery_groups(source, now)
+        self.assertEqual(['future'], [r['race_key'] for r in groups[0]['races']])
+        self.assertEqual(['past','unknown'], [r['race_key'] for r in groups[1]['races']])
+        self.assertEqual(before, source)
+        self.assertEqual(3, sum(len(g['races']) for g in groups))
+
     def test_unexpired_evidence_is_sent_before_old_records_without_changing_any(self):
         now = m.datetime.fromisoformat('2026-10-24T21:00:00+09:00')
         records = [{'id': key, 'deadline_at': '2026-10-24T'+at+'+09:00'} for key, at in

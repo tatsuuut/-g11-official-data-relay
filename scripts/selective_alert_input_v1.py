@@ -191,6 +191,18 @@ def urgent_first(records, now):
         return (1, now)
     return sorted(records, key=priority)
 
+def delivery_groups(source, now):
+    """Keep current odds and probability evidence together ahead of history."""
+    current, history = [], []
+    for row in source['races']:
+        try:
+            deadline = datetime.fromisoformat(row['deadline_at'])
+            live = deadline.tzinfo is not None and deadline > now
+        except (KeyError, TypeError, ValueError):
+            live = False
+        (current if live else history).append(row)
+    return [{**source, 'races': rows} for rows in (current, history) if rows]
+
 def collect_probabilities(ledger, source):
     """Read immutable hash preimages; never infer, calibrate or select a BET."""
     day = source["date"]
@@ -274,14 +286,18 @@ def main():
     with urllib.request.urlopen(request, timeout=25) as response:
         token = json.load(response)["value"]
     source = json.loads(args.projection.read_bytes())
-    deliver_optional(args.store, source, token=token, odds_day=json.loads(args.odds_day.read_bytes()))
     # Existing WILD4 observer already owns this immutable ledger. A missing
     # optional source must never block ordinary projection/odds publication.
     ledger = args.probability_ledger
     if ledger is None and os.environ.get("RUNNER_TEMP"):
         ledger = Path(os.environ["RUNNER_TEMP"]) / "g11-wild4-future-locks"
-    if ledger is not None and source.get("schema") == "G11_WILD4_PUBLIC_PROJECTION_V1":
-        deliver_probabilities_optional(ledger, source, token=token)
+    odds_day = json.loads(args.odds_day.read_bytes())
+    groups = (delivery_groups(source, datetime.now(timezone.utc))
+              if source.get('schema') == 'G11_WILD4_PUBLIC_PROJECTION_V1' else [source])
+    for group in groups:
+        deliver_optional(args.store, group, token=token, odds_day=odds_day)
+        if ledger is not None and source.get("schema") == "G11_WILD4_PUBLIC_PROJECTION_V1":
+            deliver_probabilities_optional(ledger, group, token=token)
 
 if __name__ == "__main__":
     main()
