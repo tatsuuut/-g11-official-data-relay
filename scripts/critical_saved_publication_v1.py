@@ -91,9 +91,24 @@ def main():
     from daily_runtime_delivery_v1 import deliver, ORIGIN
     require(os.environ['G11_APP_ORIGIN'] == ORIGIN, 'EARLY_PUBLICATION_ORIGIN')
     receipt = deliver(root / '.relay-state', output, ORIGIN, include_optional_inputs=False)
+    # HOME's condition comparison also needs the saved odds proof. Send just
+    # current, newly saved races now; the regular path retains the full history.
+    feed = json.loads(output.read_bytes())
+    critical = json.loads((root / '.relay-state/relay-state.json').read_bytes())['CRITICAL']
+    fresh = fresh_input_source(feed, critical, datetime.now(JST))
+    if fresh['races']:
+        from selective_alert_input_v1 import deliver_optional
+        deliver_optional(root / '.relay-state/store', fresh, ORIGIN, token=token)
     print('G11_EARLY_PUBLICATION=' + json.dumps({
         'status': receipt['site_get_readback'], 'at': datetime.now(JST).isoformat(),
         'authority': receipt['authority_sha256'], 'prediction_recalculation': 0}, sort_keys=True))
+
+
+def fresh_input_source(feed, critical, now):
+    keys = set(critical.get('V53_LOCKED_BEFORE_DEADLINE', []))
+    rows = [row for row in feed['races'] if row['key'] in keys
+            and datetime.fromisoformat(row['deadline_jst']) > now]
+    return {**feed, 'races': rows}
 
 
 if __name__ == '__main__':

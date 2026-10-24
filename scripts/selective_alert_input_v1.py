@@ -157,7 +157,7 @@ def post_batch(origin, token, payload):
 def deliver_optional(store_path, source, origin=ORIGIN, token=None, odds_day=None, sender=post_batch):
     try:
         payload, held = collect(store_path, source, odds_day=odds_day)
-        records = payload["records"]
+        records = urgent_first(payload["records"], datetime.now(timezone.utc))
         acknowledgements = []
         # Existing update opportunity, bounded chunks; not a new retry/scheduler.
         batch = []
@@ -178,6 +178,18 @@ def deliver_optional(store_path, source, origin=ORIGIN, token=None, odds_day=Non
         result = {"status": "HELD", "reason": type(exc).__name__, "selection_enabled": False, "delivery_enabled": False, "notification_send_count": 0}
     print("G11_SELECTIVE_INPUT=" + json.dumps(result, ensure_ascii=False, sort_keys=True))
     return result
+
+def urgent_first(records, now):
+    """Publish still-open race evidence before historical batches; retain all."""
+    def priority(record):
+        try:
+            deadline = datetime.fromisoformat(record['deadline_at'])
+            if deadline.tzinfo is not None and deadline > now:
+                return (0, deadline)
+        except (KeyError, ValueError, TypeError):
+            pass
+        return (1, now)
+    return sorted(records, key=priority)
 
 def collect_probabilities(ledger, source):
     """Read immutable hash preimages; never infer, calibrate or select a BET."""

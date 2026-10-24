@@ -97,6 +97,15 @@ class EarlyPublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'SEQUENCE_SCOPE'):
             hot.create_delta({**incoming, 'stage': 'NIGHT'}, accepted, 'a'*64, sequence_offset=0)
 
+    def test_early_home_evidence_contains_only_new_unexpired_races(self):
+        rows = [{'key': key, 'deadline_jst': DAY + at} for key, at in
+                [('new', 'T20:36:00+09:00'), ('old', 'T20:36:00+09:00'),
+                 ('expired', 'T20:30:00+09:00')]]
+        feed = {'races': rows, 'operational_date_jst': DAY}
+        result = early.fresh_input_source(feed, {'V53_LOCKED_BEFORE_DEADLINE': ['new', 'expired']}, NOW)
+        self.assertEqual(['new'], [r['key'] for r in result['races']])
+        self.assertEqual(3, len(feed['races']))
+
 
 class PublishedGoripanTests(unittest.TestCase):
     def setUp(self):

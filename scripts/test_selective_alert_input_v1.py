@@ -10,6 +10,16 @@ from unittest.mock import patch
 import selective_alert_input_v1 as m
 
 class EvidenceTest(unittest.TestCase):
+    def test_unexpired_evidence_is_sent_before_old_records_without_changing_any(self):
+        now = m.datetime.fromisoformat('2026-10-24T21:00:00+09:00')
+        records = [{'id': key, 'deadline_at': '2026-10-24T'+at+'+09:00'} for key, at in
+                   [('old', '20:30:00'), ('later', '21:10:00'), ('urgent', '21:05:00')]]
+        before = copy.deepcopy(records)
+        ordered = m.urgent_first(records, now)
+        self.assertEqual(['urgent', 'later', 'old'], [r['id'] for r in ordered])
+        self.assertEqual(before, records)
+        self.assertEqual(sorted(ordered, key=lambda r:r['id']), sorted(before, key=lambda r:r['id']))
+
     def test_context_wire_chunks_are_bounded_and_missing_context_keeps_odds(self):
         records=[{"player_context":{"synthetic":"x"*20_000}} for _ in range(40)]
         with patch.object(m,'collect',return_value=({'schema':m.SCHEMA,'date':'2026-10-22','records':records},[])):
