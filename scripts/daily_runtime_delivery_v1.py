@@ -212,6 +212,16 @@ def optional_deme_projection(day):
                 or not isinstance(value.get("candidates"), list)
                 or str(value.get("discovery_through") or "") > day):
             raise ValueError("CONTRACT")
+        # This hot-delta route requires second-resolution JST. The dedicated
+        # research delivery below accepts the original richer timestamp. Do
+        # not retry an invalid research-only delta or rewrite its saved bytes.
+        stamp = value.get('updated_at')
+        if (not isinstance(stamp, str) or not re.fullmatch(
+                r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00', stamp)
+                or stamp[:10] > day):
+            print('G11_DEME_PUBLIC=DEFERRED_TO_DEDICATED_DELIVERY')
+            return None
+        datetime.fromisoformat(stamp)
         return value
     except (OSError, ValueError, UnicodeDecodeError):
         print("G11_DEME_PUBLIC=HELD_INVALID_OPTIONAL_PROJECTION")

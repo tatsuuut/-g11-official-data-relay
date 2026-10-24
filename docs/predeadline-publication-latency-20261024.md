@@ -24,6 +24,15 @@ Changes:
 - The Site uses completion-based 15-second refresh for the current day,
   immediate focus/visibility refresh, and pauses hidden-tab reads. A slow
   response is not aborted by the next polling interval; history keeps 60s.
+- HOME's saved odds evidence for freshly published V53 races is sent in the
+  early lane too, so condition cards need not wait for the full historical
+  evidence pass. Both evidence senders prioritize unexpired races while
+  retaining every historical record and its existing validation.
+- Repeated `HOT_DELTA_EMPTY` failures on unchanged-race cycles came from a
+  research-only payload whose microsecond timestamp does not meet this
+  route's seconds-only JST contract. Such metadata is left byte-for-byte
+  intact and delivered through the existing dedicated research endpoint.
+  Canonical no-change delivery no longer retries this incompatible sidecar.
 
 Protected: frozen private source cf2769886e857369630512d2301558f6c17188a6,
 existing forecast rules/models, saved morning and predeadline LOCKs/BETs,

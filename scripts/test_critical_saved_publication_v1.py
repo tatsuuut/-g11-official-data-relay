@@ -2,6 +2,7 @@
 import copy
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from unittest.mock import Mock
 import critical_saved_publication_v1 as early
 import predeadline_race_isolation_v1 as handoff
 import hot_delta_transport_v1 as hot
+import daily_runtime_delivery_v1 as delivery
 
 DAY = '2026-10-24'
 NOW = datetime.fromisoformat(DAY + 'T20:31:10+09:00')
@@ -96,6 +98,32 @@ class EarlyPublicationTests(unittest.TestCase):
         self.assertEqual(123001, regular_delta['PATCH_SEQUENCE'])
         with self.assertRaisesRegex(RuntimeError, 'SEQUENCE_SCOPE'):
             hot.create_delta({**incoming, 'stage': 'NIGHT'}, accepted, 'a'*64, sequence_offset=0)
+
+    def test_early_home_evidence_contains_only_new_unexpired_races(self):
+        rows = [{'key': key, 'deadline_jst': DAY + at} for key, at in
+                [('new', 'T20:36:00+09:00'), ('old', 'T20:36:00+09:00'),
+                 ('expired', 'T20:30:00+09:00')]]
+        feed = {'races': rows, 'operational_date_jst': DAY}
+        result = early.fresh_input_source(feed, {'V53_LOCKED_BEFORE_DEADLINE': ['new', 'expired']}, NOW)
+        self.assertEqual(['new'], [r['key'] for r in result['races']])
+        self.assertEqual(3, len(feed['races']))
+
+    def test_optional_research_wire_mismatch_does_not_retry_or_rewrite_source(self):
+        old = Path.cwd()
+        try:
+            os.chdir(self.root); Path('.relay-output').mkdir()
+            path = Path('.relay-output/deme-discovery-public.json')
+            payload = {'schema': 'G11_P3_DEME_DISCOVERY_V1', 'production_mutated': False,
+                'available': True, 'counts': {}, 'candidates': [],
+                'updated_at': DAY+'T20:31:10.123456+09:00'}
+            path.write_text(json.dumps(payload)); before = path.read_bytes()
+            self.assertIsNone(delivery.optional_deme_projection(DAY))
+            self.assertEqual(before, path.read_bytes())
+            payload['updated_at'] = DAY+'T20:31:10+09:00'
+            path.write_text(json.dumps(payload))
+            self.assertEqual(payload, delivery.optional_deme_projection(DAY))
+        finally:
+            os.chdir(old)
 
 
 class PublishedGoripanTests(unittest.TestCase):
