@@ -28,6 +28,11 @@ Changes:
   early lane too, so condition cards need not wait for the full historical
   evidence pass. Both evidence senders prioritize unexpired races while
   retaining every historical record and its existing validation.
+- Repeated `HOT_DELTA_EMPTY` failures on unchanged-race cycles came from a
+  research-only payload whose microsecond timestamp does not meet this
+  route's seconds-only JST contract. Such metadata is left byte-for-byte
+  intact and delivered through the existing dedicated research endpoint.
+  Canonical no-change delivery no longer retries this incompatible sidecar.
 
 Protected: frozen private source cf2769886e857369630512d2301558f6c17188a6,
 existing forecast rules/models, saved morning and predeadline LOCKs/BETs,
