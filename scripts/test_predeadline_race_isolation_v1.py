@@ -267,5 +267,84 @@ class IsolationTest(unittest.TestCase):
         self.assertEqual(3, len(saved))
 
 
+class FollowupTest(unittest.TestCase):
+    def setUp(self):
+        self.now = BASE + timedelta(minutes=2)
+        self.critical = {'OPERATIONAL_DATE': '2026-10-24',
+            'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'CRITICAL_CAPTURE_AT': BASE.isoformat()}
+        self.morning = {'OPERATIONAL_DATE_JST': '2026-10-24', 'PREDEADLINE_PLAN': []}
+        self.snapshots = {}
+        for key, captured in [(BAD, BASE-timedelta(seconds=15)), (GOOD, BASE+timedelta(minutes=1))]:
+            name = 'odds3t-' + key
+            self.morning['PREDEADLINE_PLAN'].append({'RACE_KEY': key, 'SOURCE_ID': name,
+                'KIND': 'ODDS3T', 'MUST_FINISH_BEFORE_JST': (BASE+timedelta(minutes=6)).isoformat()})
+            self.snapshots[name] = {'SNAPSHOT': {'PAYLOAD': {
+                'STATUS': 'PREDEADLINE_SOURCE_COMPLETE', 'RACE_KEY': key, 'KIND': 'ODDS3T',
+                'CAPTURED_AT_JST': captured.isoformat()}}}
+
+    def choose(self, early=True):
+        return adapter.followup_odds(self.morning, self.critical, self.snapshots.get, self.now, early)
+
+    def test_accepted_early_dispatch_does_not_suppress_new_saved_odds(self):
+        self.assertEqual([GOOD], [r['RACE_KEY'] for r in self.choose()])
+
+    def test_failed_early_handoff_retries_all_unexpired_verified_inputs(self):
+        self.assertEqual([BAD, GOOD], [r['RACE_KEY'] for r in self.choose(False)])
+
+    def test_no_new_source_does_not_queue_duplicate_job(self):
+        self.snapshots.pop('odds3t-' + GOOD)
+        self.assertEqual([], self.choose())
+
+    def test_expired_inputs_are_never_handed_off_for_prediction(self):
+        self.now = BASE+timedelta(minutes=7)
+        self.assertEqual([], self.choose(False))
+
+    def test_wrong_day_and_future_capture_cannot_trigger_handoff(self):
+        self.morning['OPERATIONAL_DATE_JST'] = '2026-10-23'
+        with self.assertRaisesRegex(ValueError, 'DAY_BINDING'): self.choose()
+        self.morning['OPERATIONAL_DATE_JST'] = '2026-10-24'
+        self.snapshots['odds3t-' + GOOD]['SNAPSHOT']['PAYLOAD']['CAPTURED_AT_JST'] = (self.now+timedelta(seconds=1)).isoformat()
+        with self.assertRaisesRegex(ValueError, 'SNAPSHOT_TIME'): self.choose()
+
+    def test_wrong_source_or_unverified_critical_is_rejected(self):
+        self.critical['CRITICAL_CHECKPOINT_STATUS'] = 'PARTIAL'
+        with self.assertRaisesRegex(ValueError, 'CRITICAL_BINDING'): self.choose()
+        self.critical['CRITICAL_CHECKPOINT_STATUS'] = 'PASS'
+        self.snapshots['odds3t-' + GOOD]['SNAPSHOT']['PAYLOAD']['RACE_KEY'] = BAD
+        with self.assertRaisesRegex(ValueError, 'SNAPSHOT_BINDING'): self.choose()
+
+    def test_followup_is_after_verified_save_and_before_site_publication(self):
+        source = (Path(__file__).resolve().parents[1]/'.github/workflows/g11-free-runner.yml').read_text()
+        self.assertLess(source.index('id: publication-state-verified'), source.index('id: wild4-followup'))
+        self.assertLess(source.index('id: wild4-followup'), source.index('id: publish\n'))
+        step = source.split('id: wild4-followup\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn("steps.publication-state-verified.outputs.ready=='true'", step)
+        self.assertIn('predeadline_race_isolation_v1.py handoff', step)
+
+    def test_dispatch_claims_sent_only_after_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/'output'; calls = []
+            adapter.dispatch_followup(self.choose(), '2026-10-24', output,
+                run=lambda args, **kw: calls.append((args, kw)))
+            self.assertEqual('needed=true\nsent=true\n', output.read_text())
+            self.assertEqual('operational_date=2026-10-24', calls[0][0][-1])
+            self.assertTrue(calls[0][1]['check'])
+
+    def test_failed_dispatch_retains_retry_signal_without_false_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/'output'
+            with self.assertRaises(RuntimeError):
+                adapter.dispatch_followup(self.choose(), '2026-10-24', output,
+                    run=lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('dispatch failed')))
+            self.assertEqual('needed=true\n', output.read_text())
+
+    def test_empty_followup_never_calls_receiver(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/'output'
+            adapter.dispatch_followup([], '2026-10-24', output,
+                run=lambda *a, **kw: self.fail('unexpected dispatch'))
+            self.assertEqual('needed=false\n', output.read_text())
+
+
 if __name__ == '__main__':
     unittest.main()
