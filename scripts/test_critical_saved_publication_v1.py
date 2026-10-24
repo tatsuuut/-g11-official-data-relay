@@ -4,10 +4,12 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import critical_saved_publication_v1 as early
 import predeadline_race_isolation_v1 as handoff
@@ -50,6 +52,20 @@ class EarlyPublicationTests(unittest.TestCase):
         self.assertEqual(4, self.module.verify_locks.call_count)
         self.assertEqual('b'*40, self.relay.build_feed.call_args.kwargs['github_sha'])
         self.assertEqual('predeadline', self.relay.build_feed.call_args.kwargs['relay_phase'])
+
+    def test_real_projector_import_needs_no_optional_dependencies(self):
+        source = Path(__file__).resolve().parents[1] / '.g11-private'
+        if not (source / 'g11/relay/v1.py').is_file():
+            self.skipTest('private source is available in the required contract gate')
+        statement = (
+            'import sys; from g11.relay import v1; '
+            'from g11.growth_p3.v1_1 import relay_publish_v1; '
+            "bad={'catboost','numpy','pandas','scipy','matplotlib','plotly','lxml'}; "
+            'assert not bad.intersection(sys.modules), bad.intersection(sys.modules)'
+        )
+        result = subprocess.run([sys.executable, '-S', '-c', statement], cwd=source,
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_no_new_locks_does_not_build_or_send(self):
         self.meta['CRITICAL'].update(LAST_TIMELY_P3_LIVE_COUNT=0, LAST_TIMELY_V53_COUNT=0)
@@ -156,6 +172,24 @@ class PublishedGoripanTests(unittest.TestCase):
         self.feed['races'] *= 2
         with self.assertRaisesRegex(ValueError, 'PUBLIC_DUPLICATE'):
             handoff.exclude_published_goripan([self.row], self.feed, DAY)
+
+    def test_http_readback_requires_exact_final_response_hash(self):
+        import hashlib
+        raw = json.dumps(self.feed).encode()
+        def response(command, **kwargs):
+            Path(command[command.index('--output')+1]).write_bytes(raw)
+            Path(command[command.index('--dump-header')+1]).write_text(
+                'HTTP/1.1 200 Connection established\nX-G11-Feed-Sha256: invalid\n\n'
+                'HTTP/2 200\nX-G11-Feed-Sha256: ' + hashlib.sha256(raw).hexdigest() + '\n')
+        with patch.object(handoff.subprocess, 'run', side_effect=response):
+            self.assertEqual([], handoff.without_published_goripan([self.row], DAY))
+        def wrong_hash(command, **kwargs):
+            response(command, **kwargs)
+            Path(command[command.index('--dump-header')+1]).write_text('HTTP/2 200\n')
+        with patch.object(handoff.subprocess, 'run', side_effect=wrong_hash):
+            self.assertEqual([self.row], handoff.without_published_goripan([self.row], DAY))
+        with patch.object(handoff.subprocess, 'run', side_effect=subprocess.TimeoutExpired('curl', 8)):
+            self.assertEqual([self.row], handoff.without_published_goripan([self.row], DAY))
 
 
 if __name__ == '__main__':
