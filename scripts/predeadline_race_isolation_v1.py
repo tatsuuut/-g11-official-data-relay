@@ -228,18 +228,34 @@ def without_published_goripan(rows, day):
     # Read-only optimisation. On timeout, bad identity or integrity, retain the
     # existing retry path instead of assuming that an unpublished LOCK exists.
     try:
-        from urllib.request import urlopen
         import hashlib
+        import tempfile
         url = 'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date=' + day
-        with urlopen(url, timeout=6) as response:
-            raw = response.read(20_000_001)
-            if len(raw) > 20_000_000 or hashlib.sha256(raw).hexdigest() != response.headers.get('x-g11-feed-sha256'):
+        # Use the same HTTP client as canonical Site delivery. The plain
+        # urllib request is rejected by this origin even when curl readback
+        # succeeds, which otherwise makes every deduplication a retry.
+        with tempfile.TemporaryDirectory(prefix='g11-followup-') as temporary:
+            body = Path(temporary) / 'body.json'
+            header = Path(temporary) / 'headers.txt'
+            subprocess.run(['curl', '--fail-with-body', '--silent', '--show-error',
+                '--max-time', '6', '--max-filesize', '20000000',
+                '--dump-header', str(header), '--output', str(body), url],
+                check=True, capture_output=True, timeout=8)
+            raw = body.read_bytes()
+            headers = {}
+            for line in header.read_text().splitlines():
+                if line.startswith('HTTP/'):
+                    headers = {}
+                elif ':' in line:
+                    key, value = line.split(':', 1)
+                    headers[key.lower()] = value.strip()
+            if len(raw) > 20_000_000 or hashlib.sha256(raw).hexdigest() != headers.get('x-g11-feed-sha256'):
                 raise ValueError('FOLLOWUP_PUBLIC_HASH')
         remaining = exclude_published_goripan(rows, json.loads(raw), day)
         print('WILD4_FOLLOWUP_ALREADY_PUBLIC=' + str(len(rows) - len(remaining)))
         return remaining
-    except Exception:
-        print('WILD4_FOLLOWUP_PUBLIC_READBACK=UNAVAILABLE_RETRY_PRESERVED')
+    except Exception as exc:
+        print('WILD4_FOLLOWUP_PUBLIC_READBACK=UNAVAILABLE_RETRY_PRESERVED TYPE=' + type(exc).__name__)
         return rows
 
 

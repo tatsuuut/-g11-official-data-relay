@@ -33,6 +33,10 @@ Changes:
   route's seconds-only JST contract. Such metadata is left byte-for-byte
   intact and delivered through the existing dedicated research endpoint.
   Canonical no-change delivery no longer retries this incompatible sidecar.
+- Public Goripan deduplication uses the existing curl transport with a bounded
+  six-second request and exact final-response hash. The former plain urllib
+  read returned HTTP 403 while the canonical client succeeded; failures still
+  preserve the original retry instead of suppressing an unpublished race.
 
 Protected: frozen private source cf2769886e857369630512d2301558f6c17188a6,
 existing forecast rules/models, saved morning and predeadline LOCKs/BETs,
@@ -42,3 +46,25 @@ separate Abeken reproduction study are outside this change.
 
 Validation is recorded separately from live race evidence. Passing the
 contract gate does not prove any guaranteed five-minute publication margin.
+
+## Validation and staged rollout evidence
+
+- PR 112 gate 40091813520 and PR 113 gate 40092399630 passed before merge.
+  The merged PR 113 head also passed gate 40092532720.
+- Site v304 (`g11-source-15f3f1b20c1af8cb4c5a5f9b`) deployed successfully.
+  Refresh scheduling tests, typecheck and production build passed. A separately
+  checked existing analysis-view test has an unrelated baseline label mismatch
+  (3/4 passed); its source and test were unchanged by this repair.
+- Exact comparison of 790 previously public saved forecast objects found no
+  changes. Frozen source and Goripan model identities stayed unchanged.
+- Wakamatsu 8R, deadline 21:17 JST: transition run 40092523275 captured odds at
+  21:10:51 and canonical Site readback passed at 21:12:48.727 (4m11s remaining).
+  The v304 HOME updated automatically from 158 to 159 current P3 races.
+  This race entered the regular acquisition path, so it does not establish
+  the latency of the new critical-checkpoint publication path.
+- Goripan run 40092987837 started at 21:12:41 without an empty predecessor,
+  locked Wakamatsu 8R at 21:13:55.721 and passed Site GET at 21:14:23.755
+  (2m36s remaining). Its new odds evidence was acknowledged at 21:14:25.120
+  before historical evidence; this saved abstention correctly had no formal
+  probability-proof record. The separate optional player-context import hold
+  remained isolated and was not changed by this task.
