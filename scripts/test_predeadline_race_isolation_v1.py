@@ -4,8 +4,10 @@ G11_ISOLATION_SOURCE_DIR may point to a read-only source export for local tests.
 CI uses the already restored private runtime; no private source is vendored here.
 """
 import ast
+import contextlib
 from datetime import datetime, timedelta
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -269,6 +271,10 @@ class IsolationTest(unittest.TestCase):
 
 class FollowupTest(unittest.TestCase):
     def setUp(self):
+        # Mock dispatch tests must not emit production acceptance markers.
+        capture = contextlib.redirect_stdout(io.StringIO())
+        capture.__enter__()
+        self.addCleanup(capture.__exit__, None, None, None)
         self.now = BASE + timedelta(minutes=2)
         self.critical = {'OPERATIONAL_DATE': '2026-10-24',
             'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'CRITICAL_CAPTURE_AT': BASE.isoformat()}
