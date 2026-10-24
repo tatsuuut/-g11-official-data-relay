@@ -74,3 +74,53 @@ contract gate does not prove any guaranteed five-minute publication margin.
   before historical evidence; this saved abstention correctly had no formal
   probability-proof record. The separate optional player-context import hold
   remained isolated and was not changed by this task.
+- PR 114 gate 40093387407 passed, including the real dependency-free projector
+  import and exact public-response hash/timeout cases. PR 115 gate 40094624411
+  passed the expanded 18 publication/alignment tests and the full runtime gate;
+  merged head d051823f2282af0c9b50231fd2d0afa5d55c3972 passed 40094719713 too.
+- New-code run 40092820048 passed canonical no-change publication at
+  21:17:05.252 without `HOT_DELTA_EMPTY` retries. Its dedicated research
+  readback passed at 21:17:32.538; several subsequent runs also completed.
+- Wakamatsu 9R, deadline 21:41: run 40094152506 acquired odds at 21:35:02,
+  verified public readback at 21:36:24.021 (4m35s remaining), and the bounded
+  Goripan public-lock check succeeded. Goripan run 40094610921 verified Site
+  GET at 21:37:58.224 (3m1s remaining); current odds and its one saved
+  probability proof were delivered before all 144 historical odds records and
+  141 historical proofs. This run predates the capture-alignment addition.
+
+## Completed live verification: Wakamatsu 10R
+
+The official saved deadline was 22:05 JST. Run 40095817559 used the merged
+capture-alignment and early-publication code end to end:
+
+- The verified-plan alignment waited once for 39.907 seconds. V53's immutable
+  LIVE timestamp is 21:58:02; official odds/P3 input is 21:58:11. The existing
+  encrypted checkpoint was saved and read back by 21:58:44.
+- Early publication began at 21:58:46. The Site canonical receipt header is
+  21:58:58.347; exact Site GET readback passed at 21:59:09.106, with 5m50s
+  remaining. HOME visibly refreshed itself from 160 to 161 current P3 races
+  during the 21:59 check. Saved odds evidence was acknowledged at
+  21:59:10.436 and the complete early-publication receipt passed at
+  21:59:18.969, with zero prediction recalculation.
+- Goripan run 40096167635 was handed off at 21:58:46 and started at 21:58:50.
+  Its immutable LOCK timestamp is 22:00:01.066937; exact Site GET readback
+  passed at 22:00:26.199 (4m33s remaining). The unchanged active model SHA is
+  2d17db06cf9d7f0e73501e84b14f23621a42abb8a4ea1da3ef9d3fd07ac6c412.
+  New odds evidence was acknowledged at 22:00:28.026 and its probability
+  proof was delivered before historical records. The WILD4 market record was
+  saved at 22:00:43.658 and its notification event was created at
+  22:00:48.604 (4m11s remaining). These event timestamps are saved server
+  evidence, not a claim of device push arrival at that exact instant.
+- The regular publication in the same run also passed, at 22:02:29.625.
+  The separate sequence slots therefore worked with a real early/regular pair.
+  Follow-up correctly found no remaining inputs, and the dedicated research
+  delivery passed at 22:03:14.594. Both workflows completed successfully.
+- A second exact comparison after early publication still found 790 prior
+  saved forecast objects, zero missing and zero changed, with the frozen
+  runtime source unchanged. Fourteen new saved forecast objects had accumulated
+  since the baseline; the new Goripan 10R LOCK followed separately.
+
+This is measured improvement for the observed race, not a universal deadline
+guarantee. Official input availability, runner scheduling and transport still
+affect each race's available margin. Existing fallback and daily research
+delivery remain active.
