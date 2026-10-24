@@ -1,0 +1,134 @@
+name: isolated research archive readback
+on:
+  push:
+    branches: [research/g11-peel-asof-readonly-20261024]
+    paths: [.github/workflows/research-archive-readonly.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: g11-peel-research-readonly-20261024
+  cancel-in-progress: false
+jobs:
+  read-only:
+    if: github.ref == 'refs/heads/research/g11-peel-asof-readonly-20261024'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        day: ['2026-10-22', '2026-10-23', '2026-10-24']
+    steps:
+      - name: Restore existing encrypted archive without saving
+        id: archive
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-research-readonly-${{matrix.day}}-20261024
+          restore-keys: |
+            g11-state-v4-published-${{matrix.day}}-
+            g11-state-v4-critical-${{matrix.day}}-
+            g11-state-v4-${{matrix.day}}-
+            g11-state-v3-${{matrix.day}}-
+      - name: Read archive in temporary isolated workspace
+        env:
+          ARCHIVE_PASSPHRASE: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          RECOVERY_DAY: ${{matrix.day}}
+          MATCHED_CACHE_KEY: ${{steps.archive.outputs.cache-matched-key}}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p recovery
+          if [ -s .relay-cache/state.tgz.gpg ]; then
+            test -n "${ARCHIVE_PASSPHRASE}"
+            exec 3<<<"${ARCHIVE_PASSPHRASE}"
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/source.tgz" .relay-cache/state.tgz.gpg
+            exec 3<&-
+          fi
+          unset ARCHIVE_PASSPHRASE
+          cat > "${RUNNER_TEMP}/recipient.pem" <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIEMzCCApugAwIBAgIUQir+8LnfiIig+7BgylsnInhzcfAwDQYJKoZIhvcNAQEL
+          BQAwKTEnMCUGA1UEAwweRzExIHJlc2VhcmNoIHJlY292ZXJ5IDIwMjYxMDI0MB4X
+          DTI2MTAyNDA4MzkyMFoXDTI2MTAzMTA4MzkyMFowKTEnMCUGA1UEAwweRzExIHJl
+          c2VhcmNoIHJlY292ZXJ5IDIwMjYxMDI0MIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
+          MIIBigKCAYEAt3Wk85w60uPnYnPr6f9szTrDaiKtc/pkEP84ArF1JerN9qE6Ux66
+          DZy8ol6vNo6kb0IAJDjiO+TrSoBKxFwp9ZG9/Cq7Cey7cWs6yqbW5uZoRAYgj4w/
+          4vekvi1SytSeEYP17QQXkWhkpNQMxVrZZ4bbU65EYkya5A9Lj1QoZM5piAHQz5ud
+          koPl6ACV62sarJjhj0+9VNz0nMepr6FoEli2ynyX43TUGWndsq50b/f7m+LIkAHU
+          Xv6k3D4qZKf+cCChIrV+rDc8AfxUmppdNHkCEy+332nB+71kBwr93BwsbhCB1N5W
+          /aQas/9jsZV1FU50hxh0yv+9Nv5ZkoHyoJ0JrpABXJOT1HxObnfN6mRjkOPbm/4F
+          mfYA5d3dphT0kqiLNvianF5q38vpSerrmMfyPYrbJ2zEgODUqFXkZ+RlWyV4x2Z+
+          uSEnsBcGs08cUpxpPZPP7Dpa9YqjBGXftgzd83XP8tycYUTeDeWgD+b+Otv/2gQc
+          xKXSwejNij2HAgMBAAGjUzBRMB0GA1UdDgQWBBSi5iil1QqSHuB3qRevJKENuITt
+          ZDAfBgNVHSMEGDAWgBSi5iil1QqSHuB3qRevJKENuITtZDAPBgNVHRMBAf8EBTAD
+          AQH/MA0GCSqGSIb3DQEBCwUAA4IBgQCKlQoGZTssNDsZpnuVRRY83ASm1bJKhhf7
+          Bye8gU0iNk256WIi7CLRcJs5fpnfOAyjHxspx9VqLQyMlhezPY28ECIr/0lrLyL4
+          LLYSvVO4UNNhFfAyP8xib1dzV2Hw1+iE/FEl2+kF8W/ZtNUGZoOh46ym52+8hqVb
+          B++Xlh+MqCENR5fJ2Mo1pCNSUXKkrUIUILDBhPYAJujSGdwBCrZ5so9yHowkiVo9
+          +te0bCD7RMvS4ei1XF/08Be+Vu+7G0srQcACR18b+pmFZqj9tyxjfP0bjfaUYEvf
+          3Mzjh/SKFEPPIEpxTwFbLWZhvxuhRGtmYBrVsikC4qXTEsABQodb6zvt7Jtsw3Vl
+          6USGDbHpWbg69F2Vngx4FRYsl/tRPNpOOReOqkpkGsB7EMU3WQQQN7n2B69UGwZh
+          32VOWEEN1zYVIgz2ygfx8ryKfPTg3D8Y0CI5lKkbYX0GeiUwmrYGJakFXOAOMU90
+          wO4/3TjhVRLza7hoOlrUZ+P8RgcIpf0=
+          -----END CERTIFICATE-----
+          CERT
+          python3 - <<'PYCODE'
+          import hashlib, io, json, os, re, tarfile
+          from pathlib import Path, PurePosixPath
+          archive=Path(os.environ['RUNNER_TEMP'])/'source.tgz'
+          out=Path(os.environ['RUNNER_TEMP'])/'selected.tgz'
+          manifest={'schema':'G11_READ_ONLY_ASOF_ARCHIVE_RECOVERY_V1','date':os.environ['RECOVERY_DAY'],'cache_key':os.environ.get('MATCHED_CACHE_KEY'),'source_present':archive.exists(),'files':[],'missing_responses':[],'inventory':[],'production_writes':0,'predictions_generated':0}
+          selected={}
+          if archive.exists():
+              manifest['archive_sha256']=hashlib.sha256(archive.read_bytes()).hexdigest()
+              with tarfile.open(archive,'r:gz') as tf:
+                  members={}
+                  for m in tf.getmembers():
+                      p=PurePosixPath(m.name)
+                      if p.is_absolute() or '..' in p.parts or m.issym() or m.islnk():
+                          raise RuntimeError('UNSAFE_ARCHIVE')
+                      if m.isfile():
+                          n='/'.join(p.parts)
+                          if n in members: raise RuntimeError('DUPLICATE_ARCHIVE_PATH')
+                          members[n]=m
+                  manifest['inventory']=[{'path':n,'bytes':m.size} for n,m in members.items()]
+                  sources=set()
+                  for n,m in members.items():
+                      p=PurePosixPath(n)
+                      wanted=(('/snapshots/morning/' in '/'+n and (p.name in {'official-day-input.json','abeken-head-features.json'} or p.name.startswith('abeken-'))) or ('/snapshots/predeadline/' in '/'+n and p.name.startswith(('beforeinfo-','abeken-'))) or n.endswith('store/manifest.json') or ('/abeken-v53-daily-version/' in '/'+n))
+                      if not wanted: continue
+                      if m.size > 100_000_000: raise RuntimeError('MEMBER_SIZE_LIMIT')
+                      b=tf.extractfile(m).read()
+                      selected[n]=b
+                      if '/snapshots/' in n:
+                          v=json.loads(b)
+                          prefix=n.split('/snapshots/',1)[0]
+                          for r in v.get('SOURCE_RECEIPTS',[]):
+                              sid=r.get('SOURCE_ID')
+                              if not isinstance(sid,str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{2,159}',sid): raise RuntimeError('SOURCE_ID')
+                              sources.add((prefix,sid))
+                  for prefix,sid in sorted(sources):
+                      for leaf in ('receipt.json','response.bin'):
+                          name=f'{prefix}/responses/{sid}/{leaf}'
+                          if name in members:
+                              selected[name]=tf.extractfile(members[name]).read()
+                          else: manifest['missing_responses'].append(name)
+          with tarfile.open(out,'w:gz') as tf:
+              for n,b in sorted(selected.items()):
+                  manifest['files'].append({'path':n,'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+                  info=tarfile.TarInfo(n); info.size=len(b); info.mode=0o600; tf.addfile(info,io.BytesIO(b))
+              b=json.dumps(manifest,ensure_ascii=False,sort_keys=True).encode()
+              info=tarfile.TarInfo('recovery-manifest.json'); info.size=len(b); info.mode=0o600; tf.addfile(info,io.BytesIO(b))
+          print(json.dumps({'source_present':manifest['source_present'],'selected_file_count':len(selected),'missing_response_count':len(manifest['missing_responses']),'production_writes':0,'predictions_generated':0}))
+          PYCODE
+          openssl cms -encrypt -binary -aes-256-cbc -in "${RUNNER_TEMP}/selected.tgz" -out "recovery/asof-${RECOVERY_DAY}.cms" -outform DER "${RUNNER_TEMP}/recipient.pem"
+          rm -f "${RUNNER_TEMP}/source.tgz" "${RUNNER_TEMP}/selected.tgz"
+      - name: Retain recipient-encrypted research bytes only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: encrypted-asof-${{matrix.day}}
+          path: recovery/*.cms
+          retention-days: 3
+          if-no-files-found: error
