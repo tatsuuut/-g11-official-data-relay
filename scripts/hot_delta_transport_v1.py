@@ -303,7 +303,10 @@ def fetch_stored_rescue(origin: str, day: str) -> tuple[dict, dict[str, str], by
     return feed, headers, raw
 
 
-def create_delta(incoming: dict, accepted: dict, base_sha: str, research_projection: dict | None = None) -> dict:
+def create_delta(incoming: dict, accepted: dict, base_sha: str, research_projection: dict | None = None,
+                 *, sequence_offset: int = 1) -> dict:
+    if sequence_offset not in (0, 1) or (sequence_offset == 0 and incoming['stage'] != 'PREDEADLINE'):
+        raise RuntimeError('HOT_DELTA_SEQUENCE_SCOPE')
     day = incoming["operational_date_jst"]
     if day != accepted["operational_date_jst"] or incoming["stage"] not in ("PREDEADLINE", "NIGHT"):
         raise RuntimeError("HOT_DATE_OR_STAGE")
@@ -372,7 +375,7 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
         print("G11_NIGHT_FIELD_BYTES=" + json.dumps(sizes.most_common(), ensure_ascii=False))
     return {
         "SCHEMA": SCHEMA, "OPERATIONAL_DATE": day, "BASE_FEED_SHA": base_sha,
-        "PATCH_SEQUENCE": incoming["source"]["run_id"] * 1000 + 1,
+        "PATCH_SEQUENCE": incoming["source"]["run_id"] * 1000 + sequence_offset,
         "PATCH_CREATED_AT": incoming["generated_at_jst"],
         "PATCH_SHA256": fingerprint, "STAGE": incoming["stage"],
         "TOP_LEVEL": top, "RACES": changes,
@@ -524,17 +527,18 @@ def publish_night_transaction(delta: dict, incoming: dict, origin: str, token: s
     return result
 
 
-def publish(feed_path: Path, origin: str, research_projection: dict | None = None) -> None:
+def publish(feed_path: Path, origin: str, research_projection: dict | None = None,
+            *, sequence_offset: int = 1) -> None:
     incoming = json.loads(feed_path.read_text(encoding="utf-8"))
     day = incoming["operational_date_jst"]
     url = f"{origin}/api/g11-feed?date={day}"
     accepted, headers, _ = fetch(url)
     base_sha = headers["x-g11-source-feed-sha256"]
-    delta = create_delta(incoming, accepted, base_sha, research_projection)
+    delta = create_delta(incoming, accepted, base_sha, research_projection, sequence_offset=sequence_offset)
     data = compact(delta)
     if research_projection is not None and len(data) > BUDGET and incoming["stage"] != "NIGHT":
         print("G11_DEME_PUBLIC=HELD_PREDEADLINE_BUDGET")
-        delta = create_delta(incoming, accepted, base_sha)
+        delta = create_delta(incoming, accepted, base_sha, sequence_offset=sequence_offset)
         data = compact(delta)
     print("G11_HOT_DELTA_BYTES=" + str(len(data)))
     print("G11_HOT_DELTA_RACES=" + str(len(delta["RACES"])))

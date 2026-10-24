@@ -99,6 +99,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py -q
           python3 -m unittest discover -s scripts -p test_predeadline_watchdog_v1.py -q
           python3 -m unittest discover -s scripts -p test_daily_runtime_delivery_v1.py -q
+          python3 -m unittest discover -s scripts -p test_critical_saved_publication_v1.py -q
 
       - name: Checkout pinned rescue settlement source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

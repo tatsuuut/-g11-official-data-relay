@@ -297,7 +297,8 @@ def send_morning(feed_path, feed, authority, origin, token):
         return ack, headers, raw
 
 
-def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS, pause=time.sleep):
+def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS, pause=time.sleep,
+            include_optional_inputs=True):
     if n13_transport_only():
         attempts = 1
     require(origin == ORIGIN and 1 <= attempts <= MAX_ATTEMPTS, "DAILY_DELIVERY_CONFIGURATION")
@@ -355,7 +356,12 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
             elif phase == "MORNING":
                 ack, headers, raw = send_morning(feed_path, feed, authority, origin, token)
             elif phase == "PREDEADLINE":
-                hot.publish(feed_path, origin, optional_deme_projection(day))
+                if include_optional_inputs:
+                    hot.publish(feed_path, origin, optional_deme_projection(day))
+                else:
+                    # Reserve slot zero for the saved critical projection;
+                    # the regular update in this same run still uses slot one.
+                    hot.publish(feed_path, origin, sequence_offset=0)
                 readback, headers, raw = hot.fetch(origin + "/api/g11-feed?date=" + day)
                 identity(readback, authority, "PREDEADLINE")
                 ack = {"payload_sha256": headers["x-g11-source-feed-sha256"]}
@@ -412,7 +418,7 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
     try:
         from selective_alert_input_v1 import deliver_optional
         sys.path.insert(0, str(Path(".g11-private").resolve()))
-        if os.environ.get("G11_R13") != "true":
+        if include_optional_inputs and os.environ.get("G11_R13") != "true":
             deliver_optional(state / "store", feed, origin, token=token)
     except Exception:
         print("G11_SELECTIVE_INPUT=HELD_OPTIONAL_READER_UNAVAILABLE")

@@ -92,7 +92,7 @@ class EarlyDispatchTests(unittest.TestCase):
     def exercise(self, count, dispatch_status=0):
         workflow = (ROOT / '.github/workflows/g11-free-runner.yml').read_text()
         step = workflow.split('        id: wild4-early\n', 1)[1].split(
-            '      - name: Keep the predeadline relay alive', 1)[0]
+            '      - name:', 1)[0]
         script = textwrap.dedent(step.split('        run: |\n', 1)[1])
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); (root / '.relay-output').mkdir()
@@ -134,6 +134,8 @@ class EarlyDispatchTests(unittest.TestCase):
         for sent, followup, needed, phase, expected in [
                 ('true', '', '', 'predeadline', False), ('', '', '', 'predeadline', True),
                 ('true', '', 'true', 'predeadline', True),
+                ('', '', 'false', 'predeadline', False),
+                ('', '', 'true', 'predeadline', True),
                 ('true', 'true', 'true', 'predeadline', False),
                 ('', 'true', 'true', 'predeadline', False), ('', '', '', 'night', False)]:
             script = line.replace('${{steps.wild4-early.outputs.sent}}', sent).replace(
