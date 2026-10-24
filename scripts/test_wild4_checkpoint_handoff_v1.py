@@ -131,9 +131,14 @@ class EarlyDispatchTests(unittest.TestCase):
     def test_published_dispatch_is_skipped_only_after_accepted_early_handoff(self):
         workflow = (ROOT / '.github/workflows/g11-free-runner.yml').read_text()
         line = next(line for line in workflow.splitlines() if 'WILD4_DISPATCH_RETRY' in line)
-        for sent, phase, expected in [('true', 'predeadline', False), ('', 'predeadline', True),
-                                      ('', 'night', False)]:
+        for sent, followup, needed, phase, expected in [
+                ('true', '', '', 'predeadline', False), ('', '', '', 'predeadline', True),
+                ('true', '', 'true', 'predeadline', True),
+                ('true', 'true', 'true', 'predeadline', False),
+                ('', 'true', 'true', 'predeadline', False), ('', '', '', 'night', False)]:
             script = line.replace('${{steps.wild4-early.outputs.sent}}', sent).replace(
+                '${{steps.wild4-followup.outputs.sent}}', followup).replace(
+                '${{steps.wild4-followup.outputs.needed}}', needed).replace(
                 '${{steps.due.outputs.phase}}', phase).replace('${{github.token}}', 'test').replace(
                 '${{steps.due.outputs.operational_date}}', DAY)
             result = subprocess.run(['bash', '-c', 'gh() { echo DISPATCH; }; ' + script],
@@ -156,3 +161,4 @@ class ProtectedLogicTests(unittest.TestCase):
             block = source.split("      - name: " + name + "\n", 1)[1].split("      - name: ", 1)[0]
             with self.subTest(step=name):
                 self.assertEqual(hashlib.sha256(block.encode()).hexdigest(), digest)
+

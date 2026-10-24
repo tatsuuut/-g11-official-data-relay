@@ -12,6 +12,9 @@ import inspect
 import json
 import sys
 import textwrap
+from datetime import datetime
+from pathlib import Path
+import re
 
 COLLECT_SHA = 'a1d5c2166a4e305825d593f6f48ffa76717bc5998226d5522eb0bde38ff6e42b'
 BET_HANDOFF_SHA = 'ed14b607cb6b590be3a03eff2d08ddc153bc204df6d8ef6c32feffe731adedd6'
@@ -138,3 +141,86 @@ def isolate_predeadline_inputs():
         yield
     finally:
         wild._collect_pre_race_packets, wild.run_predeadline, display.capture_due = originals
+
+
+def followup_odds(morning, critical, load_snapshot, now, early_sent):
+    """Select saved, unexpired odds not covered by an accepted early handoff."""
+    day = now.date().isoformat()
+    if morning.get('OPERATIONAL_DATE_JST') != day or now.utcoffset() is None:
+        raise ValueError('FOLLOWUP_DAY_BINDING')
+    cutoff = None
+    if early_sent:
+        if (critical.get('OPERATIONAL_DATE') != day
+                or critical.get('CRITICAL_CHECKPOINT_STATUS') != 'PASS'):
+            raise ValueError('FOLLOWUP_CRITICAL_BINDING')
+        cutoff = datetime.fromisoformat(critical['CRITICAL_CAPTURE_AT'])
+        if cutoff.utcoffset() is None or cutoff > now:
+            raise ValueError('FOLLOWUP_CRITICAL_TIME')
+    rows = []
+    seen = set()
+    for task in morning['PREDEADLINE_PLAN']:
+        if task.get('KIND') != 'ODDS3T':
+            continue
+        key = task.get('RACE_KEY', '')
+        name = 'odds3t-' + key.lower()
+        if (re.fullmatch(day.replace('-', '') + r'-(?:0[1-9]|1[0-9]|2[0-4])-(?:0[1-9]|1[0-2])', key) is None
+                or key in seen or task.get('SOURCE_ID') != name):
+            raise ValueError('FOLLOWUP_SOURCE_IDENTITY')
+        seen.add(key)
+        deadline = datetime.fromisoformat(task['MUST_FINISH_BEFORE_JST'])
+        if deadline.utcoffset() is None:
+            raise ValueError('FOLLOWUP_DEADLINE_ZONE')
+        if now >= deadline:
+            continue
+        verified = load_snapshot(name)
+        if verified is None:
+            continue
+        payload = verified['SNAPSHOT']['PAYLOAD']
+        if (payload.get('RACE_KEY') != key or payload.get('KIND') != 'ODDS3T'
+                or payload.get('STATUS') != 'PREDEADLINE_SOURCE_COMPLETE'):
+            raise ValueError('FOLLOWUP_SNAPSHOT_BINDING')
+        captured = datetime.fromisoformat(payload['CAPTURED_AT_JST'])
+        if captured.utcoffset() is None or not captured <= now < deadline:
+            raise ValueError('FOLLOWUP_SNAPSHOT_TIME')
+        if cutoff is None or captured > cutoff:
+            rows.append({'RACE_KEY': key, 'CAPTURED_AT_JST': captured.isoformat(),
+                         'DEADLINE_AT_JST': deadline.isoformat()})
+    return sorted(rows, key=lambda row: row['RACE_KEY'])
+
+
+def _handoff_main():
+    import argparse
+    import os
+    from zoneinfo import ZoneInfo
+    parser = argparse.ArgumentParser()
+    parser.add_argument('mode', choices=['handoff'])
+    parser.add_argument('--state-root', type=Path, required=True)
+    parser.add_argument('--operational-date', required=True)
+    parser.add_argument('--early-sent', default='')
+    args = parser.parse_args()
+    sys.path.insert(0, str(Path.cwd()))
+    from g11.canonical.official_pipeline import OfficialArtifactStore
+    now = datetime.now(ZoneInfo('Asia/Tokyo'))
+    if args.operational_date != now.date().isoformat():
+        raise ValueError('FOLLOWUP_NOT_CURRENT_DAY')
+    root = args.state_root.resolve()
+    metadata = json.loads((root/'relay-state.json').read_text())
+    if metadata.get('OPERATIONAL_DATE_JST') != args.operational_date:
+        raise ValueError('FOLLOWUP_STATE_DAY')
+    store = OfficialArtifactStore(root/'store')
+    morning = store.load_verified_snapshot('morning', 'official-day-input')['SNAPSHOT']['PAYLOAD']
+    def load(name):
+        if not (root/'store/snapshots/predeadline'/f'{name}.json').is_file():
+            return None
+        return store.load_verified_snapshot('predeadline', name)
+    rows = followup_odds(morning, metadata.get('CRITICAL', {}), load, now,
+                         args.early_sent == 'true')
+    print('G11_WILD4_FOLLOWUP_INPUTS=' + json.dumps(rows, sort_keys=True))
+    if 'GITHUB_OUTPUT' in os.environ:
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+            output.write('needed=' + str(bool(rows)).lower() + '\n')
+    return 0 if rows else 3
+
+
+if __name__ == '__main__':
+    raise SystemExit(_handoff_main())

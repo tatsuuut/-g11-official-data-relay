@@ -17,6 +17,15 @@ coverage. The official page retrieved after the incident displays `L` for
 boat 1's exhibition start; this later page is diagnostic corroboration, not
 a replacement for the saved predeadline source.
 
+The formal WILD4 path has an additional handoff fault. Run 40064143006 read
+93 official odds snapshots from the early checkpoint at 13:56:08 JST; its
+latest was Fukuoka 7R captured at 13:53:23, and it saved that formal WILD4 lock
+at 13:56:08. The regular relay acquired additional Miyajima input after that
+early checkpoint. Its accepted early-dispatch flag suppressed the follow-up
+dispatch. The next WILD4 run 40064502380 read 95 snapshots at 14:01:45, already
+past Miyajima's 14:01 deadline. Numeric ST rejection in the optional position
+model is not the cause of this independent formal WILD4 handoff miss.
+
 ## Change
 
 The public operational adapter isolates identified input/contract failures
@@ -26,6 +35,14 @@ Independent morning BET odds are saved before optional PRE_RACE inference.
 WILD checks the current time again after inference and immediately before
 writing, and records the actual completion time. The original-display audit
 records its failed race using its existing failure-control mechanism.
+
+After the complete encrypted state is saved and read back, the relay now
+checks verified unexpired ODDS3T snapshots against the early checkpoint time.
+Additional inputs trigger the existing WILD4 published-state receiver before
+Site publication. Accepted dispatch is recorded only after the command
+succeeds. Empty/expired input does not queue a duplicate job, while a failed
+dispatch retains the existing retry path. No prediction input is fetched or
+invented by this handoff helper.
 
 Only three reviewed orchestration function hashes are adapted in memory.
 The frozen daily source/model files, MORNING/previous LIVE LOCKs, P3/V53
@@ -39,12 +56,13 @@ accept remains unavailable for that engine.
 
 ## Validation
 
-13 regression tests execute the actual reviewed orchestration functions with
+20 regression tests exercise the handoff and actual reviewed orchestration functions with
 controlled source/clock/model doubles: one failed race followed by a healthy
 venue; byte-identical healthy predictions; immutable retry; deadline crossing;
 later-deadline continuation; source-hash and saved-LOCK corruption; global
 manifest rejection; uncaught programming errors; independent odds persistence;
 and original-display failure continuation. The pre-existing 48 recovery tests
-also pass. The isolation suite is connected to the existing PREDEADLINE gate.
+also pass, along with the 10 checkpoint/protected-logic tests. The isolation
+suite is connected to the existing PREDEADLINE and three-phase contract gates.
 
 Deployment and live readback evidence are appended after verification.
