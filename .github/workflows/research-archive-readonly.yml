@@ -8,7 +8,7 @@ permissions:
   actions: read
 concurrency:
   group: g11-e1-forward-readonly-20261025
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   read-only:
     if: github.ref == 'refs/heads/research/g11-e1-forward-readonly-20261025'
@@ -109,12 +109,14 @@ jobs:
                               sid=r.get('SOURCE_ID')
                               if not isinstance(sid,str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{2,159}',sid): raise RuntimeError('SOURCE_ID')
                               sources.add((prefix,sid))
-                  for prefix,sid in sorted(sources):
-                      for leaf in ('receipt.json','response.bin'):
-                          name=f'{prefix}/responses/{sid}/{leaf}'
-                          if name in members:
-                              selected[name]=tf.extractfile(members[name]).read()
-                          else: manifest['missing_responses'].append(name)
+                  wanted_responses={f'{prefix}/responses/{sid}/{leaf}' for prefix,sid in sources for leaf in ('receipt.json','response.bin')}
+                  manifest['missing_responses']=sorted(wanted_responses-set(members))
+              # One sequential pass avoids hundreds of backward gzip seeks.
+              with tarfile.open(archive,'r|gz') as tf:
+                  for m in tf:
+                      n='/'.join(PurePosixPath(m.name).parts)
+                      if n in wanted_responses and m.isfile():
+                          selected[n]=tf.extractfile(m).read()
           with tarfile.open(out,'w:gz') as tf:
               for n,b in sorted(selected.items()):
                   manifest['files'].append({'path':n,'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
@@ -132,3 +134,4 @@ jobs:
           path: recovery/*.cms
           retention-days: 3
           if-no-files-found: error
+
