@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: b3dd58ea69bec17a04d9c6d0fd87583c4a8ddb8b
+          ref: d0b55e3a3aafb26fa0a125c0121510ee022b8f92
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           persist-credentials: false
           path: source
@@ -89,6 +89,7 @@ jobs:
           report=B.run(root,"2026-10-26")
           report["SOURCE_CACHE_KEY"]=os.environ.get("MATCHED_CACHE_KEY")
           report["SOURCE_ARCHIVE_SHA256"]=hashlib.sha256(archive.read_bytes()).hexdigest()
+          report["REPORT_SHA256"]=hashlib.sha256(json.dumps(report,ensure_ascii=False,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
           print("P3_BACKTEST_JSON="+json.dumps(report,ensure_ascii=False,separators=(",",":")))
           PY
       - name: Remove temporary plaintext
