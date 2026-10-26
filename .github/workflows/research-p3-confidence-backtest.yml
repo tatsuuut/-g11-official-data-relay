@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        day: ['2026-10-25','2026-10-23']
+        day: ['2026-10-26']
     steps:
       - name: Checkout pinned evaluation source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -28,6 +28,17 @@ jobs:
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           persist-credentials: false
           path: source
+      - name: List retained cache metadata only
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: |
+          gh api --paginate 'repos/tatsuuut/-g11-official-data-relay/actions/caches?per_page=100' --jq '.actions_caches[] | {id,key,ref,size_in_bytes,last_accessed_at}' > "${RUNNER_TEMP}/cache-list.jsonl"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          rows=[json.loads(l) for l in (Path(os.environ["RUNNER_TEMP"])/"cache-list.jsonl").read_text().splitlines()]
+          print("P3_CACHE_METADATA_JSON="+json.dumps(rows, separators=(",",":")))
+          PY
       - name: Restore existing encrypted history read only
         id: archive
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
