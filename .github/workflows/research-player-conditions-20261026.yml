@@ -1,0 +1,96 @@
+name: Player condition saved-source audit
+on:
+  push:
+    branches: [research/player-conditions-20261026]
+    paths: [.github/workflows/research-player-conditions-20261026.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: player-conditions-20261026
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/research/player-conditions-20261026'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        day: ['2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26']
+    steps:
+      - name: Checkout pinned source readers
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: e8e8da4f10e9b9ec6719b9b542e24c5ab06354c6
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          persist-credentials: false
+          path: source
+      - name: Restore existing encrypted state read only
+        id: archive
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: player-conditions-readonly-${{matrix.day}}-20261026
+          restore-keys: |
+            g11-state-v4-published-${{matrix.day}}-
+            g11-state-v4-critical-${{matrix.day}}-
+            g11-state-v4-${{matrix.day}}-
+      - name: Decrypt into isolated workspace
+        env:
+          ARCHIVE_PASSPHRASE: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -s .relay-cache/state.tgz.gpg ]; then
+            exec 3<<<"${ARCHIVE_PASSPHRASE}"
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/source.tgz" .relay-cache/state.tgz.gpg
+            exec 3<&-
+          fi
+      - name: Inspect source coverage without replaying predictions
+        env:
+          PYTHONPATH: source
+          AUDIT_DAY: ${{matrix.day}}
+          MATCHED_CACHE_KEY: ${{steps.archive.outputs.cache-matched-key}}
+        run: |
+          python3 - <<'PY'
+          import collections,hashlib,json,os,re,tarfile
+          from pathlib import Path,PurePosixPath
+          from g11.canonical.official_pipeline import OfficialArtifactStore
+          root=Path('.audit/state');root.mkdir(parents=True,exist_ok=True)
+          archive=Path(os.environ['RUNNER_TEMP'])/'source.tgz'
+          report={'schema':'G11_PLAYER_CONDITION_SOURCE_INVENTORY_V1','day':os.environ['AUDIT_DAY'],'cache':os.environ.get('MATCHED_CACHE_KEY'),'available':archive.is_file()}
+          if archive.is_file():
+            counts=collections.Counter();g11=collections.Counter();snapshots=collections.defaultdict(list)
+            with tarfile.open(archive,'r|gz') as tf:
+              for m in tf:
+                p=PurePosixPath(m.name)
+                if p.is_absolute() or '..' in p.parts or m.issym() or m.islnk():raise RuntimeError('UNSAFE_ARCHIVE')
+                if not m.isfile():continue
+                n='/'.join(p.parts)
+                if n.startswith('store/g11/'):
+                  g11[p.parts[2]]+=1
+                if not n.startswith(('store/snapshots/','store/responses/','store/archives/')) and n!='store/manifest.json':continue
+                if m.size>100_000_000:raise RuntimeError('MEMBER_SIZE_LIMIT')
+                counts['/'.join(p.parts[:3])]+=1
+                out=root/n;out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(tf.extractfile(m).read())
+            store=OfficialArtifactStore((root/'store').resolve())
+            for p in sorted((root/'store/snapshots').glob('*/*.json')):
+              stage=p.parent.name;name=p.stem
+              group=re.sub(r'\d{8}-\d{2}-\d{2}','RACE',name)
+              try:
+                v=store.load_verified_snapshot(stage,name)['SNAPSHOT']['PAYLOAD']
+                meta={'name':group,'fields':sorted(v) if isinstance(v,dict) else [],'verified':True}
+                if name=='abeken-head-features':meta['feature_races']=len(v.get('FEATURES',{}))
+                identity=next((v.get(k) for k in ['OPERATIONAL_DATE_JST','DATE_JST','DATE'] if v.get(k)),None)
+                if identity:meta['day']=identity
+              except Exception as exc:meta={'name':group,'verified':False,'error_type':type(exc).__name__}
+              snapshots[stage].append(meta)
+            report.update(archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),files=dict(counts),g11_folders=dict(g11),snapshots={s:[dict(json.loads(k),count=n) for k,n in collections.Counter(json.dumps(x,sort_keys=True) for x in rows).items()] for s,rows in snapshots.items()})
+          print('PLAYER_SOURCE_INVENTORY_JSON='+json.dumps(report,separators=(',',':')))
+          PY
+      - name: Remove temporary plaintext
+        if: always()
+        run: rm -rf .audit "${RUNNER_TEMP}/source.tgz"
