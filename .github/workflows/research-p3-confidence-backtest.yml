@@ -1,0 +1,110 @@
+name: P3 confidence backtest archive inventory
+on:
+  push:
+    branches: [research/p3-confidence-backtest-20261026]
+    paths: [.github/workflows/research-p3-confidence-backtest.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p3-confidence-backtest-20261026
+  cancel-in-progress: false
+jobs:
+  backtest:
+    if: github.ref == 'refs/heads/research/p3-confidence-backtest-20261026'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        day: ['2026-10-25','2026-10-23']
+    steps:
+      - name: Checkout pinned evaluation source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: aa83b7a3617945e20005443be798f1c7d9fa2408
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          persist-credentials: false
+          path: source
+      - name: Restore existing encrypted history read only
+        id: archive
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: p3-backtest-readonly-${{matrix.day}}-20261026
+          restore-keys: |
+            g11-state-v4-published-${{matrix.day}}-
+            g11-state-v4-critical-${{matrix.day}}-
+            g11-state-v4-${{matrix.day}}-
+            g11-state-v3-${{matrix.day}}-
+            g11-state-v2-${{matrix.day}}-
+      - name: Decrypt in isolated temporary workspace
+        env:
+          ARCHIVE_PASSPHRASE: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -s .relay-cache/state.tgz.gpg ]; then
+            exec 3<<<"${ARCHIVE_PASSPHRASE}"
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/source.tgz" .relay-cache/state.tgz.gpg
+            exec 3<&-
+          fi
+      - name: Inspect only P3 research and source shapes
+        env:
+          AUDIT_DAY: ${{matrix.day}}
+          MATCHED_CACHE_KEY: ${{steps.archive.outputs.cache-matched-key}}
+          PYTHONPATH: source
+        run: |
+          python3 - <<'PY'
+          import gzip,hashlib,json,os,tarfile
+          from pathlib import Path,PurePosixPath
+          from collections import Counter
+          root=Path(".audit/state"); root.mkdir(parents=True,exist_ok=True)
+          archive=Path(os.environ["RUNNER_TEMP"])/"source.tgz"
+          report={"kind":"P3_BACKTEST_INVENTORY","day":os.environ["AUDIT_DAY"],"cache":os.environ.get("MATCHED_CACHE_KEY"),"present":archive.exists(),"archives":[],"snapshot_counts":{},"examples":{}}
+          if archive.exists():
+              report["archive_sha256"]=hashlib.sha256(archive.read_bytes()).hexdigest()
+              with tarfile.open(archive,"r|gz") as tf:
+                  for m in tf:
+                      p=PurePosixPath(m.name)
+                      if p.is_absolute() or ".." in p.parts or m.issym() or m.islnk(): raise RuntimeError("UNSAFE_ARCHIVE")
+                      n="/".join(p.parts)
+                      if not m.isfile(): continue
+                      wanted=(n.startswith("store/archives/") and p.name.startswith("daily-research-") or
+                              n.startswith("store/snapshots/") and (p.name.startswith("current-growth-p3") or p.name in {"official-day-input.json","official-day-results.json","workbook-ledger-projection.json"}) or n=="store/manifest.json")
+                      if wanted:
+                          if m.size>100_000_000: raise RuntimeError("MEMBER_SIZE_LIMIT")
+                          out=root/n;out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(tf.extractfile(m).read())
+              from g11.growth_p3.v1_1 import confidence_calibration_research_v1 as R
+              rows=[];issues=[]
+              for p in sorted(root.rglob("daily-research-*.json.gz")):
+                  try:
+                      v=json.loads(gzip.decompress(p.read_bytes()))
+                      ev=v.get("P3_CONFIDENCE_CALIBRATION_DEV") or {}
+                      loaded=R.load_daily_evidence(ev,issues=issues) if ev else []
+                      rows+=loaded
+                      report["archives"].append({"name":p.name,"sha256":hashlib.sha256(p.read_bytes()).hexdigest(),"date":v.get("OPERATIONAL_DATE_JST"),"keys":sorted(v),"records":len(ev.get("RECORDS",[])),"usable":len(loaded),"reasons":dict(Counter(r for row in ev.get("RECORDS",[]) for r in row.get("UNDETERMINED_REASONS",[])))})
+                  except Exception as e: report["archives"].append({"name":p.name,"error":type(e).__name__+":"+str(e)})
+              counts=Counter();sigs=Counter()
+              for p in sorted(root.rglob("current-growth-p3*.json")):
+                  try:v=json.loads(p.read_text());q=v.get("PAYLOAD",{});c=q.get("TRIFECTA_CONFIDENCE") or {}
+                  except Exception: counts["malformed"]+=1;continue
+                  stage=q.get("SNAPSHOT","UNKNOWN")
+                  counts[stage]+=1
+                  counts[stage+"_scores6"]+=len(q.get("SCORES",[]))==6
+                  counts[stage+"_raw"]+=c.get("RAW_SET_PROBABILITY") is not None
+                  sigs[json.dumps({"logic":q.get("LOGIC_VERSION"),"runtime":q.get("RUNTIME_VERSION"),"mode":q.get("BET_SELECTION_MODE"),"true":q.get("TRUE_AI_APPLIED"),"material":q.get("P3_MATERIALS_APPLIED")},sort_keys=True)]+=1
+                  if stage not in report["examples"]: report["examples"][stage]={"envelope_keys":sorted(v),"payload_keys":sorted(q),"research_keys":sorted(q.get("RESEARCH_PACKET") or {}),"confidence_keys":sorted(c)}
+              report["snapshot_counts"]=dict(counts);report["generation_signatures"]=[{"signature":json.loads(k),"count":n} for k,n in sigs.items()]
+              report["eligible_records"]=len(rows);report["source_issues"]=issues[:20]
+              if rows:
+                  a=R.analyze_generations(rows)
+                  report["generations"]={k:{"status":g.get("STATUS"),"total":g.get("TOTAL_RECORDS"),"days":g.get("DISTINCT_DAYS"),"error":g.get("ERROR"),"units":{u:{"development":d.get("DEVELOPMENT"),"holdout":d.get("HOLDOUT_RAW"),"evaluated_n":d.get("HOLDOUT_EVALUATED_N")} for u,d in g.get("UNITS",{}).items()}} for k,g in a["GENERATIONS"].items()}
+          print("P3_INVENTORY_JSON="+json.dumps(report,ensure_ascii=False,separators=(",",":")))
+          
+          PY
+      - name: Remove temporary plaintext
+        if: always()
+        run: rm -rf .audit "${RUNNER_TEMP}/source.tgz"
