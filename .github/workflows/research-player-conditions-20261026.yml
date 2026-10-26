@@ -1,4 +1,4 @@
-name: Player condition saved-source audit
+name: P3 saved LIVE wave and equal-points audit
 on:
   push:
     branches: [research/player-conditions-20261026]
@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        day: ['2026-10-26']
+        day: ['2026-10-20', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26']
     steps:
       - name: Checkout pinned source readers
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -56,49 +56,108 @@ jobs:
           MATCHED_CACHE_KEY: ${{steps.archive.outputs.cache-matched-key}}
         run: |
           python3 - <<'PY'
-          import collections,hashlib,json,os,tarfile
-          from pathlib import Path,PurePosixPath
-          from g11.growth_p3.v1_1.confidence_historical_backtest_v1 import manifest_archive,ledger_map,verified_outcome,summary,research_grade
-          root=Path('.audit/state');root.mkdir(parents=True,exist_ok=True)
-          archive=Path(os.environ['RUNNER_TEMP'])/'source.tgz'
-          assert archive.is_file(), 'ARCHIVE_REQUIRED'
-          with tarfile.open(archive,'r|gz') as tf:
-           for m in tf:
-            p=PurePosixPath(m.name)
-            if p.is_absolute() or '..' in p.parts or m.issym() or m.islnk():raise RuntimeError('UNSAFE_ARCHIVE')
-            if not m.isfile() or not '/'.join(p.parts).startswith('store/archives/'):continue
-            assert m.size<100_000_000
-            out=root.joinpath(*p.parts);out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(tf.extractfile(m).read())
-          rows=[];sources=[];identities=collections.Counter();rejected=collections.Counter();shapes={}
+          import collections, hashlib, json, os, tarfile
+          from pathlib import Path, PurePosixPath
+          from g11.growth_p3.v1_1.confidence_historical_backtest_v1 import manifest_archive, ledger_map, verified_outcome, summary, require, stamp
+          from g11.growth_p3.v1_1.canonical_v1_1 import canonical_sha
+          from g11.canonical.official_pipeline import OfficialArtifactStore
+          
+          day = os.environ['AUDIT_DAY']
+          root = Path('.audit/state')
+          root.mkdir(parents=True, exist_ok=True)
+          archive = Path(os.environ['RUNNER_TEMP']) / 'source.tgz'
+          report = {'schema': 'G11_P3_LIVE_WAVE_DIAGNOSTIC_V1', 'cache_day': day,
+                    'cutoff_exclusive': '2026-10-26', 'prediction_recalculated': False,
+                    'rank_thresholds_changed': False, 'formal_certification': False}
+          if not archive.is_file():
+              report['status'] = 'CACHE_UNAVAILABLE'
+              print('P3_WAVE_AUDIT_JSON=' + json.dumps(report, separators=(',', ':')))
+              raise SystemExit(0)
+          with tarfile.open(archive, 'r|gz') as tf:
+              for member in tf:
+                  path = PurePosixPath(member.name)
+                  require(not path.is_absolute() and '..' not in path.parts and not member.issym() and not member.islnk(), 'UNSAFE_ARCHIVE')
+                  name = '/'.join(path.parts)
+                  selected = name.startswith('store/archives/') or name.startswith('store/responses/') or name.startswith('store/snapshots/predeadline/current-growth-p3-live-')
+                  if not member.isfile() or not selected:
+                      continue
+                  require(member.size < 100_000_000, 'MEMBER_SIZE')
+                  target = root.joinpath(*path.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(tf.extractfile(member).read())
+          
+          def score_subset(record, outcome, archive_value):
+              # Original stored order only, no re-ranking with later data. Refund races
+              # are reported separately because the effective three-ticket stake changes.
+              bets = record['PRODUCTION_BET_ORDER'][:3]
+              require(len(bets) == 3 and len(set(bets)) == 3, 'FIRST_THREE')
+              winners = archive_value['OFFICIAL_TRIFECTA_SETTLEMENTS']['BY_RACE_KEY'][record['RACE_ID']]
+              return dict(outcome, Y=int(any(s['combination'] in bets for s in winners)),
+                          NET_STAKE=300, GROSS_STAKE=300, REFUND=0,
+                          PAYOUT=sum(s['payout'] for s in winners if s['combination'] in bets))
+          
+          def grouped(rows):
+              return {'all_bets': summary(rows), 'first_three': summary([r['FIRST_THREE'] for r in rows]),
+                      'head_hit_n': sum(r.get('HEAD_HIT', 0) for r in rows),
+                      'head_verified_n': sum('HEAD_HIT' in r for r in rows)}
+          
+          rows, compact, sources = [], [], []
+          excluded, snapshot_issues, identities = collections.Counter(), collections.Counter(), collections.Counter()
+          store = OfficialArtifactStore(root / 'store')
           for path in sorted(root.rglob('daily-research-*.json.gz')):
-           value,digest=manifest_archive(path);day=value['OPERATIONAL_DATE_JST']
-           if not '2026-10-20'<=day<'2026-10-26':continue
-           ledger=ledger_map(value)
-           records=value.get('P3_CONFIDENCE_CALIBRATION_DEV',{}).get('RECORDS',[])
-           sources.append({'day':day,'archive_sha256':digest,'records':len(records)})
-           if not shapes:
-            shapes={'ledger_fields':value['RESEARCH_LEDGER60_FIELDS'],'bindings':value['SOURCE_BINDINGS'],'record_fields':sorted(records[0]) if records else []}
-           for r in records:
-            if r.get('MORNING_OR_LIVE')!='LIVE':continue
-            identities[json.dumps({k:r.get(k) for k in ['P3_VERSION','P3_ENGINE_FINGERPRINT','CONFIDENCE_RULE_VERSION','PL120_VERSION']},sort_keys=True)]+=1
-            try:
-             out=verified_outcome(r,ledger[r['RACE_ID']],value)
-             rows.append(out)
-            except Exception as exc:rejected[str(exc)]+=1
-          units={u:summary([r for r in rows if r['UNIT']==u]) for u in ['LIVE_3','LIVE_5','LIVE_7']}
-          byday={d:{u:summary([r for r in rows if r['RACE_DAY']==d and r['UNIT']==u]) for u in units} for d in sorted({r['RACE_DAY'] for r in rows})}
-          folds=[]
-          for day in sorted(byday):
-           for u in units:
-            train=[r for r in rows if r['RACE_DAY']<day and r['UNIT']==u and r['Y'] in [0,1]]
-            test=[r for r in rows if r['RACE_DAY']==day and r['UNIT']==u and r['Y'] in [0,1]]
-            if len(train)<30 or len({r['RACE_DAY'] for r in train})<3:continue
-            rate=sum(r['Y'] for r in train)/len(train)
-            folds.append({'day':day,'unit':u,'train':summary(train),'test':summary(test),'reference_grade':research_grade(rate)})
-          report={'schema':'G11_P3_LIVE_POINT_REFERENCE_AUDIT_V1','cutoff_exclusive':'2026-10-26','sources':sources,'units':units,'by_day':byday,'walk_forward':folds,'identity_groups':[dict(json.loads(k),n=n) for k,n in identities.items()],'shapes':shapes,'rejected':dict(rejected),'method':{'kind':'HISTORICAL_PERIOD_POINT_COHORT','thresholds':{'S':.6,'A':.4,'B':.2,'C':0},'minimum_races':30,'minimum_days':3,'individual_probability':False,'formal_certification':False,'model_generation_verified':False}}
-          print('P3_POINT_REFERENCE_JSON='+json.dumps(report,ensure_ascii=False,separators=(',',':')))
+              value, digest = manifest_archive(path)
+              race_day = value['OPERATIONAL_DATE_JST']
+              if not '2026-10-20' <= race_day < '2026-10-26' or (day != '2026-10-26' and race_day != day):
+                  continue
+              sources.append({'day': race_day, 'archive_sha256': digest})
+              ledger = ledger_map(value)
+              for record in value.get('P3_CONFIDENCE_CALIBRATION_DEV', {}).get('RECORDS', []):
+                  if record.get('MORNING_OR_LIVE') != 'LIVE':
+                      continue
+                  try:
+                      outcome = verified_outcome(record, ledger[record['RACE_ID']], value)
+                  except (ValueError, KeyError, TypeError) as exc:
+                      excluded['OUTCOME:' + str(exc)] += 1
+                      continue
+                  if outcome['Y'] is None:
+                      excluded['VOID'] += 1
+                      continue
+                  if record['REFUND_BOATS']:
+                      excluded['REFUND_RACE'] += 1
+                      continue
+                  outcome['POINTS'] = record['POINTS']
+                  outcome['FIRST_THREE'] = score_subset(record, outcome, value)
+                  compact.append(outcome)
+                  try:
+                      verified = store.load_verified_snapshot('predeadline', record['SOURCE_SNAPSHOT_NAME'])
+                      payload = verified['SNAPSHOT']['PAYLOAD']
+                      body = dict(payload); content_sha = body.pop('CONTENT_SHA256', None)
+                      require(verified['SNAPSHOT_SHA256'] == record['SOURCE_SNAPSHOT_SHA256'], 'SNAPSHOT_SHA_BINDING')
+                      require(content_sha == record['SOURCE_CONTENT_SHA256'] == canonical_sha(body), 'CONTENT_SHA_BINDING')
+                      require(payload['RACE_ID'] == record['RACE_ID'] and payload['SNAPSHOT'] == 'LIVE', 'LIVE_IDENTITY')
+                      require(payload['PREDICTION_AT'] == record['PREDICTION_LOCKED_AT'] and stamp(payload['PREDICTION_AT']) < stamp(record['RACE_DEADLINE_AT']), 'LIVE_TIME')
+                      require(payload['PRODUCTION_BETS'] == record['PRODUCTION_BET_ORDER'] and payload['PRODUCTION_POINTS'] == record['POINTS'], 'BET_BINDING')
+                      wave = payload['WAVE']['WAVE']
+                      require(type(wave) is int and 1 <= wave <= 8, 'LIVE_WAVE_RANGE')
+                      require(record['POINTS'] == (3 if wave <= 2 else 5 if wave <= 5 else 7), 'WAVE_POINT_BINDING')
+                      require(all(stamp(r['CAPTURED_AT_JST']) <= stamp(payload['PREDICTION_AT']) for r in verified['SNAPSHOT']['SOURCE_RECEIPTS']), 'LATE_INPUT')
+                      winners = record['OFFICIAL_WINNING_TRIFECTA_SET']
+                      outcome['WAVE'] = wave
+                      outcome['HEAD_HIT'] = int(any(int(b.split('-')[0]) == payload['HEAD'] for b in winners))
+                      identities[json.dumps({k: payload.get(k) for k in ['LOGIC_VERSION', 'BET_SELECTION_MODE', 'BASE_LOGIC_VERSION']}, sort_keys=True)] += 1
+                      rows.append(outcome)
+                  except (OSError, ValueError, KeyError, TypeError) as exc:
+                      snapshot_issues[str(exc)] += 1
+          
+          report.update(status='COMPLETE', sources=sources, excluded=dict(excluded), snapshot_issues=dict(snapshot_issues),
+                        compact_by_points={str(n): grouped([r for r in compact if r['POINTS'] == n]) for n in [3, 5, 7]},
+                        verified_by_wave={str(w): grouped([r for r in rows if r['WAVE'] == w]) for w in range(1, 9)},
+                        verified_by_wave_band={name: grouped([r for r in rows if lo <= r['WAVE'] <= hi]) for name, lo, hi in [('1-2',1,2),('3-5',3,5),('6-8',6,8)]},
+                        identity_groups=[dict(json.loads(k), n=n) for k,n in identities.items()],
+                        method={'first_three': 'ORIGINAL_PRODUCTION_ORDER_PREFIX_3_NO_RESORT', 'refund_races': 'EXCLUDED_FROM_EQUAL_POINTS_COMPARISON',
+                                'wave_source': 'ORIGINAL_LIVE_SNAPSHOT_ONLY_NEVER_MORNING_LEDGER', 'comparison': 'RETROSPECTIVE_DESCRIPTIVE_NOT_CAUSAL'})
+          print('P3_WAVE_AUDIT_JSON=' + json.dumps(report, ensure_ascii=False, separators=(',', ':')))
           PY
       - name: Remove temporary plaintext
         if: always()
         run: rm -rf .audit "${RUNNER_TEMP}/source.tgz"
-
