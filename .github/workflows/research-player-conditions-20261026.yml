@@ -56,58 +56,49 @@ jobs:
           MATCHED_CACHE_KEY: ${{steps.archive.outputs.cache-matched-key}}
         run: |
           python3 - <<'PY'
-          import collections,hashlib,json,os,re,tarfile
-          from datetime import date
+          import collections,hashlib,json,os,tarfile
           from pathlib import Path,PurePosixPath
-          from g11.canonical.official_pipeline import OfficialArtifactStore,LzhExtractor,parse_result_text,decode_cp932
+          from g11.growth_p3.v1_1.confidence_historical_backtest_v1 import manifest_archive,ledger_map,verified_outcome,summary,research_grade
           root=Path('.audit/state');root.mkdir(parents=True,exist_ok=True)
           archive=Path(os.environ['RUNNER_TEMP'])/'source.tgz'
-          report={'schema':'G11_PLAYER_CONDITION_SOURCE_INVENTORY_V1','day':os.environ['AUDIT_DAY'],'cache':os.environ.get('MATCHED_CACHE_KEY'),'available':archive.is_file()}
-          if archive.is_file():
-            counts=collections.Counter();g11=collections.Counter();snapshots=collections.defaultdict(list);wild_shapes=collections.Counter()
-            with tarfile.open(archive,'r|gz') as tf:
-              for m in tf:
-                p=PurePosixPath(m.name)
-                if p.is_absolute() or '..' in p.parts or m.issym() or m.islnk():raise RuntimeError('UNSAFE_ARCHIVE')
-                if not m.isfile():continue
-                n='/'.join(p.parts)
-                if n.startswith('store/g11/'):
-                  g11[p.parts[2]]+=1
-                  if p.parts[2]=='wild-pack-oos' and n.endswith('.json') and m.size<2_000_000:
-                    item=json.loads(tf.extractfile(m).read())
-                    if isinstance(item,dict):
-                      shape={'keys':sorted(item),'schema':item.get('schema',item.get('SCHEMA'))}
-                      wild_shapes[json.dumps(shape,sort_keys=True)]+=1
-                if not n.startswith(('store/snapshots/','store/responses/','store/archives/')) and n!='store/manifest.json':continue
-                if m.size>100_000_000:raise RuntimeError('MEMBER_SIZE_LIMIT')
-                counts['/'.join(p.parts[:3])]+=1
-                out=root/n;out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(tf.extractfile(m).read())
-            store=OfficialArtifactStore((root/'store').resolve())
-            receipt=store.response_receipt('result-k-20261025')
-            if receipt:
-              raw=store.response_bytes('result-k-20261025')
-              assert receipt['HOST'] in ['www1.mbrace.or.jp','www.boatrace.jp']
-              assert receipt['STATUS']=='HTTP_200_BYTE_EXACT_READBACK'
-              assert hashlib.sha256(raw).hexdigest()=='f214e4f0d0910d820ef68d52cd6efe2d11c4b008d21c089dac5852045edbf3dd'
-              records=parse_result_text(decode_cp932(LzhExtractor().extract_one(raw,'k261025.TXT')),date(2026,10,25))
-              results=[{'key':r.race_key,'status':r.race_status,'refund_boats':sorted(r.refund_boats),'settlements':sorted([{'trifecta':s.combination,'payout':s.payout} for s in r.trifecta_settlements],key=lambda s:s['trifecta'])} for r in sorted(records,key=lambda r:r.race_key)]
-              result_bytes=json.dumps(results,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-              report['prior_official_result']={'day':'2026-10-25','raw_sha256':hashlib.sha256(raw).hexdigest(),'result_count':len(results),'settlements_sha256':hashlib.sha256(result_bytes).hexdigest(),'verification':'RAW_REPARSED_AND_ORIGINAL_NIGHT_RAW_HASH_MATCHED'}
-            report['wild_oos_shapes']=[dict(json.loads(k),count=n) for k,n in wild_shapes.items()]
-            for p in sorted((root/'store/snapshots').glob('*/*.json')):
-              stage=p.parent.name;name=p.stem
-              group=re.sub(r'\d{8}-\d{2}-\d{2}','RACE',name)
-              try:
-                v=store.load_verified_snapshot(stage,name)['SNAPSHOT']['PAYLOAD']
-                meta={'name':group,'fields':sorted(v) if isinstance(v,dict) else [],'verified':True}
-                if name=='abeken-head-features':meta['feature_races']=len(v.get('FEATURES',{}))
-                identity=next((v.get(k) for k in ['OPERATIONAL_DATE_JST','DATE_JST','DATE'] if v.get(k)),None)
-                if identity:meta['day']=identity
-              except Exception as exc:meta={'name':group,'verified':False,'error_type':type(exc).__name__}
-              snapshots[stage].append(meta)
-            report.update(archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),files=dict(counts),g11_folders=dict(g11),snapshots={s:[dict(json.loads(k),count=n) for k,n in collections.Counter(json.dumps(x,sort_keys=True) for x in rows).items()] for s,rows in snapshots.items()})
-          print('PLAYER_SOURCE_INVENTORY_JSON='+json.dumps(report,separators=(',',':')))
+          assert archive.is_file(), 'ARCHIVE_REQUIRED'
+          with tarfile.open(archive,'r|gz') as tf:
+           for m in tf:
+            p=PurePosixPath(m.name)
+            if p.is_absolute() or '..' in p.parts or m.issym() or m.islnk():raise RuntimeError('UNSAFE_ARCHIVE')
+            if not m.isfile() or not '/'.join(p.parts).startswith('store/archives/'):continue
+            assert m.size<100_000_000
+            out=root.joinpath(*p.parts);out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(tf.extractfile(m).read())
+          rows=[];sources=[];identities=collections.Counter();rejected=collections.Counter();shapes={}
+          for path in sorted(root.rglob('daily-research-*.json.gz')):
+           value,digest=manifest_archive(path);day=value['OPERATIONAL_DATE_JST']
+           if not '2026-10-20'<=day<'2026-10-26':continue
+           ledger=ledger_map(value)
+           records=value.get('P3_CONFIDENCE_CALIBRATION_DEV',{}).get('RECORDS',[])
+           sources.append({'day':day,'archive_sha256':digest,'records':len(records)})
+           if not shapes:
+            shapes={'ledger_fields':value['RESEARCH_LEDGER60_FIELDS'],'bindings':value['SOURCE_BINDINGS'],'record_fields':sorted(records[0]) if records else []}
+           for r in records:
+            if r.get('MORNING_OR_LIVE')!='LIVE':continue
+            identities[json.dumps({k:r.get(k) for k in ['P3_VERSION','P3_ENGINE_FINGERPRINT','CONFIDENCE_RULE_VERSION','PL120_VERSION']},sort_keys=True)]+=1
+            try:
+             out=verified_outcome(r,ledger[r['RACE_ID']],value)
+             rows.append(out)
+            except Exception as exc:rejected[str(exc)]+=1
+          units={u:summary([r for r in rows if r['UNIT']==u]) for u in ['LIVE_3','LIVE_5','LIVE_7']}
+          byday={d:{u:summary([r for r in rows if r['RACE_DAY']==d and r['UNIT']==u]) for u in units} for d in sorted({r['RACE_DAY'] for r in rows})}
+          folds=[]
+          for day in sorted(byday):
+           for u in units:
+            train=[r for r in rows if r['RACE_DAY']<day and r['UNIT']==u and r['Y'] in [0,1]]
+            test=[r for r in rows if r['RACE_DAY']==day and r['UNIT']==u and r['Y'] in [0,1]]
+            if len(train)<30 or len({r['RACE_DAY'] for r in train})<3:continue
+            rate=sum(r['Y'] for r in train)/len(train)
+            folds.append({'day':day,'unit':u,'train':summary(train),'test':summary(test),'reference_grade':research_grade(rate)})
+          report={'schema':'G11_P3_LIVE_POINT_REFERENCE_AUDIT_V1','cutoff_exclusive':'2026-10-26','sources':sources,'units':units,'by_day':byday,'walk_forward':folds,'identity_groups':[dict(json.loads(k),n=n) for k,n in identities.items()],'shapes':shapes,'rejected':dict(rejected),'method':{'kind':'HISTORICAL_PERIOD_POINT_COHORT','thresholds':{'S':.6,'A':.4,'B':.2,'C':0},'minimum_races':30,'minimum_days':3,'individual_probability':False,'formal_certification':False,'model_generation_verified':False}}
+          print('P3_POINT_REFERENCE_JSON='+json.dumps(report,ensure_ascii=False,separators=(',',':')))
           PY
       - name: Remove temporary plaintext
         if: always()
         run: rm -rf .audit "${RUNNER_TEMP}/source.tgz"
+
