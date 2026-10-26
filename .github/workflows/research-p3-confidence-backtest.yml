@@ -113,6 +113,24 @@ jobs:
               if rows:
                   a=R.analyze_generations(rows)
                   report["generations"]={k:{"status":g.get("STATUS"),"total":g.get("TOTAL_RECORDS"),"days":g.get("DISTINCT_DAYS"),"error":g.get("ERROR"),"units":{u:{"development":d.get("DEVELOPMENT"),"holdout":d.get("HOLDOUT_RAW"),"evaluated_n":d.get("HOLDOUT_EVALUATED_N")} for u,d in g.get("UNITS",{}).items()}} for k,g in a["GENERATIONS"].items()}
+          
+              report["retained_paths"]=[]
+              report["shape_samples"]={}
+              prefixes=Counter()
+              with tarfile.open(archive,"r|gz") as tf:
+                  for m in tf:
+                      if not m.isfile(): continue
+                      n="/".join(PurePosixPath(m.name).parts)
+                      prefixes["/".join(n.split("/")[:3])]+=1
+                      if ("p3" in n.lower() or "research" in n.lower() or "2026-10-25" in n or "20261025" in n) and not n.startswith(("daily-runtime/","store/responses/")):
+                          if len(report["retained_paths"])<180: report["retained_paths"].append({"path":n,"size":m.size})
+                      if n.endswith("daily-research-20261025.json.gz") or n.endswith("daily-research-20261010.json.gz"):
+                          v=json.loads(gzip.decompress(tf.extractfile(m).read()))
+                          ev=v.get("P3_CONFIDENCE_CALIBRATION_DEV") or {}
+                          rr=ev.get("RECORDS",[])
+                          report["shape_samples"][n]={"record_keys":list(rr[0]) if rr else [],"ledger_fields":v.get("RESEARCH_LEDGER60_FIELDS"),"ledger_first":dict(zip(v.get("RESEARCH_LEDGER60_FIELDS",[]),v.get("RESEARCH_LEDGER60_ROWS",[[]])[0])),"odds_type":type(v.get("ODDS_EV_RECORDS")).__name__,"odds_first_keys":list(v.get("ODDS_EV_RECORDS",[{}])[0]) if isinstance(v.get("ODDS_EV_RECORDS"),list) and v["ODDS_EV_RECORDS"] else []}
+              report["prefixes"]=dict(prefixes)
+          
           print("P3_INVENTORY_JSON="+json.dumps(report,ensure_ascii=False,separators=(",",":")))
           
           PY
