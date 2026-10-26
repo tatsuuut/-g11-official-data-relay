@@ -89,7 +89,7 @@ jobs:
               assert receipt['HOST'] in ['www1.mbrace.or.jp','www.boatrace.jp']
               assert receipt['STATUS']=='HTTP_200_BYTE_EXACT_READBACK'
               assert hashlib.sha256(raw).hexdigest()=='f214e4f0d0910d820ef68d52cd6efe2d11c4b008d21c089dac5852045edbf3dd'
-              records=parse_result_text(decode_cp932(LzhExtractor().extract_one(raw,'k261025.txt')),date(2026,10,25))
+              records=parse_result_text(decode_cp932(LzhExtractor().extract_one(raw,'k261025.TXT')),date(2026,10,25))
               results=[{'key':r.race_key,'status':r.race_status,'refund_boats':sorted(r.refund_boats),'settlements':sorted([{'trifecta':s.combination,'payout':s.payout} for s in r.trifecta_settlements],key=lambda s:s['trifecta'])} for r in sorted(records,key=lambda r:r.race_key)]
               result_bytes=json.dumps(results,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
               report['prior_official_result']={'day':'2026-10-25','raw_sha256':hashlib.sha256(raw).hexdigest(),'result_count':len(results),'settlements_sha256':hashlib.sha256(result_bytes).hexdigest(),'verification':'RAW_REPARSED_AND_ORIGINAL_NIGHT_RAW_HASH_MATCHED'}
