@@ -1,0 +1,41 @@
+name: P3 5-8-15 retained source replay audit
+on:
+  push:
+    branches: [research/p3-5815-initial-ranks-20261027]
+    paths: [.github/workflows/p3-5815-initial-ranks.yml, scripts/p3_5815_source_inventory.py, scripts/p3_5815_replay.py]
+permissions: {contents: read, actions: read}
+concurrency: {group: p3-5815-initial-ranks-research, cancel-in-progress: false}
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/research/p3-5815-initial-ranks-20261027'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - name: Restore existing encrypted history without saving caches
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: p3-5815-isolated-audit-20261027-${{github.run_id}}
+          restore-keys: |
+            g11-state-v4-published-2026-10-27-
+            g11-state-v4-critical-2026-10-27-
+            g11-state-v4-2026-10-27-
+            g11-state-v3-2026-10-27-
+      - name: Decrypt isolated research copy
+        env:
+          ARCHIVE_PASSPHRASE: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -s .relay-cache/state.tgz.gpg ]; then
+            exec 3<<<"${ARCHIVE_PASSPHRASE}"
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/p3-history-source.tgz" .relay-cache/state.tgz.gpg
+            exec 3<&-
+          fi
+      - name: Audit retained projections and prediction-time score coverage
+        run: python3 scripts/p3_5815_source_inventory.py
+      - name: Remove temporary plaintext
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/p3-history-source.tgz"
