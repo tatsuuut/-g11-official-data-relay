@@ -1,4 +1,4 @@
-name: P3 saved LIVE wave and equal-points audit
+name: P3 October 26 historical input coverage audit
 on:
   push:
     branches: [research/player-conditions-20261026]
@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        day: ['2026-10-20', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26']
+        day: ['2026-10-26', '2026-10-27']
     steps:
       - name: Checkout pinned source readers
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -33,7 +33,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: player-conditions-readonly-${{matrix.day}}-20261026
+          key: p3-input-coverage-readonly-${{matrix.day}}-20261027
           restore-keys: |
             g11-state-v4-published-${{matrix.day}}-
             g11-state-v4-critical-${{matrix.day}}-
@@ -67,7 +67,7 @@ jobs:
           root.mkdir(parents=True, exist_ok=True)
           archive = Path(os.environ['RUNNER_TEMP']) / 'source.tgz'
           report = {'schema': 'G11_P3_LIVE_WAVE_DIAGNOSTIC_V1', 'cache_day': day,
-                    'cutoff_exclusive': '2026-10-26', 'prediction_recalculated': False,
+                    'cutoff_exclusive': '2026-10-27', 'prediction_recalculated': False,
                     'rank_thresholds_changed': False, 'formal_certification': False}
           if not archive.is_file():
               report['status'] = 'CACHE_UNAVAILABLE'
@@ -107,7 +107,7 @@ jobs:
           for path in sorted(root.rglob('daily-research-*.json.gz')):
               value, digest = manifest_archive(path)
               race_day = value['OPERATIONAL_DATE_JST']
-              if not '2026-10-20' <= race_day < '2026-10-26' or (day != '2026-10-26' and race_day != day):
+              if race_day != '2026-10-26':
                   continue
               sources.append({'day': race_day, 'archive_sha256': digest})
               ledger = ledger_map(value)
@@ -146,6 +146,8 @@ jobs:
                       outcome['HEAD_HIT'] = int(any(int(b.split('-')[0]) == payload['HEAD'] for b in winners))
                       identities[json.dumps({k: payload.get(k) for k in ['LOGIC_VERSION', 'BET_SELECTION_MODE', 'BASE_LOGIC_VERSION']}, sort_keys=True)] += 1
                       rows.append(outcome)
+                      if 'verified_payload_shape' not in report:
+                          report['verified_payload_shape'] = {k: sorted(v.keys()) if isinstance(v, dict) else {'type': type(v).__name__, 'length': len(v) if isinstance(v, list) else None} for k, v in payload.items()}
                   except (OSError, ValueError, KeyError, TypeError) as exc:
                       snapshot_issues[str(exc)] += 1
           
