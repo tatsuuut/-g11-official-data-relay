@@ -139,9 +139,10 @@ def run():
         require(feed['status']=='PASS' and feed['stage']=='NIGHT','NIGHT_STATUS')
         audit=source_equivalence(day,authority); audits.append(dict(day=day,**audit))
         archives=list((root/'store/archives').rglob('daily-research-'+day+'*.json.gz'))
-        if not archives: archives=[p for p in (root/'store/archives').rglob('*.json.gz') if day in str(p)]
+        if not archives: archives=[p for p in (root/'store/archives').rglob('*.json.gz') if day in str(p) or day.replace('-','') in str(p)]
         require(len(archives)==1,'ARCHIVE_DAY_COUNT:'+day)
         history,digest=manifest_archive(archives[0]); ledger=ledger_map(history)
+        require(history['OPERATIONAL_DATE_JST']==day,'ARCHIVE_DAY_BINDING')
         records={r['RACE_ID']:r for r in history.get('P3_CONFIDENCE_CALIBRATION_DEV',{}).get('RECORDS',[]) if r.get('MORNING_OR_LIVE')=='LIVE'}
         reviews=list((root/'store/g11/p3-true-ai-review'/day).glob('review-*.json')); require(len(reviews)==1,'REVIEW_COUNT')
         review=json.loads(reviews[0].read_bytes()); review_sha=seal(review)
