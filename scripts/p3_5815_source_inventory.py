@@ -46,20 +46,23 @@ else:
                         'impact_six': len(impact), 'top_fields': sorted(obj),
                         'source': obj.get('source'), 'daily_p3': obj.get('daily_runtime', {}).get('p3'),
                         'selection_policies': dict(collections.Counter((r['predeadline'].get('trifecta_confidence') or {}).get('selection_policy') for r in live))}
-                if impact:
-                    r = impact[0]
+                if live and day >= '2026-10-22':
+                    r = (impact or live)[0]
                     item['sample'] = {'key': r['key'], 'race_fields': sorted(r),
                                       'live_fields': sorted(r['predeadline']),
-                                      'impact': r['predeadline']['pre_race_impact'],
+                                      'live': r['predeadline'],
                                       'confidence': r['predeadline'].get('trifecta_confidence'),
                                       'current_p3': r.get('current_p3')}
+                    item['p3_race_fields'] = {k:v for k,v in r.items() if 'p3' in k or 'growth' in k}
                 feeds.append(item)
     for item in feeds:
         day_proof = proofs.get(item['date'], {})
         check = day_proof.get('night-checkpoint.json', {})
         item['checkpoint_feed_hash_matches'] = check.get('feed_sha256') == item['sha256']
         item['checkpoint_fields'] = sorted(check)
-        item['authority'] = day_proof.get('authority.json', {})
+        authority = day_proof.get('authority.json', {})
+        item['authority'] = {k:v for k,v in authority.items() if k in {'runtime_source_sha','source_archive_sha256','source_archive','p3','authority_sha256'}}
+        item['p3_source_files'] = {k:v for k,v in authority.get('source_files', {}).items() if 'growth_p3/v1_1/' in k and k.endswith('.py') and '/test_' not in k}
     report.update(status='COMPLETE', member_groups=dict(roots),
                   retained_night_projections=sorted(feeds, key=lambda r:r['date']),
                   true_source_manifests=dict(true_days))
