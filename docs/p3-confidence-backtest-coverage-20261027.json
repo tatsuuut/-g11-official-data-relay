@@ -1,0 +1,387 @@
+{
+  "schema": "G11_P3_BACKTEST_SOURCE_COVERAGE_20261027_V1",
+  "evaluated_on": "2026-10-27",
+  "purpose": "Determine whether currently retained historical inputs can replay the new 5/8/15 P3 policy for race-specific confidence.",
+  "runs": [
+    {
+      "url": "https://github.com/tatsuuut/-g11-official-data-relay/actions/runs/40426447330",
+      "source_commit": "9b51b7e5323fbdcebe8cc3d0d26559d091054f0f",
+      "day26_cache": "CACHE_UNAVAILABLE",
+      "day27_cache": "AVAILABLE"
+    },
+    {
+      "url": "https://github.com/tatsuuut/-g11-official-data-relay/actions/runs/40426704483",
+      "source_commit": "3973064a4b58dbd95236077e3ecfd8bbb620eaea",
+      "job_id": 121934150470
+    }
+  ],
+  "source_day": "2026-10-26",
+  "sources": [
+    {
+      "day": "2026-10-26",
+      "archive_sha256": "06c99410e6514634788ebf4c2f7661046381491a3cc46919d0b98fa8e1514051"
+    }
+  ],
+  "new_old_policy_outcomes": {
+    "scored_races": 132,
+    "hits": 35,
+    "by_points": {
+      "3": {
+        "N": 28,
+        "H": 4,
+        "DAYS": [
+          "2026-10-26"
+        ],
+        "UNIQUE_RACES": 28,
+        "HIT_RATE": 0.14285714285714285,
+        "WILSON95_DESCRIPTIVE": [
+          0.05699005319749392,
+          0.31489802163525293
+        ],
+        "FINANCIAL_N": 28,
+        "NET_STAKE": 8400,
+        "PAYOUT": 2160,
+        "NET_ROI": 0.2571428571428571,
+        "VOID_N": 0
+      },
+      "5": {
+        "N": 79,
+        "H": 23,
+        "DAYS": [
+          "2026-10-26"
+        ],
+        "UNIQUE_RACES": 79,
+        "HIT_RATE": 0.2911392405063291,
+        "WILSON95_DESCRIPTIVE": [
+          0.20251993313819472,
+          0.39912880084382363
+        ],
+        "FINANCIAL_N": 79,
+        "NET_STAKE": 39500,
+        "PAYOUT": 39810,
+        "NET_ROI": 1.0078481012658227,
+        "VOID_N": 0
+      },
+      "7": {
+        "N": 25,
+        "H": 8,
+        "DAYS": [
+          "2026-10-26"
+        ],
+        "UNIQUE_RACES": 25,
+        "HIT_RATE": 0.32,
+        "WILSON95_DESCRIPTIVE": [
+          0.17205190306907978,
+          0.5158973072689775
+        ],
+        "FINANCIAL_N": 25,
+        "NET_STAKE": 17500,
+        "PAYOUT": 15080,
+        "NET_ROI": 0.8617142857142858,
+        "VOID_N": 0
+      }
+    }
+  },
+  "prior_audit": {
+    "source_commit": "6746e449a6f0a933b943b36f3bc2f630966a41e1",
+    "scored_old_policy_races": 741,
+    "nonrefund_live_snapshots_requested": 737,
+    "nonrefund_live_snapshots_unavailable": 737
+  },
+  "combined_old_policy_scored_races": 873,
+  "original_live_snapshots": {
+    "requested": 132,
+    "verified": 0,
+    "issues": {
+      "VERIFIED_SNAPSHOT_FILE": 132
+    }
+  },
+  "compact_archive_shape": {
+    "AUTHORITY_CONSUMED": {
+      "type": "int",
+      "length": null
+    },
+    "AUTHORITY_ISSUED": {
+      "type": "int",
+      "length": null
+    },
+    "COMPRESSION_ELIGIBILITY": [
+      "1_OFFICIAL_RESULTS_ACQUIRED",
+      "2_STANDARD_RACE_KEY_RECONCILIATION",
+      "3_REFUND_CONFIRMATION",
+      "4_PRACTICAL_SELECTION_HIT_DETERMINATION",
+      "5_VALIDATION10_HIT_DETERMINATION",
+      "6_INVESTMENT_REFUND_PROFIT_CALCULATION",
+      "7_RESEARCH_LEDGER_TRANSFER",
+      "8_TRANSFER_CONSISTENCY_AUDIT",
+      "9_DAILY_AGGREGATION"
+    ],
+    "COUNTS": [
+      "EXCLUDED",
+      "EXPECTED_RACES",
+      "FORMAL",
+      "MODEL_CALIBRATION_EXCLUDED_MULTI_SETTLEMENT",
+      "MODEL_CALIBRATION_RACES",
+      "MORNING_EXCLUDED",
+      "MORNING_FORMAL",
+      "MULTI_SETTLEMENT_RACES",
+      "ODDS_ARCHIVED",
+      "ODDS_MISSING_OR_NOT_APPLICABLE",
+      "PENDING_RACES",
+      "PRACTICAL_HITS",
+      "RACES",
+      "REFUND_RACES",
+      "RESEARCH_DECISION_SKIP",
+      "RESEARCH_DECISION_WAIT",
+      "RESEARCH_DECISION_WIN",
+      "SG_RESEARCH_EXCLUDED",
+      "VALIDATION10_HITS"
+    ],
+    "MODEL_CALIBRATION20_FIELDS": {
+      "type": "list",
+      "length": 20
+    },
+    "MODEL_CALIBRATION20_ROWS": {
+      "type": "list",
+      "length": 144
+    },
+    "MODEL_CALIBRATION_EXCLUSIONS": [
+      "RACE_KEYS",
+      "REASON_BY_RACE_KEY",
+      "SCHEMA"
+    ],
+    "NIGHT_WORKBOOK_PROJECTION_SHA256": {
+      "type": "str",
+      "length": null
+    },
+    "ODDS_EV_RECORDS": {
+      "type": "list",
+      "length": 142
+    },
+    "OFFICIAL_TRIFECTA_SETTLEMENTS": [
+      "BY_RACE_KEY",
+      "MULTI_SETTLEMENT_RACE_KEYS",
+      "SCHEMA"
+    ],
+    "OPERATIONAL_DATE_JST": {
+      "type": "str",
+      "length": null
+    },
+    "P3_CONFIDENCE_CALIBRATION_DEV": [
+      "BET_MUTATION_COUNT",
+      "CALIBRATION_DEV_HISTORICAL_RECONSTRUCTABLE_N",
+      "CALIBRATION_DEV_PROSPECTIVE_REUSABLE_N",
+      "CALIBRATION_DEV_SETTLED_USABLE_N",
+      "FORMAL_CERTIFICATION_PROSPECTIVE_REUSABLE_N",
+      "LOCK_MUTATED",
+      "OPERATIONAL_DATE_JST",
+      "PAYOUT_INPUT_USED_COUNT",
+      "PRODUCTION_MUTATED",
+      "RECORDS",
+      "RESULT_INPUT_USED_COUNT",
+      "SCHEMA",
+      "SPECIAL_FIXED_8_EXCLUDED_N",
+      "STATUS",
+      "TARGET",
+      "TIME_LEAK_COUNT",
+      "UNITS"
+    ],
+    "PURCHASE_EXECUTED": {
+      "type": "int",
+      "length": null
+    },
+    "RESEARCH_EXCLUSION_POLICY": [
+      "DETECTION_FIELD",
+      "DETECTION_SOURCE",
+      "EXCLUDED_CLASS",
+      "KPI_ROI_VALIDATION10_CALIBRATION_SHADOW_EXCLUDED",
+      "MORNING_PREDICTION_DISPLAY_UNCHANGED",
+      "OFFICIAL_B_MEMBER_SHA256",
+      "OFFICIAL_B_REPARSED",
+      "OFFICIAL_B_RESPONSE_SHA256",
+      "OFFICIAL_B_SCHEDULE_KEYS_SHA256",
+      "OFFICIAL_B_SOURCE_ID",
+      "OFFICIAL_B_URL",
+      "OFFICIAL_RESULT_RAW_RETAINED",
+      "SCHEMA",
+      "SG_CONFIRMED_RACE_KEYS",
+      "SG_EXPECTED_RACE_KEYS",
+      "VENUE_DATE_HARDCODING_USED"
+    ],
+    "RESEARCH_LEDGER60_FIELDS": {
+      "type": "list",
+      "length": 60
+    },
+    "RESEARCH_LEDGER60_ROWS": {
+      "type": "list",
+      "length": 144
+    },
+    "RESULT_RAW16_FIELDS": {
+      "type": "list",
+      "length": 16
+    },
+    "RESULT_RAW16_ROWS": {
+      "type": "list",
+      "length": 144
+    },
+    "SCHEMA": {
+      "type": "str",
+      "length": null
+    },
+    "SG_RESEARCH_LEDGER_MIGRATION": [
+      "AFFECTED_RACE_KEYS",
+      "CORRECTION_EVIDENCE_APPEND_ONLY",
+      "MORNING_PREDICTION_FIELDS_MUTATED",
+      "MUTABLE_RESEARCH_FIELDS",
+      "OFFICIAL_RESULT_RAW_RETAINED",
+      "ORIGINAL_PERMANENT_HISTORY_MUTATED",
+      "REMOVE_MODEL_CALIBRATION_RACE_KEYS",
+      "REPLACEMENT_ROW_SHA256_BY_KEY",
+      "SCHEMA",
+      "STATUS",
+      "VENUE_DATE_HARDCODING_USED",
+      "VOLATILE_PROVENANCE_PRESERVED_FROM_EXISTING_ROW"
+    ],
+    "SHADOW_COEFFICIENT_POLICY": [
+      "CANDIDATE_A_TEMPERATURE",
+      "CANDIDATE_B_TEMPERATURE",
+      "CURRENT_TEMPERATURE",
+      "FORMAL_REVIEW_R",
+      "MORNING_RANKING_AXIS_BETS_MUTATED",
+      "OBSERVATION_START_R",
+      "PRODUCTION_MODEL_MUTATED",
+      "SCHEMA"
+    ],
+    "SOURCE_BINDINGS": [
+      "MORNING_WORKBOOK_PROJECTION_SHA256",
+      "NIGHT_RESULTS_SNAPSHOT_SHA256",
+      "OFFICIAL_B_RESPONSE_SHA256",
+      "OFFICIAL_B_URL",
+      "OFFICIAL_RESULT_RESPONSE_SHA256",
+      "OFFICIAL_RESULT_URL"
+    ],
+    "STATUS": {
+      "type": "str",
+      "length": null
+    }
+  },
+  "compact_confidence_record_fields": [
+    "BET_ARTIFACT_SHA",
+    "CALIBRATION_VERSION_AT_LOCK",
+    "CLASSIFICATION",
+    "CONFIDENCE_CAPTURED_AT",
+    "CONFIDENCE_RULE_VERSION",
+    "CONFIDENCE_SOURCE_SNAPSHOT_ID",
+    "DISPOSITION",
+    "FORMAL_CERTIFICATION_ELIGIBLE",
+    "LOCK_MUTATED",
+    "MORNING_OR_LIVE",
+    "OFFICIAL_RESULT_BOUND",
+    "OFFICIAL_RESULT_STATUS",
+    "OFFICIAL_WINNING_TRIFECTA_SET",
+    "P3_ENGINE_FINGERPRINT",
+    "P3_VERSION",
+    "PAYOUT_INPUT_USED_AT_RAW_CREATION",
+    "PL120_VERSION",
+    "POINTS",
+    "PREDICTION_LOCKED_AT",
+    "PRODUCTION_BET_COUNT",
+    "PRODUCTION_BET_ORDER",
+    "PRODUCTION_BET_SET",
+    "PRODUCTION_MUTATED",
+    "RACE_DEADLINE_AT",
+    "RACE_ID",
+    "RAW_SET_PROBABILITY",
+    "REFUND_ADJUSTED_VALID_BET_SET",
+    "REFUND_BOATS",
+    "RESEARCH_FORMAL_ELIGIBLE",
+    "RESULT_INPUT_USED_AT_RAW_CREATION",
+    "RESULT_REVISION_ID",
+    "RESULT_REVISION_RECORDED_AT",
+    "RESULT_SOURCE_SHA",
+    "SCHEMA",
+    "SOURCE_CONTENT_SHA256",
+    "SOURCE_SNAPSHOT_NAME",
+    "SOURCE_SNAPSHOT_SHA256",
+    "UNDETERMINED_REASONS",
+    "UNIT"
+  ],
+  "ledger_fields": [
+    "標準レースキー",
+    "日付",
+    "場",
+    "R",
+    "正式/除外",
+    "本体1位艇",
+    "本体1位点",
+    "本体2位艇",
+    "本体2位点",
+    "点差",
+    "軸",
+    "予想の質",
+    "波乱度",
+    "展開予想",
+    "実戦買い目",
+    "本番点数",
+    "検証10点",
+    "1着",
+    "2着",
+    "3着",
+    "3連単",
+    "払戻",
+    "返還",
+    "実戦投資",
+    "実戦的中",
+    "実戦払戻",
+    "実戦損益",
+    "検証的中",
+    "救済",
+    "軸着順",
+    "軸1着",
+    "軸2着",
+    "軸3着",
+    "軸3着内",
+    "正式集計対象",
+    "LOCK時刻",
+    "ロジックVer",
+    "朝行SHA",
+    "台帳行SHA",
+    "直前オッズ取得時刻",
+    "直前オッズSHA",
+    "結果取得時刻",
+    "公式結果URL",
+    "結果source SHA",
+    "結果snapshot SHA",
+    "朝予想snapshot SHA",
+    "結果成立状態",
+    "返還艇",
+    "3連単人気",
+    "決まり手",
+    "購入実行",
+    "検証投資条件",
+    "見/勝負",
+    "オッズ判断",
+    "オッズ妙味",
+    "最高EV買い目",
+    "最高EV",
+    "妙味買い目",
+    "オッズデータ充足度",
+    "外れ方分類"
+  ],
+  "remaining_sources": {
+    "original_display_shadow": "Retained auxiliary exhibition/morning-profile research; source contract is legacy official-course-only. Not established as current-P3 six-score/material/TRUE policy replay proof.",
+    "true_ai_history": "Retained morning model history. It does not replace missing P3 LIVE score provenance."
+  },
+  "conclusion": "OLD_SAVED_SET_PERFORMANCE_VERIFIED_NEW_5815_REPLAY_INPUTS_NOT_ESTABLISHED",
+  "limitations": [
+    "This audit did not replay or grade the new 5/8/15 policy.",
+    "No assertion that historical backtesting is inherently prohibited or requires waiting until November 2.",
+    "November 2 is the earliest eligible forward calendar holdout under the currently frozen collection schedule, not a universal earliest historical backtest date.",
+    "Legacy point-group performance must not be presented as race-specific calibrated confidence for the new policy.",
+    "Further reconstruction would require matching the current scoring/selection inputs and pre-race information availability; missing fields were not imputed."
+  ],
+  "production_mutated": false,
+  "forecast_locks_mutated": false,
+  "grade_thresholds_changed": false,
+  "formal_certification_issued": false
+}
