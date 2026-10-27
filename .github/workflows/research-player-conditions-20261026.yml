@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        day: ['2026-10-26', '2026-10-27']
+        day: ['2026-10-27']
     steps:
       - name: Checkout pinned source readers
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -73,11 +73,14 @@ jobs:
               report['status'] = 'CACHE_UNAVAILABLE'
               print('P3_WAVE_AUDIT_JSON=' + json.dumps(report, separators=(',', ':')))
               raise SystemExit(0)
+          member_groups = collections.Counter()
           with tarfile.open(archive, 'r|gz') as tf:
               for member in tf:
                   path = PurePosixPath(member.name)
                   require(not path.is_absolute() and '..' not in path.parts and not member.issym() and not member.islnk(), 'UNSAFE_ARCHIVE')
                   name = '/'.join(path.parts)
+                  if member.isfile() and name.startswith('store/'):
+                      member_groups['/'.join(path.parts[:3])] += 1
                   selected = name.startswith('store/archives/') or name.startswith('store/responses/') or name.startswith('store/snapshots/predeadline/current-growth-p3-live-')
                   if not member.isfile() or not selected:
                       continue
@@ -86,6 +89,7 @@ jobs:
                   target.parent.mkdir(parents=True, exist_ok=True)
                   target.write_bytes(tf.extractfile(member).read())
           
+          report['store_member_groups'] = dict(member_groups)
           def score_subset(record, outcome, archive_value):
               # Original stored order only, no re-ranking with later data. Refund races
               # are reported separately because the effective three-ticket stake changes.
@@ -111,11 +115,15 @@ jobs:
                   continue
               sources.append({'day': race_day, 'archive_sha256': digest})
               ledger = ledger_map(value)
+              report['archive_shape'] = {k: sorted(v.keys()) if isinstance(v, dict) else {'type': type(v).__name__, 'length': len(v) if isinstance(v, list) else None} for k, v in value.items()}
+              report['ledger_fields'] = value['RESEARCH_LEDGER60_FIELDS']
               for record in value.get('P3_CONFIDENCE_CALIBRATION_DEV', {}).get('RECORDS', []):
                   if record.get('MORNING_OR_LIVE') != 'LIVE':
                       continue
                   try:
                       outcome = verified_outcome(record, ledger[record['RACE_ID']], value)
+                      if 'confidence_record_fields' not in report:
+                          report['confidence_record_fields'] = sorted(record.keys())
                   except (ValueError, KeyError, TypeError) as exc:
                       excluded['OUTCOME:' + str(exc)] += 1
                       continue
