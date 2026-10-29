@@ -903,7 +903,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{env.G11_PRIVATE_REPOSITORY}}
-          ref: 7c38273c4e02eb607b58a55bf44a4034969fde7b
+          ref: 3fa4f754c1e1d491b7d1c42ae3b624f8bfee20d3
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .g11-deme-research
           persist-credentials: false
@@ -919,6 +919,16 @@ jobs:
           set -euo pipefail
           rm -f .relay-output/deme-discovery-public.json
           timeout 120 python3 .g11-deme-research/g11/canonical/deme_discovery_v5.py \
+            --store .relay-state/store --feed .relay-output/feed.json \
+            --projection-output .relay-output/deme-discovery-public.json
+      - name: 30x research registration and records
+        if: steps.deme-source.outcome=='success'&&hashFiles('.relay-output/deme-discovery-public.json')!=''
+        continue-on-error: true
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          timeout 90 python3 .g11-deme-research/g11/canonical/deme_discovery_thirty.py \
             --store .relay-state/store --feed .relay-output/feed.json \
             --projection-output .relay-output/deme-discovery-public.json
       - name: Encrypt changed state before persistence

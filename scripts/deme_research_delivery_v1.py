@@ -55,8 +55,15 @@ def request_json(url, data=None, token=None):
 def publish(state, feed_path, origin, request=request_json):
     projection_path=feed_path.parent/'deme-discovery-public.json'
     if not projection_path.is_file():return {'status':'NOT_AVAILABLE','reason':'CURRENT_RESEARCH_PROJECTION_MISSING'}
-    if projection_path.stat().st_size>256000:raise ValueError('RESEARCH_PUBLIC_BUDGET')
+    if projection_path.stat().st_size>320000:raise ValueError('RESEARCH_PUBLIC_BUDGET')
     p=json.loads(projection_path.read_bytes());feed=json.loads(feed_path.read_bytes())
+    if len(compact({k:v for k,v in p.items() if k!='thirty_focus_packed'}))>256000:
+        raise ValueError('RESEARCH_LEGACY_PUBLIC_BUDGET')
+    thirty=p.get('thirty_focus_packed')
+    if thirty is not None and (not isinstance(thirty,dict) or
+        thirty.get('schema')!='G11_THIRTY_VIEW_PACKED_V1' or
+        not isinstance(thirty.get('data'),str) or len(thirty['data'])>48000):
+        raise ValueError('RESEARCH_THIRTY_BUDGET')
     runtime=p.get('runtime') or {};day=feed['operational_date_jst']
     if (runtime.get('implementation')!=RELEASE or runtime.get('operational_date')!=day
         or p.get('available') is not True or p.get('production_mutated') is not False
@@ -79,6 +86,15 @@ def publish(state, feed_path, origin, request=request_json):
     visible,_=request(origin+'/api/g11-feed?view=p3-deme&through='+day)
     if (visible.get('publication') or {}).get('payload_sha256')!=sha(data) or visible.get('source_state_sha256')!=digest:
         raise ValueError('RESEARCH_PUBLIC_READBACK')
+    if thirty is not None:
+        shown=visible.get('thirty_focus') or {};saved=canonical.get('thirty_focus_v1') or {}
+        registration=shown.get('registration') or {};selection=saved.get('selection') or {}
+        if (shown.get('transport_sha256')!=thirty.get('sha256') or
+            registration.get('status')!='SAVED_READBACK_VERIFIED' or
+            registration.get('registered_at')!=selection.get('activated_at') or
+            registration.get('requested_start_date_jst')!=selection.get('requested_start_date_jst') or
+            (shown.get('observation') or {}).get('saved_records')!=len(saved.get('observations',{}))):
+            raise ValueError('RESEARCH_THIRTY_PUBLIC_READBACK')
     return dict(status='PASS',schema=SCHEMA,operational_date=day,updated_at=p['updated_at'],
         payload_sha256=sha(data),source_state_sha256=digest,site_get_readback='PASS',production_mutated=False)
 
