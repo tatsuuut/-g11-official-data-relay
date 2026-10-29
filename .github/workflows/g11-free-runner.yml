@@ -99,12 +99,7 @@ jobs:
               operational_date="${REQUESTED_DATE}"
             fi
           elif [ "${EVENT_NAME}" = "schedule" ]; then
-            # Cron deliveries can arrive hours late, including across the race-day boundary.
-            # During the live morning window bootstrap today before any predeadline work.
-            now_hhmm="$(date +%H%M)"
-            if [[ "${now_hhmm}" > "0214" && "${now_hhmm}" < "0800" ]]; then
-              phase="morning"
-            else
+            if [[ "$(date +%H%M)" > 0214 && "${now_hour}" -lt 8 ]]; then phase=morning; else
             case "${SCHEDULE_EXPRESSION}" in
               "15-55/5 17 * * *"|"*/5 18-21 * * *"|"0-5/5 22 * * *")
                 phase="morning"
@@ -378,9 +373,6 @@ jobs:
       - name: Keep the predeadline relay alive between delayed cron starts
         id: predeadline-chain
         continue-on-error: true
-        # A transient cache readback failure must not terminate future capture.
-        # Publication and WILD4 still require the verified checkpoint above.
-        # Recovery dispatch never publishes unverified state.
         if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
         env:
           GH_TOKEN: ${{github.token}}
