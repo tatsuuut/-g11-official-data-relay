@@ -373,6 +373,7 @@ jobs:
         continue-on-error: true
         # A transient cache readback failure must not terminate future capture.
         # Publication and WILD4 still require the verified checkpoint above.
+        # Recovery dispatch never publishes unverified state.
         if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
         env:
           GH_TOKEN: ${{github.token}}

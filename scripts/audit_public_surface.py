@@ -9,6 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "docs/predeadline-cache-readback-20261029.md",
     "scripts/critical_saved_publication_v1.py",
     "scripts/test_critical_saved_publication_v1.py",
     "docs/predeadline-publication-latency-20261024.md",
@@ -933,8 +934,15 @@ def audit_predeadline_critical_order() -> None:
     if "pip install" in before or ".g11-model" in before or "catboost" in before:
         fail("optional dependency before official capture")
     chain = workflow.split("      - name: Keep the predeadline relay alive between delayed cron starts", 1)[1].split("      - name:", 1)[0]
-    if "steps.runtime.outcome" in chain or "steps.critical-save.outcome == 'success'" not in chain:
+    if ("steps.runtime.outcome" in chain or "steps.critical-save" in chain
+            or "steps.critical.outcome=='success'" not in chain
+            or "steps.critical-encrypt.outputs.ready=='true'" not in chain):
         fail("optional runtime controls critical self-chain")
+    publish = workflow.split('      - name: Publish persisted critical LOCKs', 1)[1].split('      - name:', 1)[0]
+    handoff = workflow.split('      - name: Handoff saved early inputs to WILD4', 1)[1].split('      - name:', 1)[0]
+    if ("steps.critical-save.outputs.ready=='true'" not in publish
+            or "steps.critical-save.outcome=='success'" not in handoff):
+        fail('publication and WILD4 must still require verified persistence')
 
 
 def main() -> int:
@@ -981,6 +989,3 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
-
-
-
