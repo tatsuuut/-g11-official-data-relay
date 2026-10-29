@@ -99,6 +99,12 @@ jobs:
               operational_date="${REQUESTED_DATE}"
             fi
           elif [ "${EVENT_NAME}" = "schedule" ]; then
+            # Cron deliveries can arrive hours late, including across the race-day boundary.
+            # During the live morning window bootstrap today before any predeadline work.
+            now_hhmm="$(date +%H%M)"
+            if [[ "${now_hhmm}" > "0214" && "${now_hhmm}" < "0800" ]]; then
+              phase="morning"
+            else
             case "${SCHEDULE_EXPRESSION}" in
               "15-55/5 17 * * *"|"*/5 18-21 * * *"|"0-5/5 22 * * *")
                 phase="morning"
@@ -110,6 +116,7 @@ jobs:
                 phase="auto"
                 ;;
             esac
+            fi
           elif [ "${EVENT_NAME}" = "push" ]; then
             if [[ "${COMMIT_MESSAGE}" == *"[delayed-recovery-current]"* ]]; then
               phase="same-day-rescue"
