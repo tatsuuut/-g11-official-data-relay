@@ -116,8 +116,19 @@ def audit_public() -> dict[str, object]:
     )
     continuation_end = free.index("- name: Checkout hash-locked research runtime")
     continuation = free[continuation_start:continuation_end]
-    require_text(continuation, "steps.critical-save.outcome == 'success'",
-                 "PREDEADLINE_CRITICAL_CHECKPOINT_CHAIN_AUTHORITY")
+    require_text(continuation, "steps.critical.outcome=='success'",
+                 "PREDEADLINE_CRITICAL_CAPTURE_CHAIN_AUTHORITY")
+    require_text(continuation, "steps.critical-encrypt.outputs.ready=='true'",
+                 "PREDEADLINE_ENCRYPTED_CHAIN_AUTHORITY")
+    require('steps.critical-save' not in continuation,
+            "PREDEADLINE_CACHE_FAILURE_MUST_NOT_STOP_FUTURE_CAPTURE")
+    publish_start = free.index('- name: Publish persisted critical LOCKs')
+    publish = free[publish_start:continuation_start]
+    require_text(publish, "steps.critical-save.outputs.ready=='true'",
+                 "PREDEADLINE_PUBLICATION_REQUIRES_SAVED_READBACK")
+    handoff = free[free.index('- name: Handoff saved early inputs to WILD4'):publish_start]
+    require_text(handoff, "steps.critical-save.outcome=='success'",
+                 "WILD4_HANDOFF_REQUIRES_SAVED_READBACK")
     require("steps.runtime.outcome" not in continuation,
             "PREDEADLINE_OPTIONAL_RUNTIME_CHAIN_AUTHORITY")
     require_text(
@@ -495,4 +506,3 @@ if __name__ == "__main__":
     except ContractError as exc:
         print(f"G11_THREE_PHASE_RUNTIME_CONTRACT_FAIL:{exc}", file=sys.stderr)
         raise SystemExit(1)
-

@@ -21,6 +21,33 @@ runs:
         key: ${{ inputs.cache-key }}
     - name: Read back complete encrypted publication checkpoint
       id: readback
+      continue-on-error: true
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .relay-cache/state.tgz.gpg
+        key: ${{ inputs.cache-key }}
+        fail-on-cache-miss: true
+    - name: Wait for exact checkpoint visibility
+      if: steps.readback.outputs.cache-hit != 'true'
+      shell: bash
+      run: sleep 3
+    - name: Retry exact encrypted checkpoint readback
+      if: steps.readback.outputs.cache-hit != 'true'
+      id: readback-retry
+      continue-on-error: true
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .relay-cache/state.tgz.gpg
+        key: ${{ inputs.cache-key }}
+        fail-on-cache-miss: true
+    - name: Wait for final exact checkpoint readback
+      if: steps.readback.outputs.cache-hit != 'true' && steps.readback-retry.outputs.cache-hit != 'true'
+      shell: bash
+      run: sleep 7
+    - name: Final exact encrypted checkpoint readback
+      if: steps.readback.outputs.cache-hit != 'true' && steps.readback-retry.outputs.cache-hit != 'true'
+      id: readback-final
+      continue-on-error: true
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
         path: .relay-cache/state.tgz.gpg
@@ -30,11 +57,10 @@ runs:
       id: verified
       shell: bash
       env:
-        CACHE_HIT: ${{ steps.readback.outputs.cache-hit }}
+        CACHE_HIT: ${{ steps.readback.outputs.cache-hit == 'true' || steps.readback-retry.outputs.cache-hit == 'true' || steps.readback-final.outputs.cache-hit == 'true' }}
       run: |
         set -euo pipefail
         test "${CACHE_HIT}" = "true"
         sha256sum -c .relay-output/publication-state.sha256
         echo 'ready=true' >> "${GITHUB_OUTPUT}"
         echo 'G11_PUBLICATION_STATE_READBACK=PASS'
-

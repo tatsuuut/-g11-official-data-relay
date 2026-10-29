@@ -371,7 +371,9 @@ jobs:
       - name: Keep the predeadline relay alive between delayed cron starts
         id: predeadline-chain
         continue-on-error: true
-        if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-save.outcome == 'success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
+        # A transient cache readback failure must not terminate future capture.
+        # Publication and WILD4 still require the verified checkpoint above.
+        if: always()&&!cancelled()&&steps.critical.outcome=='success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
         env:
           GH_TOKEN: ${{github.token}}
           OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
@@ -2272,4 +2274,3 @@ jobs:
 
 
 # Verified paths
-
