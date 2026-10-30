@@ -243,7 +243,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 0dc69329705c6b59ee70978658cdc284f2a71c16
+          ref: 67d6ed0862f8bb91c7ee827023a86480aa00eb2f
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -598,11 +598,8 @@ jobs:
               active=saved.get('active',{}).get('identity',life.BASE)
               generation=saved.get('generations',{}).get(active,{})
               q=generation.get('qualification',{})
-              cached=(q.get('state')=='VERIFIED' and q.get('through')==previous and q.get('contract')==life.GENERATION_CONTRACT
-                  and (q.get('valid_races',0)<1000 or generation.get('first_adoption'))
-                  and saved.get('specialty',{}).get('schema')==life.SPECIALTY_REVISION
-                  and saved.get('specialty',{}).get('through')==previous
-                  and not saved.get('specialty',{}).get('last_error'))
+              cached=life.generation_cache_ready(saved,day)
+              print('WILD4_VERIFIED_GENERATION_CACHE='+('REUSED' if cached else 'REFRESH_REQUIRED'))
               if not cached:
                   generation_evidence,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=goripan-generation&generation='+active+'&through='+previous)
           except Exception:
@@ -1082,8 +1079,55 @@ jobs:
           print('SPECIALTY_V4_RESEARCH_READBACK='+json.dumps(life.specialty_public_status(state),sort_keys=True))
           with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write('saved=true\n')
           PYRESEARCH
+      - name: Recheck retained incomplete NIGHT without generating predictions
+        id: coverage-recheck
+        if: inputs.lineage_readback_date == '' && steps.decrypted.outputs.canonical_ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.growth.outcome != 'success'
+        continue-on-error: true
+        working-directory: .g11-private
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+        run: |
+          python3 - <<'PYRECHECK'
+          import json,os,pathlib
+          from datetime import datetime,timezone
+          from g11.canonical.official_pipeline import OfficialArtifactStore
+          from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+          from g11.wild_pack.v1.wild4_official_settlement_v1 import verify_prior
+          ledger=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-future-locks'
+          day=os.environ['OPERATIONAL_DATE']
+          state=life.read(life.state_path(ledger))
+          attempt=state.get('last_attempt') or {}
+          if (attempt.get('date')!=day or attempt.get('state')!='TECHNICAL_HOLD'
+              or attempt.get('reason')!='OFFICIAL_DAY_PREDICTION_COVERAGE'):
+              print('WILD4_COVERAGE_RECHECK=NOT_REQUIRED');raise SystemExit(0)
+          root=pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'.relay-state/store'
+          source=OfficialArtifactStore(root)
+          verified=source.load_verified_snapshot('night','workbook-ledger-projection')
+          direct=source.load_verified_snapshot('night','official-day-results')
+          official={f"{day.replace('-','')}-{r['venue_code']}-{r['race_no']:02d}" for r in direct['SNAPSHOT']['PAYLOAD']['RESULTS']}
+          settled=verify_prior(ledger)
+          locks={p.stem for p in ledger.glob('*.json') if life.KEY.fullmatch(p.stem)}
+          life.require(set(settled)==locks,'COVERAGE_RECHECK_SETTLEMENTS_INCOMPLETE')
+          # A now-complete cohort may only use the normal NIGHT path. This
+          # repair step is limited to diagnostics for the still-incomplete day.
+          if set(settled)==official:
+              print('WILD4_COVERAGE_RECHECK=WAIT_NORMAL_NIGHT');raise SystemExit(0)
+          result=life.after_night(ledger,root,day,verified,direct,now=datetime.now(timezone.utc))
+          for key in ('active','pending','challenger','history','last_training','policy'):
+              life.require(result.get(key)==state.get(key),'COVERAGE_RECHECK_MODEL_MUTATION')
+          life.require(life.read(life.state_path(ledger))==result,'COVERAGE_RECHECK_READBACK')
+          odds=life.b.load_json(pathlib.Path(os.environ['RUNNER_TEMP'])/'wild4-verified-odds-day.json')
+          ready={r['STANDARD_RACE_KEY'] for r in odds['RECORDS']}
+          missing=official-set(settled)
+          print('WILD4_MISSING_INPUT_AUDIT='+json.dumps({'date':day,
+              'missing_lock_with_saved_odds':sorted(missing & ready),
+              'missing_lock_without_saved_odds':sorted(missing-ready),
+              'historical_backfill':False},sort_keys=True))
+          print('WILD4_COVERAGE_RECHECK='+json.dumps(result['last_attempt'],sort_keys=True))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('saved=true\n')
+          PYRECHECK
       - name: Encrypt immutable future locks
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true')
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -1095,7 +1139,7 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
@@ -1111,7 +1155,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 0dc69329705c6b59ee70978658cdc284f2a71c16
+          ref: 67d6ed0862f8bb91c7ee827023a86480aa00eb2f
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -1242,6 +1286,7 @@ jobs:
           if [ '${{ steps.settlement.outputs.held }}' != '' ] && [ '${{ steps.settlement.outputs.held }}' != '0' ]; then
             echo '::warning::Rescue NIGHT saved valid records; held races remain explicitly unresolved in the immutable audit'
           fi
+
 
 
 
