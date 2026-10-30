@@ -87,16 +87,34 @@ def publish(state, feed_path, origin, request=request_json):
     if (visible.get('publication') or {}).get('payload_sha256')!=sha(data) or visible.get('source_state_sha256')!=digest:
         raise ValueError('RESEARCH_PUBLIC_READBACK')
     if thirty is not None:
-        shown=visible.get('thirty_focus') or {};saved=canonical.get('thirty_focus_v1') or {}
-        registration=shown.get('registration') or {};selection=saved.get('selection') or {}
-        if (shown.get('transport_sha256')!=thirty.get('sha256') or
-            registration.get('status')!='SAVED_READBACK_VERIFIED' or
-            registration.get('registered_at')!=selection.get('activated_at') or
-            registration.get('requested_start_date_jst')!=selection.get('requested_start_date_jst') or
-            (shown.get('observation') or {}).get('saved_records')!=len(saved.get('observations',{}))):
-            raise ValueError('RESEARCH_THIRTY_PUBLIC_READBACK')
+        verify_thirty_readback(canonical, visible.get('thirty_focus') or {}, thirty)
     return dict(status='PASS',schema=SCHEMA,operational_date=day,updated_at=p['updated_at'],
         payload_sha256=sha(data),source_state_sha256=digest,site_get_readback='PASS',production_mutated=False)
+
+def verify_thirty_readback(canonical, shown, packet):
+    saved=canonical.get('thirty_focus_v1') or {}
+    if shown.get('transport_sha256')!=packet.get('sha256'):
+        raise ValueError('RESEARCH_THIRTY_PUBLIC_READBACK')
+    def check(section, view):
+        selection=section.get('selection') or {};reg=view.get('registration') or {}
+        if (reg.get('status')!='SAVED_READBACK_VERIFIED' or
+            (view.get('selection') or {}).get('selection_id')!=selection.get('selection_id') or
+            reg.get('registered_at')!=selection.get('activated_at') or
+            reg.get('requested_start_date_jst')!=selection.get('requested_start_date_jst') or
+            (view.get('observation') or {}).get('saved_records')!=len(section.get('observations',{}))):
+            raise ValueError('RESEARCH_THIRTY_PUBLIC_READBACK')
+    replacement=saved.get('replacement')
+    current_id=(shown.get('selection') or {}).get('selection_id')
+    if current_id==(saved.get('selection') or {}).get('selection_id'):
+        check(saved,shown)
+        if replacement:check(replacement,shown.get('upcoming') or {})
+    elif replacement and current_id==replacement['selection']['selection_id']:
+        check(replacement,shown);check(saved,shown.get('previous') or {})
+    else:
+        raise ValueError('RESEARCH_THIRTY_PUBLIC_READBACK')
+    if saved.get('nikoshi_a'):check(saved['nikoshi_a'],shown.get('additional') or {})
+    elif shown.get('additional'):raise ValueError('RESEARCH_THIRTY_PUBLIC_READBACK')
+
 
 def optional_publish(state, feed_path, origin):
     try:result=publish(Path(state),Path(feed_path),origin)
@@ -105,3 +123,4 @@ def optional_publish(state, feed_path, origin):
         result=dict(status='HELD',reason=reason[:100],production_mutated=False)
     print(json.dumps({'deme_research_delivery':result},ensure_ascii=False,sort_keys=True))
     return result
+
