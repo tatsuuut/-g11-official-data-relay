@@ -30,6 +30,7 @@ def fixture():
         "MORNING_V53_SNAPSHOT_SHA256": "a" * 64, "BEFOREINFO_SNAPSHOT_SHA256": "b" * 64,
         "P3_INPUT_USED": False, "WILD_INPUT_USED": False, "RESULT_FEEDBACK_TO_MODEL": False}}}
     race = {"key": KEY, "date_jst": DAY, "deadline_jst": DAY + "T08:35:00+09:00",
+        "formal_status": "FORMAL", "research_eligible": True,
         "abeken_shadow": {"v53": {"formal_use": True,
             "morning": {"snapshot_sha256": "a" * 64, "practical_bets": ["1-2-3"], "buy_count": 1},
             "live": {"snapshot_sha256": "c" * 64, "practical_bets": ["1-2-3"], "buy_count": 1,
@@ -112,6 +113,19 @@ class SavedReadbackTest(unittest.TestCase):
         self.assertEqual(proof["live_verified"], 0)
         self.assertEqual(proof["source_writes"], 0)
         self.assertEqual(proof["failures"][0]["race_key"], KEY)
+
+    def test_reference_records_are_not_counted_as_formal_eligible(self):
+        race, _, _, _ = fixture()
+        reference = copy.deepcopy(race)
+        reference.update(key="20261030-14-02", formal_status="EXCLUDED", research_eligible=False)
+        feed = {"operational_date_jst": DAY, "daily_runtime": {"runtime_source_sha": C1_SOURCE},
+            "races": [race, reference]}
+        def unavailable(*_):
+            raise FileNotFoundError("No source in this count-only fixture")
+        proof = audit_c1(DAY, feed, unavailable)
+        self.assertEqual(proof["v53_source_records"], 2)
+        self.assertEqual(proof["formal_eligible_records"], 1)
+        self.assertEqual(len(proof["failures"]), 2)
 
 
 if __name__ == "__main__":

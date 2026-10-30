@@ -104,7 +104,9 @@ def audit_c1(day, feed, load_snapshot):
         except Exception as exc:
             failures.append({"race_key": key, "reason": type(exc).__name__ + ":" + str(exc)[:160]})
     return {"status": "FAIL" if failures else "PASS" if records else "NO_FORMAL_RECORDS",
-        "date": day, "runtime_source_sha": C1_SOURCE, "formal_races": len(races),
+        "date": day, "runtime_source_sha": C1_SOURCE, "v53_source_records": len(races),
+        "formal_eligible_records": sum(r.get("formal_status") == "FORMAL"
+            and r.get("research_eligible") is True for r in races),
         "morning_verified": len(records), "live_verified": sum(r["live_status"] == "PASS" for r in records),
         "forward_imitation_accuracy": "UNOBSERVED_GENUINE_LABELS_REQUIRED",
         "records": records, "failures": failures, "prediction_calls": 0, "source_writes": 0}
