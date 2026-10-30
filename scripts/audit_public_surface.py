@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/predeadline_content_retry_v1.py",
+    "scripts/test_predeadline_content_retry_v1.py",
+    "docs/predeadline-content-retry-20261030.md",
     "scripts/verify_v53_readback.py",
     "scripts/test_verify_v53_readback.py",
     "docs/predeadline-cache-readback-20261029.md",

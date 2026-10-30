@@ -78,6 +78,9 @@ jobs:
           PYTHONPATH: .g11-private:scripts
         run: python3 -m unittest discover -s scripts -p test_morning_race_isolation_v1.py -v
 
+      - name: Verify bounded content retry with the reviewed collector
+        run: python3 -m unittest discover -s scripts -p test_predeadline_content_retry_v1.py -v
+
       - name: Run bounded private regression
         working-directory: .g11-private
         run: |
