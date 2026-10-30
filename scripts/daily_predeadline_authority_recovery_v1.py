@@ -437,12 +437,15 @@ def main():
             from critical_saved_publication_v1 import align_empty_capture
             align_empty_capture(Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve(), day)
             from g11.relay import predeadline_critical_v1
-            predeadline_critical_v1.main()
+            from predeadline_content_retry_v1 import bounded_content_retry
+            with bounded_content_retry():
+                predeadline_critical_v1.main()
         elif mode == "predeadline":
             guard_optional_mashiro_shadow()
             from g11.relay import predeadline_nowait_v1
             from predeadline_race_isolation_v1 import isolate_predeadline_inputs
-            with isolate_predeadline_inputs():
+            from predeadline_content_retry_v1 import bounded_content_retry
+            with isolate_predeadline_inputs(), bounded_content_retry():
                 return predeadline_nowait_v1.main(sys.argv[1:])
         elif mode == "night":
             from g11.relay import v1
