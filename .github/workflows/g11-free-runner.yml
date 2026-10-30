@@ -903,7 +903,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{env.G11_PRIVATE_REPOSITORY}}
-          ref: 92a8cc1e7fc0422d2560c3edd8441a887a01bb1d
+          ref: 5e3a77c6b556f5ecc76245e7e45e5506f082e70c
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .g11-deme-research
           persist-credentials: false
