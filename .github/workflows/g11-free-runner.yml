@@ -1058,6 +1058,8 @@ jobs:
               -H 'Accept: application/json' \
               "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
             token="$(printf '%s' "${oidc}" | jq -er '.value')"
+            # NIGHT retries transport saved checkpoint bytes. Versioned wire plans
+            # repair encoding/references without rewriting predictions or settlement.
             G11_SYNC_OIDC="${token}" python3 scripts/daily_runtime_delivery_v1.py \
               --state-root .relay-state --feed "${FEED}" --origin "${G11_APP_ORIGIN}"
             exit 0
