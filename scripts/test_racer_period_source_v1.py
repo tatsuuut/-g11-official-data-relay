@@ -162,9 +162,10 @@ class PrivateBoundaryIntegrationTests(unittest.TestCase):
             with official_input_compatibility():
                 self.assertTrue(official.CanonicalRunner.run_morning._g11_daily_authority_boundary)
                 self.assertIs(official.CanonicalRunner.run_morning.__code__,original.__code__)
-                with self.assertRaisesRegex(Exception,'DAILY_AUTHORITY_UNKNOWN'):
+                with self.assertRaisesRegex(Exception,'DAILY_AUTHORITY_FILE_MISSING'):
                     runner.run_morning(date(2026,11,1),source.BASE+'fan2610.lzh',
                                        '2026-11-01T06:18:00+09:00')
+                self.assertEqual(store.ledger.events(),[])
             self.assertIs(official.CanonicalRunner.run_morning,original)
             self.assertIs(official.parse_racer_period_bytes,parser)
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),before)
