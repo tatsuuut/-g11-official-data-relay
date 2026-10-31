@@ -1180,7 +1180,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 67d6ed0862f8bb91c7ee827023a86480aa00eb2f
+          ref: da010812e0d4e94738161b1fe810c2fa4e21a268
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -1198,15 +1198,25 @@ jobs:
             echo 'GORIPAN_PUBLIC_PROJECTION=WAITING_CANONICAL_LOCK'
             exit 0
           fi
-          if [ -n "${LINEAGE_READBACK_DATE}" ]; then
-            python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1
-          fi
+          python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1
+          python3 - <<'PYPUBLISHEDLOCK'
+          import os,pathlib,sys
+          sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'scripts'))
+          import hot_delta_transport_v1 as hot
+          pathlib.Path('.relay-output').mkdir(exist_ok=True)
+          day=os.environ['OPERATIONAL_DATE']
+          feed,_,raw=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date='+day)
+          if len(raw)>8*1024*1024 or feed.get('status')!='PASS' or feed.get('operational_date_jst')!=day:
+              raise SystemExit('GORIPAN_PRIOR_PUBLIC_FEED_BINDING')
+          (pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-prior-public-feed.json').write_bytes(raw)
+          PYPUBLISHEDLOCK
           python3 -m g11.wild_pack.v1.goripan_public_projection_v1 \
             --ledger "${RUNNER_TEMP}/g11-wild4-future-locks" \
             --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json" \
             --operational-date "${OPERATIONAL_DATE}" \
             --store "${GITHUB_WORKSPACE}/${{ steps.decrypted.outputs.store }}" \
             --candidate-root "${WILD4_CANDIDATE_ROOT}" \
+            --published-feed "${RUNNER_TEMP}/goripan-prior-public-feed.json" \
             --output "${RUNNER_TEMP}/goripan-public-projection.json"
           if [ '${{ steps.decrypted.outputs.canonical_ready }}' = 'false' ]; then
             python3 - <<'PYRESCUEPROJECTION'
@@ -1227,6 +1237,7 @@ jobs:
           fi
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
       - name: Deliver WILD4 public projection and verify exact Site GET readback
+        id: public-delivery
         if: steps.public-projection.outputs.ready == 'true'
         continue-on-error: true
         env:
@@ -1302,7 +1313,7 @@ jobs:
             --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json"
 
       - name: Require completion for verified NIGHT handoff
-        if: always() && !cancelled() && (inputs.night_checkpoint_key != '' || (steps.settlement.outputs.held != '' && steps.settlement.outputs.held != '0'))
+        if: always() && !cancelled() && (inputs.night_checkpoint_key != '' || steps.settlement.outputs.complete == 'true' || (steps.settlement.outputs.held != '' && steps.settlement.outputs.held != '0'))
         run: |
           if [ '${{ steps.settlement.outputs.complete }}' != true ] && [ '${{ steps.settlement.outputs.rescue_join_readback }}' != true ]; then
             echo 'WILD4_POST_NIGHT_SETTLEMENT_INCOMPLETE' >&2
@@ -1311,14 +1322,7 @@ jobs:
           if [ '${{ steps.settlement.outputs.held }}' != '' ] && [ '${{ steps.settlement.outputs.held }}' != '0' ]; then
             echo '::warning::Rescue NIGHT saved valid records; held races remain explicitly unresolved in the immutable audit'
           fi
-
-
-
-
-
-
-
-
-
-
-
+          if [ '${{ steps.public-projection.outputs.ready }}' != true ] || [ '${{ steps.public-delivery.outcome }}' != success ]; then
+            echo 'WILD4_NIGHT_PUBLICATION_NOT_VERIFIED' >&2
+            exit 1
+          fi
