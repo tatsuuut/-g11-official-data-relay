@@ -90,6 +90,12 @@ jobs:
       - name: Verify bounded content retry with the reviewed collector
         run: python3 -m unittest discover -s scripts -p test_predeadline_content_retry_v1.py -v
 
+      - name: Verify excluded rows cannot block the frozen critical lane
+        env:
+          PYTHONPATH: .g11-private:scripts
+          G11_REQUIRE_PRIVATE_CRITICAL_TESTS: "1"
+        run: python3 -m unittest discover -s scripts -p test_critical_formal_lock_scope_v1.py -v
+
       - name: Run bounded private regression
         working-directory: .g11-private
         run: |
@@ -217,3 +223,4 @@ jobs:
       - name: Verify retained history and all three current research cohorts
         working-directory: .g11-thirty-budget/g11/canonical
         run: python3 -m unittest -v test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget
+

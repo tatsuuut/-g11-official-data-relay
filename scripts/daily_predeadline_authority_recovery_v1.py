@@ -438,7 +438,8 @@ def main():
             align_empty_capture(Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve(), day)
             from g11.relay import predeadline_critical_v1
             from predeadline_content_retry_v1 import bounded_content_retry
-            with bounded_content_retry():
+            from critical_formal_lock_scope_v1 import formal_lock_scope
+            with bounded_content_retry(), formal_lock_scope(day):
                 predeadline_critical_v1.main()
         elif mode == "predeadline":
             guard_optional_mashiro_shadow()
