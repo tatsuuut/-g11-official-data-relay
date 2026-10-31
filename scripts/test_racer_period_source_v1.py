@@ -76,7 +76,8 @@ class PeriodSourceTests(unittest.TestCase):
                          'LOCK_BY_ORIGINAL_RUNNER')
         self.assertEqual(calls,['AUTHORITY_AND_LOCK_CHECK',
             (date(2026,11,1),source.BASE+'fan2604.lzh',captured)])
-        self.assertIs(wrapped.__wrapped__,boundary)
+        self.assertIs(wrapped.__code__,boundary.__code__)
+        self.assertIs(wrapped.__globals__,boundary.__globals__)
         self.assertTrue(wrapped._g11_daily_authority_boundary)
         self.assertIs(official.parse_racer_period_bytes,original_parser)
         self.assertIs(runner._fetch_extract,original_fetch)
@@ -160,6 +161,7 @@ class PrivateBoundaryIntegrationTests(unittest.TestCase):
             runner=official.CanonicalRunner(store)
             with official_input_compatibility():
                 self.assertTrue(official.CanonicalRunner.run_morning._g11_daily_authority_boundary)
+                self.assertIs(official.CanonicalRunner.run_morning.__code__,original.__code__)
                 with self.assertRaisesRegex(Exception,'DAILY_AUTHORITY_UNKNOWN'):
                     runner.run_morning(date(2026,11,1),source.BASE+'fan2610.lzh',
                                        '2026-11-01T06:18:00+09:00')

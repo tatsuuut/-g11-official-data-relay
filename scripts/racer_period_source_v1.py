@@ -7,6 +7,7 @@ from datetime import date
 from functools import wraps
 import json
 import sys
+import types
 
 EFFECTIVE_FROM = date(2026, 11, 1)
 BASE = 'https://www.boatrace.jp/static_extra/pc_static/download/data/kibetsu/'
@@ -46,7 +47,23 @@ def validate_period_records(periods, target):
 
 
 def adapted_period_morning(official, original):
-    """Keep the complete existing authority/LOCK wrapper inside this adapter."""
+    """Insert acquisition adaptation inside the unchanged authority wrapper."""
+    if hasattr(original, '__wrapped__'):
+        inner = original.__wrapped__
+        replacement = adapted_period_morning(official, inner)
+        cells = original.__closure__ or ()
+        if sum(cell.cell_contents is inner for cell in cells) != 1:
+            raise ValueError('RACER_PERIOD_AUTHORITY_WRAPPER_CONTRACT')
+        def cell_for(value):
+            return (lambda: value).__closure__[0]
+        wrapped = types.FunctionType(original.__code__, original.__globals__,
+            original.__name__, original.__defaults__,
+            tuple(cell_for(replacement) if cell.cell_contents is inner else cell for cell in cells))
+        wrapped.__dict__.update(original.__dict__)
+        wrapped.__wrapped__ = replacement
+        wrapped.__kwdefaults__ = original.__kwdefaults__
+        wrapped.__annotations__ = original.__annotations__
+        return wrapped
     @wraps(original)
     def invoke(self, target_date, racer_period_url, captured_at_jst):
         if target_date < EFFECTIVE_FROM:
