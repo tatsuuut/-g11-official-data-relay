@@ -1,4 +1,4 @@
-name: runtime sync # official period application calendar
+name: runtime sync # official period and explicit unavailable ST
 run-name: ${{github.event_name == 'workflow_dispatch' && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
@@ -2175,4 +2175,5 @@ jobs:
 
 
 # Verified paths
+
 
