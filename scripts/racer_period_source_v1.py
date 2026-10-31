@@ -54,9 +54,17 @@ def adapted_period_morning(official, original):
         expected = official_period_url(target_date)
         if racer_period_url not in {expected, legacy_period_url(target_date)}:
             raise ValueError('RACER_PERIOD_UNREVIEWED_SOURCE')
-        parser = official.parse_racer_period_bytes
-        def validated(data):
-            return validate_period_records(parser(data), target_date)
+        fetch_extract = self._fetch_extract
+        had_instance_fetch = '_fetch_extract' in self.__dict__
+        instance_fetch = self.__dict__.get('_fetch_extract')
+        expected_source = 'racer-period-' + expected.rsplit('/', 1)[1][:-4]
+        def validated_fetch(source_id, url):
+            if source_id.startswith('racer-period-') and (source_id != expected_source or url != expected):
+                raise ValueError('RACER_PERIOD_FETCH_BINDING')
+            receipt, member = fetch_extract(source_id, url)
+            if source_id == expected_source:
+                validate_period_records(official.parse_racer_period_bytes(member), target_date)
+            return receipt, member
         ledger = getattr(getattr(self, 'store', None), 'ledger', None)
         prior_failures = ({k: v for k, v in ledger.state()['TECHNICAL_COUNTS'].items()
                            if k.startswith('racer-period-')} if ledger else {})
@@ -67,8 +75,11 @@ def adapted_period_morning(official, original):
             'retained_period_failure_counts': prior_failures,
         }}, sort_keys=True), file=sys.stderr)
         try:
-            official.parse_racer_period_bytes = validated
+            self._fetch_extract = validated_fetch
             return original(self, target_date, expected, captured_at_jst)
         finally:
-            official.parse_racer_period_bytes = parser
+            if had_instance_fetch:
+                self._fetch_extract = instance_fetch
+            else:
+                del self._fetch_extract
     return invoke

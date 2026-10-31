@@ -15,6 +15,10 @@ def record(year=2026, half=2, start='2025-11-01', end='2026-04-30'):
                            period_start=start, period_end=end)
 
 
+def fake_runner():
+    return SimpleNamespace(_fetch_extract=lambda source_id,url: ({'URL':url},b'official'))
+
+
 class PeriodSourceTests(unittest.TestCase):
     def test_application_calendar_boundaries(self):
         # Published grading applies in January/July, not May/November.
@@ -55,7 +59,10 @@ class PeriodSourceTests(unittest.TestCase):
         official=SimpleNamespace(parse_racer_period_bytes=original_parser)
         def inner(runner, target, url, captured):
             calls.append((target,url,captured))
-            self.assertIs(official.parse_racer_period_bytes(b'official'),parsed)
+            receipt,member=runner._fetch_extract('racer-period-fan2604',url)
+            self.assertEqual(receipt,{'URL':url})
+            self.assertEqual(member,b'official')
+            self.assertIs(original_parser(member),parsed)
             return 'LOCK_BY_ORIGINAL_RUNNER'
         @wraps(inner)
         def boundary(*args):
@@ -64,19 +71,21 @@ class PeriodSourceTests(unittest.TestCase):
         boundary._g11_daily_authority_boundary=True
         wrapped=source.adapted_period_morning(official,boundary)
         captured='2026-11-01T06:18:00+09:00'
-        self.assertEqual(wrapped(object(),date(2026,11,1),source.BASE+'fan2610.lzh',captured),
+        runner=fake_runner(); original_fetch=runner._fetch_extract
+        self.assertEqual(wrapped(runner,date(2026,11,1),source.BASE+'fan2610.lzh',captured),
                          'LOCK_BY_ORIGINAL_RUNNER')
         self.assertEqual(calls,['AUTHORITY_AND_LOCK_CHECK',
             (date(2026,11,1),source.BASE+'fan2604.lzh',captured)])
         self.assertIs(wrapped.__wrapped__,boundary)
         self.assertTrue(wrapped._g11_daily_authority_boundary)
         self.assertIs(official.parse_racer_period_bytes,original_parser)
+        self.assertIs(runner._fetch_extract,original_fetch)
 
     def test_existing_correct_url_remains_identical(self):
         official=SimpleNamespace(parse_racer_period_bytes=lambda _: {})
         expected=source.BASE+'fan2604.lzh'
         wrapped=source.adapted_period_morning(official,lambda _,day,url,at:url)
-        self.assertEqual(wrapped(object(),date(2026,11,1),expected,'actual-clock'),expected)
+        self.assertEqual(wrapped(fake_runner(),date(2026,11,1),expected,'actual-clock'),expected)
 
     def test_historical_calls_not_changed(self):
         parser=lambda _: {}; official=SimpleNamespace(parse_racer_period_bytes=parser)
@@ -94,14 +103,42 @@ class PeriodSourceTests(unittest.TestCase):
     def test_parser_and_failure_retained_on_error(self):
         parser=lambda _: {}; official=SimpleNamespace(parse_racer_period_bytes=parser)
         state={'TECHNICAL_COUNTS':{'racer-period-fan2610':2,'other-source':2}}
-        runner=SimpleNamespace(store=SimpleNamespace(ledger=SimpleNamespace(state=lambda:state)))
+        runner=fake_runner()
+        runner.store=SimpleNamespace(ledger=SimpleNamespace(state=lambda:state))
+        original_fetch=runner._fetch_extract
         def blocked(*args):
             raise RuntimeError('EXISTING_LOCK_OR_AUTHORITY_GUARD')
         wrapped=source.adapted_period_morning(official,blocked)
         with self.assertRaisesRegex(RuntimeError,'EXISTING_LOCK_OR_AUTHORITY_GUARD'):
             wrapped(runner,date(2026,11,1),source.BASE+'fan2610.lzh','actual-clock')
         self.assertIs(official.parse_racer_period_bytes,parser)
+        self.assertIs(runner._fetch_extract,original_fetch)
         self.assertEqual(state,{'TECHNICAL_COUNTS':{'racer-period-fan2610':2,'other-source':2}})
+
+    def test_wrong_period_rejected_before_copied_parser_can_admit_it(self):
+        copied_parser=lambda _: {1:record(2027,1,'2026-05-01','2026-10-31')}
+        official=SimpleNamespace(parse_racer_period_bytes=copied_parser)
+        def original(runner, target, url, captured):
+            _,member=runner._fetch_extract('racer-period-fan2604',url)
+            self.fail('mismatched records reached the downstream copied parser')
+            return copied_parser(member)
+        runner=fake_runner(); before=runner._fetch_extract
+        with self.assertRaisesRegex(ValueError,'APPLICATION_CONTRACT'):
+            source.adapted_period_morning(official,original)(runner,date(2026,11,1),
+                source.BASE+'fan2610.lzh','actual-clock')
+        self.assertIs(runner._fetch_extract,before)
+
+    def test_no_instance_fetch_attribute_left_after_guard_failure(self):
+        class Runner:
+            def _fetch_extract(self,*args):
+                raise AssertionError('network called')
+        runner=Runner(); official=SimpleNamespace(parse_racer_period_bytes=lambda _: {})
+        def original(*args):
+            raise RuntimeError('AUTHORITY_STOP')
+        with self.assertRaisesRegex(RuntimeError,'AUTHORITY_STOP'):
+            source.adapted_period_morning(official,original)(runner,date(2026,11,1),
+                source.BASE+'fan2610.lzh','actual-clock')
+        self.assertNotIn('_fetch_extract',runner.__dict__)
 
 
 class PrivateBoundaryIntegrationTests(unittest.TestCase):

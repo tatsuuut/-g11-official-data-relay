@@ -26,8 +26,9 @@ This does not edit retained source files, daily authority, existing response
 bytes, request events, retry counters, clocks, predictions, LOCKs or NIGHT.
 The corrected URL has its own honest source ID and request evidence; the
 failed fan2610 request remains in the ledger. The complete existing
-authority/LOCK wrapper still executes and parser references are restored
-on success and error. Missing or invalid new-period data still fails closed.
+authority/LOCK wrapper still executes. The instance's acquisition hook is
+restored on success and error, and parser globals are never changed.
+Missing or invalid new-period data still fails closed.
 
 Validation covers January/July and May/November boundaries, leap day,
 wrong/future/mixed period records, historical isolation, unreviewed URLs,
