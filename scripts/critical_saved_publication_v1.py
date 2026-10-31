@@ -18,6 +18,36 @@ from urllib.request import Request, urlopen
 JST = timezone(timedelta(hours=9))
 
 
+def newest_checkpoint_key(day, caches):
+    """Use creation order, never access order, across the two saved lanes."""
+    import re
+    datetime.strptime(day, '%Y-%m-%d')
+    pattern = re.compile(r'g11-state-v4-(?:critical|published)-' + re.escape(day) + r'-[0-9]+(?:-[0-9]+-checkpoint)?$')
+    candidates = [row for row in caches if isinstance(row, dict)
+                  and row.get('ref') == 'refs/heads/main'
+                  and pattern.fullmatch(str(row.get('key', '')))]
+    if not candidates:
+        return ''
+    return max(candidates, key=lambda row: (datetime.fromisoformat(
+        row['created_at'].replace('Z', '+00:00')), row['id']))['key']
+
+
+def select_restore(day):
+    """Select metadata only; the normal encrypted restore/readback still gates use."""
+    import subprocess
+    caches = []
+    for lane in ('critical', 'published'):
+        url = (f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/caches?"
+               f"key=g11-state-v4-{lane}-{day}-&ref=refs%2Fheads%2Fmain"
+               '&per_page=100&sort=created_at&direction=desc')
+        response = subprocess.run(['gh', 'api', url], check=True, capture_output=True, text=True)
+        caches.extend(json.loads(response.stdout)['actions_caches'])
+    key = newest_checkpoint_key(day, caches)
+    with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+        output.write('cache_key=' + key + '\n')
+    print('G11_RESTORE_NEWEST_CHECKPOINT=' + (key or 'NO_SAME_DAY_CHECKPOINT'))
+
+
 def require(ok, code):
     if not ok:
         raise RuntimeError(code)
@@ -126,7 +156,10 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--day', required=True)
+    parser.add_argument('--select-restore', action='store_true')
     args = parser.parse_args()
+    if args.select_restore:
+        return select_restore(args.day)
     root = Path.cwd()
     output = root / '.relay-output/critical-feed.json'
     require(os.environ.get('CRITICAL_CHECKPOINT_VERIFIED') == 'true',

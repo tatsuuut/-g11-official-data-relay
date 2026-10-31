@@ -171,17 +171,31 @@ jobs:
           PY
           printf 'operational_date=%s\nphase=%s\n' \
             "${operational_date}" "${phase}" >> "${GITHUB_OUTPUT}"
+      - name: Select newest same-day persisted checkpoint
+        if: steps.scheduled.outputs.phase=='predeadline'||steps.scheduled.outputs.phase=='night'
+        id: checkpoint-choice
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: python3 scripts/critical_saved_publication_v1.py --day '${{steps.scheduled.outputs.operational_date}}' --select-restore
       - name: Restore only encrypted runtime state
         id: restore-state
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-${{steps.scheduled.outputs.operational_date}}-${{github.run_id}}
+          key: ${{steps.checkpoint-choice.outputs.cache_key || format('g11-state-v4-{0}-{1}',steps.scheduled.outputs.operational_date,github.run_id)}}
           restore-keys: |
             g11-state-v4-published-${{steps.scheduled.outputs.operational_date}}-
             ${{steps.scheduled.outputs.operational_date != '2026-10-04' && format('g11-state-v3-{0}-', steps.scheduled.outputs.operational_date) || ''}}
             g11-state-v4-published-
             ${{steps.scheduled.outputs.operational_date != '2026-10-04' && 'g11-state-v3-' || ''}}
+      - name: Require the selected checkpoint to be restored exactly
+        if: steps.checkpoint-choice.outputs.cache_key!=''
+        env:
+          SELECTED_CHECKPOINT: ${{steps.checkpoint-choice.outputs.cache_key}}
+          RESTORED_CHECKPOINT: ${{steps.restore-state.outputs.cache-matched-key}}
+        run: |
+          test "${SELECTED_CHECKPOINT}" = "${RESTORED_CHECKPOINT}"
+          echo 'G11_SELECTED_CHECKPOINT_RESTORED=PASS'
       - name: Fail closed when the private credential is absent
         env:
           G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}

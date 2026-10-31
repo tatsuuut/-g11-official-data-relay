@@ -153,6 +153,9 @@ jobs:
           if not result.wasSuccessful(): raise SystemExit(1)
           PYGUARD
 
+      - name: Verify newest critical and full checkpoint selection
+        run: python3 -m unittest discover -s scripts -p test_published_checkpoint_continuity_v1.py -v
+
       - name: Gate summary
         run: |
           echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
