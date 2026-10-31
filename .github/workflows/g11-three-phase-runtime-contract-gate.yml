@@ -47,6 +47,9 @@ jobs:
       - name: Verify C1 saved-record diagnostics
         run: python3 -m unittest discover -s scripts -p test_verify_v53_readback.py -q
 
+      - name: Verify UTF-8 NIGHT transport and original published LOCK result join
+        run: python3 -m unittest discover -s scripts -p test_night_transport_utf8_v1.py -v
+
       - name: Checkout private G11 main
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -180,3 +183,4 @@ jobs:
           python3 -m unittest discover -s scripts -p test_wild4_retained_lock_v1.py -v
         env:
           WILD4_WORKFLOW_PATH: .g11-retained-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
+

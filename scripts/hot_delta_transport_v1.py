@@ -116,10 +116,10 @@ def hash_bytes(value: bytes) -> str:
 def site_hash(value: object) -> str:
     """Hash the JSON value as the Site validates it after JavaScript JSON.parse."""
     result = subprocess.run(
-        ["node", "-e", "const crypto=require('node:crypto');let data='';"
-         "process.stdin.on('data',chunk=>data+=chunk);"
-         "process.stdin.on('end',()=>process.stdout.write(crypto.createHash('sha256')"
-         ".update(JSON.stringify(JSON.parse(data))).digest('hex')))"],
+        ["node", "-e", "const crypto=require('node:crypto');"
+         "const data=require('node:fs').readFileSync(0,'utf8');"
+         "process.stdout.write(crypto.createHash('sha256')"
+         ".update(JSON.stringify(JSON.parse(data))).digest('hex'))"],
         input=compact(value), capture_output=True, check=True,
     )
     return result.stdout.decode("ascii")
@@ -653,6 +653,7 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
+
 
 
 
