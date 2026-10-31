@@ -164,3 +164,16 @@ jobs:
 
 
 
+
+      - name: Checkout reviewed retained LOCK guard
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 2e783dbc904244990f1a85c7fe598d90a408d763
+          path: .g11-retained-guard
+          persist-credentials: false
+
+      - name: Verify retained WILD4 locks with advanced rolling input
+        run: |
+          python3 -m unittest discover -s scripts -p test_wild4_retained_lock_v1.py -v
+        env:
+          WILD4_WORKFLOW_PATH: .g11-retained-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
