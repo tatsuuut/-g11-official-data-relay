@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import racer_period_source_v1 as source
 
@@ -143,6 +144,88 @@ class PeriodSourceTests(unittest.TestCase):
 
 
 class PrivateBoundaryIntegrationTests(unittest.TestCase):
+    def private_modules(self):
+        try:
+            from g11.canonical import official_pipeline as official
+            from g11.canonical import test_official_pipeline as fixtures
+        except ModuleNotFoundError:
+            if os.environ.get('G11_REQUIRE_PRIVATE_PERIOD_TESTS') == '1':
+                raise
+            self.skipTest('private runtime is required in CI')
+        return official,fixtures
+
+    def test_only_explicit_official_st_dash_is_nullable(self):
+        official,fixtures=self.private_modules()
+        original=official.parse_racelist_racer_status_html
+        parser=source.status_parser_for(official,date(2026,11,1))
+        raw=fixtures.racelist_status_html()
+        dash=raw.replace(b'0.16',b'-',1)
+        value=parser(dash,required_racers={4006})[4006]
+        self.assertIsNone(value.average_st)
+        self.assertEqual((value.flying_count,value.late_count),(0,0))
+        self.assertEqual(parser(raw),original(raw))
+        self.assertIs(source.status_parser_for(official,date(2026,10,31)),original)
+        with self.assertRaisesRegex(Exception,'RACELIST_FL_ST'):
+            original(dash,required_racers={4006})
+        for token in (b'',b'unknown',b'1.01',b'--'):
+            with self.subTest(token=token),self.assertRaises(Exception):
+                parser(raw.replace(b'0.16',token,1),required_racers={4006})
+        with self.assertRaisesRegex(Exception,'RACELIST_FL_ST'):
+            parser(dash.replace(b'F0',b'F-',1),required_racers={4002,4006})
+        with self.assertRaisesRegex(Exception,'RACELIST_RACER_IDENTITY'):
+            parser(dash.replace(b'toban=4005',b'toban=4999',1),required_racers={4006})
+        self.assertIs(official.parse_racelist_racer_status_html,original)
+
+    def test_missing_st_survives_saved_input_gate_prediction_and_projection(self):
+        official,fixtures=self.private_modules()
+        from test_morning_race_isolation_v1 import SavedSourceClient,DAY
+        from rescue_night_result_parser_v1 import official_input_compatibility
+        class Client(SavedSourceClient):
+            def fetch_once(self,source_id,url):
+                if not source_id.startswith(('racer-period-','racelist-recovery-')):
+                    return super().fetch_once(source_id,url)
+                old=self.store.response_receipt(source_id)
+                if old is not None:return old
+                self.reads.append(source_id)
+                if source_id.startswith('racer-period-'):
+                    raw=b'\r\n'.join(fixtures.racer_record(base+race*10+boat)
+                        .replace(b'2026050120261031',b'2025110120260430')
+                        for base in (4000,5000) for race in range(1,13) for boat in range(1,7)
+                        if base+race*10+boat!=4016)
+                else:
+                    raw=fixtures.racelist_status_html().replace(b'0.16',b'-',1)
+                    for boat in range(1,7):
+                        raw=raw.replace(str(4000+boat).encode(),str(4010+boat).encode())
+                return self.store.commit_response(source_id,url,fixtures.at(len(self.reads)),raw,
+                    content_type='text/html' if source_id.startswith('racelist-') else 'application/x-lzh-compressed',
+                    final_url=url)
+        with tempfile.TemporaryDirectory() as directory:
+            store=official.OfficialArtifactStore.initialize(Path(directory)/'store',
+                DAY.isoformat(),None,fixtures.at(0).isoformat())
+            client=Client(store)
+            runner=official.CanonicalRunner(store,client=client,extractor=fixtures.IdentityArchiveExtractor())
+            # Exercise the current adapter on the isolated historical fixture.
+            # Production activation remains November 1; no live time is changed.
+            with patch.object(source,'EFFECTIVE_FROM',DAY),official_input_compatibility():
+                runner.run_morning(DAY,source.BASE+'fan2604.lzh',fixtures.at(0).isoformat())
+                before=store.load_verified_snapshot('morning','official-day-input')
+                rows=before['SNAPSHOT']['PAYLOAD']['RAW38_ROWS']
+                row=next(row for row in rows if row[official.RAW38_FIELDS.index('登録番号')]==4016)
+                self.assertIsNone(row[official.RAW38_FIELDS.index('平均ST')])
+                self.assertEqual(row[official.RAW38_FIELDS.index('F数')],0)
+                self.assertEqual(row[official.RAW38_FIELDS.index('L数')],0)
+                self.assertEqual(row[official.RAW38_FIELDS.index('source')],
+                    official.FORMAL_GATE.CANONICAL_RECOVERY_SOURCE_ROUTE)
+                _,eligible,excluded=runner._formal_prediction_scope(before,failure_prefix='TEST')
+                self.assertEqual(len(eligible),24)
+                runner.run_morning_predictions()
+                runner.run_morning_workbook_projection(fixtures.workbook_profiles())
+                result=store.load_verified_snapshot('morning','workbook-projection')['SNAPSHOT']['PAYLOAD']
+                self.assertEqual(result['COUNTS']['RACES'],24)
+                self.assertEqual(result['COUNTS']['FORMAL'],24)
+                self.assertEqual(before,store.load_verified_snapshot('morning','official-day-input'))
+                self.assertEqual(len(client.reads),len(set(client.reads)))
+
     def test_real_runtime_guard_and_source_bytes_retained(self):
         try:
             from g11.canonical import official_pipeline as official

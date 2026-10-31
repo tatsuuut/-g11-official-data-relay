@@ -207,6 +207,7 @@ def replace_pinned(function, digest, substitutions, additions):
 
 
 def adapted_morning(official, parser):
+    from racer_period_source_v1 import status_parser_for
     return replace_pinned(official.CanonicalRunner.run_morning,
         '0c8a77815489c3e27104c576ca017bda72ff6afa99520c50f83ca4a8c7374997',[
         ('        _require(\n            1 <= len(races)',
@@ -214,9 +215,11 @@ def adapted_morning(official, parser):
         ('len(quarantined_races) <= MAX_RACELIST_RECOVERY_RACES','len(quarantined_races) <= len(VENUES) * 12'),
         ('        earliest_start = min(date.fromisoformat(race.meet_start_date) for race in races)\n        prior_dates = [earliest_start + timedelta(days=offset) for offset in range((target_date - earliest_start).days)]\n',''),
         ('prior_results.extend(parse_result_text(decode_cp932(member), prior_date))','prior_results.extend(_isolation_parse(decode_cp932(member), prior_date))'),
+        ('statuses = parse_racelist_racer_status_html(', 'statuses = _status_parser_for(target_date)('),
         ('            "QUARANTINED_RACES": quarantined_races,','            "QUARANTINED_RACES": quarantined_races,\n            **({"RESULT_QUARANTINE": result_quarantine} if result_quarantine else {}),')],
         {'_isolation_prepare':lambda runner,target,races,q:prepare_scope(runner,target,races,q,official,parser),
-         '_isolation_parse':lambda text,day:isolated_results(text,day,official,parser)[0]})
+         '_isolation_parse':lambda text,day:isolated_results(text,day,official,parser)[0],
+         '_status_parser_for':lambda day:status_parser_for(official,day)})
 
 
 def adapted_night_binding(official, parser):
@@ -225,3 +228,4 @@ def adapted_night_binding(official, parser):
         ('    _require(quarantined == payload.get("QUARANTINED_RACES", []),',
          '    races, quarantined = _isolation_replay(store, verified, races, quarantined, extractor)\n    _require(quarantined == payload.get("QUARANTINED_RACES", []),')],
         {'_isolation_replay':lambda store,verified,races,q,extractor:replay_scope(store,verified,races,q,extractor,official,parser)})
+

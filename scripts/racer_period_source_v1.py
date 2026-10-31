@@ -46,6 +46,27 @@ def validate_period_records(periods, target):
     return periods
 
 
+def status_parser_for(official, target):
+    """Preserve an explicit official ST dash as unavailable, never as zero.
+
+    F/L and six racer identities remain mandatory. The unchanged admission
+    gate already represents unavailable average ST as a conditional field.
+    """
+    original = official.parse_racelist_racer_status_html
+    if target < EFFECTIVE_FROM:
+        return original
+    from morning_race_isolation_v1 import replace_pinned
+    return replace_pinned(original,
+        '503f5972968419e5599e435c93a12be4786aec12b5514cc7c7c6cf62cf2b05ec', [
+        ('r"F(\\d+)\\s+L(\\d+)\\s+(\\d+\\.\\d{2})"',
+         'r"F(\\d+)\\s+L(\\d+)\\s+(\\d+\\.\\d{2}|-)"'),
+        ('average_st = float(status_match.group(3))',
+         'average_st = None if status_match.group(3) == "-" else float(status_match.group(3))'),
+        ('0.0 <= average_st <= 1.0, "RACELIST_AVERAGE_ST"',
+         'average_st is None or 0.0 <= average_st <= 1.0, "RACELIST_AVERAGE_ST"'),
+    ], {})
+
+
 def adapted_period_morning(official, original):
     """Insert acquisition adaptation inside the unchanged authority wrapper."""
     if hasattr(original, '__wrapped__'):

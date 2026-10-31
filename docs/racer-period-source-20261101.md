@@ -35,3 +35,14 @@ wrong/future/mixed period records, historical isolation, unreviewed URLs,
 retained failure counts, error cleanup and the actual private authority
 guard. Live recovery is complete only after MORNING LOCK persistence,
 publication and date-specific public feed readback pass.
+
+The first live retry with the calendar correction passed the old 404 and
+stopped at RACELIST_FL_ST for a newly listed racer. The current B file has
+only two racers absent from fan2604: 5482 (Fukuoka 1R) and 5492 (Fukuoka 2R).
+Their official race pages both explicitly show F0, L0 and average ST '-'.
+The existing formal gate already allows average ST to be OFFICIAL_NOT_AVAILABLE;
+F/L remain strictly required. The acquisition decoder now preserves the
+official dash as None from November 1, without substituting zero or an estimate.
+The original raw HTML, URL, response receipt, scope and request evidence stay
+unchanged. Malformed values, missing F/L, wrong identities and arbitrary blanks
+still fail. The original parser and historical-date behavior are retained.
