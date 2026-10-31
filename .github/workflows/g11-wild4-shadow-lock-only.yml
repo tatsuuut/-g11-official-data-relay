@@ -764,6 +764,28 @@ jobs:
           import re
           key_pattern=re.compile(r'[0-9]{8}-[0-9]{2}-(?:0[1-9]|1[0-2])')
           existing=[p for p in out.glob('*.json') if key_pattern.fullmatch(p.stem)]
+          def retain_existing_lock(stored, row, binding, sha256_value):
+              # The ledger fixes one prediction per race. Newer odds are not
+              # the original prediction input and must not replace that LOCK.
+              unsigned=dict(stored); digest=unsigned.pop('CONTENT_SHA256',None)
+              deadline=datetime.fromisoformat(stored['RACE_DEADLINE_AT'])
+              locked_at=datetime.fromisoformat(stored['LOCKED_AT'])
+              checks={
+                  'content': digest==sha256_value(unsigned),
+                  'status': stored.get('STATUS')=='LOCKED_BEFORE_RESULT',
+                  'registry': stored.get('CANDIDATE_REGISTRY_SHA256')==binding['REGISTRY_SHA256'],
+                  'model': stored.get('CANDIDATE_MODEL_SHA256')==binding['MODEL_SHA256'],
+                  'race': stored.get('STANDARD_RACE_KEY')==row['STANDARD_RACE_KEY'],
+                  'deadline': deadline==datetime.fromisoformat(row['UPSTREAM_PACKET']['RACE_DEADLINE_AT']),
+                  'timely': locked_at.tzinfo is not None and deadline.tzinfo is not None and locked_at<deadline,
+                  'input': re.fullmatch(r'[0-9a-f]{64}',str(stored.get('INPUT_PACKET_SHA256'))) is not None,
+                  'odds': re.fullmatch(r'[0-9a-f]{64}',str(stored.get('ODDS_SNAPSHOT_SHA256'))) is not None,
+                  'production': stored.get('PRODUCTION_BETS_CHANGED') is False,
+                  'result': stored.get('OFFICIAL_RESULT_USED') is False,
+              }
+              failed=[name for name,ok in checks.items() if not ok]
+              if failed: raise RuntimeError('IMMUTABLE_SHADOW_LOCK_READBACK:'+','.join(failed))
+              return stored['INPUT_PACKET_SHA256']!=row['BET_PACKET_HASH']
           considered=expired=pack_mismatch=locked=retained=0
           for row in sorted(odds_day['RECORDS'],key=lambda value:value['STANDARD_RACE_KEY']):
               considered+=1
@@ -771,7 +793,10 @@ jobs:
               deadline=datetime.fromisoformat(packet['RACE_DEADLINE_AT'])
               path=out/(row['STANDARD_RACE_KEY']+'.json')
               if path.exists():
-                  future.predict_and_lock(row,candidate,contract,path,now=now,predictor=model)
+                  prior_bytes=path.read_bytes()
+                  changed=retain_existing_lock(b.load_json(path),row,binding,b.sha256_value)
+                  if path.read_bytes()!=prior_bytes: raise SystemExit('RETAINED_LOCK_BYTES_CHANGED')
+                  print('WILD4_RETAINED_LOCK_READBACK='+json.dumps({'race_key':row['STANDARD_RACE_KEY'],'newer_input_ignored':changed,'lock_mutated':False},sort_keys=True))
                   retained+=1; continue
               if now>=deadline:
                   expired+=1; continue
@@ -1286,6 +1311,7 @@ jobs:
           if [ '${{ steps.settlement.outputs.held }}' != '' ] && [ '${{ steps.settlement.outputs.held }}' != '0' ]; then
             echo '::warning::Rescue NIGHT saved valid records; held races remain explicitly unresolved in the immutable audit'
           fi
+
 
 
 
