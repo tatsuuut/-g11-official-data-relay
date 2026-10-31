@@ -9,6 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/test_night_transport_utf8_v1.py",
     "scripts/test_published_checkpoint_continuity_v1.py",
     "scripts/test_wild4_retained_lock_v1.py",
     "scripts/test_deme_research_delivery_nikoshi.py",
@@ -997,4 +998,5 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
+
 

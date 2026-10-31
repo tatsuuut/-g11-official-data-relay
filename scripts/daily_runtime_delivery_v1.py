@@ -146,6 +146,156 @@ def identity(feed, authority, stage):
             "DAILY_SITE_AUTHORITY_MISMATCH")
 
 
+def utf8_night_plan(plan):
+    """Correct wire hashes only; leave saved predictions, results and finance intact."""
+    result = deepcopy(plan)
+    manifest, chunks = result['manifest'], result['chunks']
+    require(len(chunks) == manifest['CHUNK_COUNT'], 'NIGHT_PLAN_CHUNK_COUNT')
+    top, races = {}, []
+    def merge(base, patch):
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(base.get(key), dict):
+                merge(base[key], value)
+            else:
+                base[key] = deepcopy(value)
+    for index, chunk in enumerate(chunks):
+        require(chunk['CHUNK_INDEX'] == index and chunk['CHUNK_COUNT'] == len(chunks)
+                and chunk['OPERATIONAL_DATE'] == manifest['OPERATIONAL_DATE']
+                and chunk['NIGHT_TRANSACTION_ID'] == manifest['NIGHT_TRANSACTION_ID']
+                and chunk['MANIFEST_SHA256'] == manifest['MANIFEST_SHA256']
+                and chunk['SOURCE_NIGHT_SHA'] == manifest['SOURCE_NIGHT_SHA']
+                and chunk['RACE_KEYS'] == [r['RACE_KEY'] for r in chunk['RACES']],
+                'NIGHT_PLAN_CHUNK_BINDING')
+        merge(top, chunk['TOP_LEVEL'])
+        races.extend(chunk['RACES'])
+        chunk['CHUNK_SHA256'] = hot.site_hash({'TOP_LEVEL': chunk['TOP_LEVEL'], 'RACES': chunk['RACES']})
+    require(hot.hash_bytes(hot.compact({'stage': 'NIGHT', 'day': manifest['OPERATIONAL_DATE'],
+            'top': top, 'races': races})) == manifest['PATCH_SHA256'], 'NIGHT_PLAN_PAYLOAD_HASH_MISMATCH')
+    manifest['CHUNK_SHA256'] = [chunk['CHUNK_SHA256'] for chunk in chunks]
+    manifest['EXPECTED_TOP_LEVEL_SHA'] = hot.site_hash(top)
+    manifest['EXPECTED_FINAL_ACCOUNTING_SHA'] = hot.site_hash(top['final_accounting'])
+    manifest['EXPECTED_FINANCE_SHA'] = hot.site_hash([
+        [row['RACE_KEY'], row['CHANGED_FIELDS'].get('research_finance')] for row in races])
+    manifest['NIGHT_TRANSACTION_ID'] = hot.hash_bytes(hot.compact([
+        manifest['OPERATIONAL_DATE'], manifest['BASE_FEED_SHA'], manifest['SOURCE_NIGHT_SHA'],
+        manifest['CHUNK_SHA256']]))
+    manifest.pop('MANIFEST_SHA256')
+    manifest['MANIFEST_SHA256'] = hot.hash_bytes(hot.compact(manifest))
+    for chunk in chunks:
+        chunk['NIGHT_TRANSACTION_ID'] = manifest['NIGHT_TRANSACTION_ID']
+        chunk['MANIFEST_SHA256'] = manifest['MANIFEST_SHA256']
+    result.pop('plan_sha256', None)
+    result['plan_sha256'] = hot.hash_bytes(json.dumps(result, ensure_ascii=False, sort_keys=True,
+        separators=(',', ':'), allow_nan=False).encode())
+    return result
+
+
+def verified_utf8_plan(root, plan, implementation):
+    fixed = utf8_night_plan(plan)
+    if fixed == plan:
+        return plan
+    path = root / 'night-transport-plan-utf8-v1.json'
+    implementation.immutable(path, hot.compact(fixed))
+    require(implementation.json_file(path) == fixed, 'NIGHT_UTF8_PLAN_READBACK')
+    print('G11_NIGHT_UTF8_WIRE_HASH_REPAIRED=PASS CANONICAL_PAYLOAD_CHANGED=0')
+    return fixed
+
+
+def published_lock_night_20261031(feed, accepted, checkpoint):
+    """Bind today's result display to the original published LOCK, in memory only.
+
+    The incident has exactly five identity/time differences and identical bets.
+    This is not a canonical repair or permission to replace any prediction.
+    """
+    if feed.get('operational_date_jst') != '2026-10-31':
+        return feed, None
+    require(checkpoint['feed_sha256'] ==
+            '18447a8b1489d99594d0e7ee37667e0b930db64992d34a5e6e5651fbabc08d6b'
+            and checkpoint['authority_sha256'] ==
+            '48aae10804d6906d6834d11ec09ce59bca05e6b43a132887dfe0a8eeb3b7f66c'
+            and feed['stage'] == 'NIGHT', 'N1031_CANONICAL_SCOPE')
+    key = '20261031-09-03'
+    current = next(r for r in feed['races'] if r['key'] == key)
+    prior = next(r for r in accepted['races'] if r['key'] == key)
+    old = hot.project('abeken_shadow', prior['abeken_shadow'])
+    new = hot.project('abeken_shadow', current['abeken_shadow'])
+    paths = [('v53', 'live', field) for field in
+             ('captured_at_jst', 'locked_at_jst', 'snapshot_sha256')]
+    paths += [('live', field) for field in
+              ('feature_asof_time_jst', 'prediction_lock_time_jst')]
+    normalized = deepcopy(new)
+    for path in paths:
+        left, right = normalized, old
+        for part in path[:-1]:
+            left, right = left[part], right[part]
+        require(path[-1] in left and path[-1] in right, 'N1031_LOCK_METADATA_MISSING')
+        left[path[-1]] = right[path[-1]]
+    require(normalized == old, 'N1031_PREDICTION_CONTENT_CONFLICT')
+    previous = old['v53']['live']
+    saved = new['v53']['live']
+    require(previous['snapshot_sha256'] ==
+            '8ec81787e5f75441efcb5fc85bb66412ef548f69277f03580c32c90d5c5027fe'
+            and previous['locked_at_jst'] == previous['captured_at_jst'] ==
+            '2026-10-31T11:18:45+09:00'
+            and old['live']['feature_asof_time_jst'] == old['live']['prediction_lock_time_jst'] ==
+            previous['locked_at_jst']
+            and current['deadline_jst'] == prior['deadline_jst'] == '2026-10-31T11:25:00+09:00',
+            'N1031_PUBLISHED_LOCK_IDENTITY')
+    entry = feed['final_accounting']['by_race'][key]['engines']['abeken']
+    require(entry['final_bet_source'] == 'PRE_RACE'
+            and entry['final_bets'] == saved['practical_bets'] == previous['practical_bets']
+            and entry['final_head'] == saved['main_head'] == previous['main_head']
+            and entry['final_bet_snapshot_id'] == saved['snapshot_sha256']
+            and entry['final_bet_locked_at_jst'] == saved['locked_at_jst'],
+            'N1031_FINAL_LOCK_AUTHORITY')
+    wire = deepcopy(feed)
+    target = next(r for r in wire['races'] if r['key'] == key)
+    target['abeken_shadow']['v53']['live'] = deepcopy(previous)
+    target['abeken_shadow']['live'] = deepcopy(old['live'])
+    final = wire['final_accounting']['by_race'][key]['engines']['abeken']
+    final['final_bet_snapshot_id'] = previous['snapshot_sha256']
+    final['final_bet_locked_at_jst'] = previous['locked_at_jst']
+    proof = {'schema': 'G11_N1031_PUBLISHED_LOCK_RESULT_JOIN_V1', 'race_key': key,
+             'canonical_feed_sha256': checkpoint['feed_sha256'],
+             'canonical_snapshot_sha256': saved['snapshot_sha256'],
+             'published_snapshot_sha256': previous['snapshot_sha256'],
+             'prediction_content_changed': False, 'settlement_changed': False,
+             'canonical_files_changed': False,
+             'wire_reference_paths': ['abeken_shadow.' + '.'.join(p) for p in paths] +
+                 ['final_accounting.by_race.' + key + '.engines.abeken.' + p for p in
+                  ('final_bet_snapshot_id', 'final_bet_locked_at_jst')]}
+    return wire, proof
+
+
+def published_lock_night_plan(root, prior, wire, accepted, checkpoint, proof, implementation):
+    """Save a separate transport projection; never modify the failed plan."""
+    research = {}
+    def merge(base, patch):
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(base.get(key), dict):
+                merge(base[key], value)
+            else:
+                base[key] = deepcopy(value)
+    for chunk in prior['chunks']:
+        if 'deme_discovery' in chunk['TOP_LEVEL']:
+            merge(research, chunk['TOP_LEVEL']['deme_discovery'])
+    delta = hot.create_delta(wire, accepted, prior['manifest']['BASE_FEED_SHA'], research or None)
+    manifest, chunks = hot.night_chunks(delta, wire, checkpoint)
+    for field in ('BASE_FEED_SHA', 'CANONICAL_FEED_SHA256', 'CHECKPOINT_SHA256',
+                  'DAILY_AUTHORITY_SHA256', 'SOURCE_NIGHT_SHA', 'PATCH_SEQUENCE',
+                  'PATCH_CREATED_AT', 'EXPECTED_RACES', 'EXPECTED_RESULTS', 'EXPECTED_PENDING'):
+        require(manifest[field] == prior['manifest'][field], 'N1031_TRANSPORT_BINDING:' + field)
+    plan = {'checkpoint_sha256': checkpoint['checkpoint_sha256'],
+            'manifest': manifest, 'chunks': chunks, 'published_lock_result_join': proof}
+    plan['plan_sha256'] = implementation.digest(implementation.canonical(plan))
+    path = root / 'night-transport-plan-published-lock-20261031.json'
+    implementation.immutable(path, hot.compact(plan))
+    require(implementation.json_file(path) == plan, 'N1031_PLAN_READBACK')
+    print('G11_N1031_PUBLISHED_LOCK_RESULT_JOIN=PASS RACE=20261031-09-03 '
+          'PREDICTION_CHANGED=0 SETTLEMENT_CHANGED=0 CANONICAL_FILES_CHANGED=0')
+    return plan
+
+
 def verify_night_readback(feed, readback, headers, checkpoint, authority):
     identity(readback, authority, "NIGHT")
     counts = readback.get("counts", {})
@@ -232,6 +382,7 @@ def send_night(state, day, feed, checkpoint, authority, implementation, origin, 
     url = f"{origin}/api/g11-feed?date={day}"
     accepted, headers, _ = hot.fetch(url)
     identity(accepted, authority, accepted["stage"])
+    wire_feed, lock_proof = published_lock_night_20261031(feed, accepted, checkpoint)
     root = implementation.day_root(state, day)
     plan_path = root / "night-transport-plan.json"
     if n13_transport_only():
@@ -240,7 +391,7 @@ def send_night(state, day, feed, checkpoint, authority, implementation, origin, 
     if accepted["stage"] == "NIGHT":
         # ACK/readback may have been lost after an atomic commit. Repeat only
         # COMMIT against the server's original immutable manifest.
-        verify_night_readback(feed, accepted, headers, checkpoint, authority)
+        verify_night_readback(wire_feed, accepted, headers, checkpoint, authority)
         transport = accepted["transport"]
         manifest = {"OPERATIONAL_DATE": day,
                     "NIGHT_TRANSACTION_ID": transport["night_transaction_id"],
@@ -256,6 +407,8 @@ def send_night(state, day, feed, checkpoint, authority, implementation, origin, 
             unsigned = dict(plan)
             expected = unsigned.pop("plan_sha256", None)
             require(expected == implementation.digest(implementation.canonical(unsigned)), "NIGHT_TRANSPORT_PLAN_HASH_MISMATCH")
+            if not n13_transport_only():
+                plan = verified_utf8_plan(root, plan, implementation)
             manifest, chunks = plan["manifest"], plan["chunks"]
             require(headers["x-g11-source-feed-sha256"] == manifest["BASE_FEED_SHA"], "NIGHT_TRANSPORT_BASE_CHANGED")
         else:
@@ -266,13 +419,17 @@ def send_night(state, day, feed, checkpoint, authority, implementation, origin, 
             # Preserve the serialized JavaScript hash order in one exclusive
             # write. No partially-persisted two-file plan needs repair.
             implementation.immutable(plan_path, hot.compact(plan))
+        if lock_proof is not None:
+            plan = published_lock_night_plan(root, plan, wire_feed, accepted, checkpoint,
+                                             lock_proof, implementation)
+            manifest, chunks = plan['manifest'], plan['chunks']
         hot.post(origin, token, manifest, "/api/g11-night-transaction")
         for chunk in chunks:
             hot.post(origin, token, chunk, "/api/g11-night-transaction")
     ack = hot.post(origin, token, commit_request(manifest), "/api/g11-night-transaction")
     readback, next_headers, raw = hot.fetch(url)
     require(ack.get("payload_sha256") == next_headers.get("x-g11-source-feed-sha256"), "DAILY_SITE_COMMIT_READBACK_SHA")
-    verify_night_readback(feed, readback, next_headers, checkpoint, authority)
+    verify_night_readback(wire_feed, readback, next_headers, checkpoint, authority)
     # The saved immutable transaction plan, including optional research, is the
     # retry authority. Research readback is diagnostic and never blocks NIGHT.
     if plan_path.is_file():
@@ -773,6 +930,7 @@ if __name__ == "__main__":
                 raise SystemExit('OFFICIAL_RESULT_PUBLICATION_INCOMPLETE')
             from deme_research_delivery_v1 import optional_publish
             optional_publish(args.state_root, args.feed, args.origin)
+
 
 
 
