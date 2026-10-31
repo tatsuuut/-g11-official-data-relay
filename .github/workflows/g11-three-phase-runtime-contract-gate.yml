@@ -198,3 +198,16 @@ jobs:
       - name: Verify immutable public LOCK settlement projection
         working-directory: .g11-retained-projection
         run: python3 -m unittest -v g11.wild_pack.v1.test_goripan_public_projection_v1
+
+      - name: Checkout bounded 30x research projection
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: 4c9c8f790e16a2e9125da3c8066d88680b4a20ae
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-thirty-budget
+          persist-credentials: false
+
+      - name: Verify retained history and all three current research cohorts
+        working-directory: .g11-thirty-budget/g11/canonical
+        run: python3 -m unittest -v test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget
