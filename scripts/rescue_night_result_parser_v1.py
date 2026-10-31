@@ -75,6 +75,7 @@ from contextlib import contextmanager
 def official_input_compatibility():
     from g11.canonical import official_pipeline as official
     from morning_race_isolation_v1 import adapted_morning, adapted_night_binding
+    from racer_period_source_v1 import adapted_period_morning
     parser=official.parse_result_text
     gate=official.FORMAL_GATE
     bridge=gate.build_canonical_official_morning_input
@@ -85,7 +86,7 @@ def official_input_compatibility():
     try:
         official.parse_result_text=adapted
         gate.build_canonical_official_morning_input=morning_metadata_bridge(gate)
-        official.CanonicalRunner.run_morning=adapted_morning(official,parser)
+        official.CanonicalRunner.run_morning=adapted_period_morning(official,adapted_morning(official,parser))
         official._night_sg_race_keys_from_saved_b=adapted_night_binding(official,parser)
         yield
     finally:

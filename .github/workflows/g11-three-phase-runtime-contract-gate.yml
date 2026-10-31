@@ -81,6 +81,12 @@ jobs:
           PYTHONPATH: .g11-private:scripts
         run: python3 -m unittest discover -s scripts -p test_morning_race_isolation_v1.py -v
 
+      - name: Verify official application period without changing retained authority
+        env:
+          PYTHONPATH: .g11-private:scripts
+          G11_REQUIRE_PRIVATE_PERIOD_TESTS: "1"
+        run: python3 -m unittest discover -s scripts -p test_racer_period_source_v1.py -v
+
       - name: Verify bounded content retry with the reviewed collector
         run: python3 -m unittest discover -s scripts -p test_predeadline_content_retry_v1.py -v
 
