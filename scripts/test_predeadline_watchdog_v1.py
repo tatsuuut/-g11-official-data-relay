@@ -437,7 +437,7 @@ class PushRoutingTests(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] /
                   '.github/workflows/g11-free-runner.yml').read_text()
         step = source.split('        id: scheduled\n', 1)[1].split(
-            '      - name: Restore only encrypted runtime state', 1)[0]
+            '\n      - ', 1)[0]
         script = textwrap.dedent(step.split('        run: |\n', 1)[1])
         stubs = '''
 date() {
