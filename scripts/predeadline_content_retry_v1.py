@@ -12,6 +12,7 @@ import hashlib
 import inspect
 import json
 import textwrap
+import types
 
 COLLECTOR_SHA = '6eef8e082ae3d6c874d83844bbb2fcae04fd0ceab3d829db5a511d29da6a9017'
 MAX_WAIT_SECONDS = 30
@@ -66,7 +67,8 @@ def select_retry(first, plan, now):
 
 
 def _restricted_collector(original, selected, stop_at):
-    source = inspect.getsource(original)
+    collector = inspect.unwrap(original)
+    source = inspect.getsource(collector)
     if hashlib.sha256(source.encode()).hexdigest() != COLLECTOR_SHA:
         raise ValueError('CONTENT_RETRY_UNREVIEWED_COLLECTOR')
     anchor = '            task = plan[task_index]\n'
@@ -78,11 +80,30 @@ def _restricted_collector(original, selected, stop_at):
         '                continue\n'
         '            if self.client.clock() >= _retry_stop_at:\n'
         '                break\n', 1)
-    namespace = dict(original.__globals__)
+    namespace = dict(collector.__globals__)
     namespace.update(_retry_source_ids=frozenset(selected), _retry_stop_at=stop_at)
-    exec(compile(textwrap.dedent(source), original.__code__.co_filename,
+    exec(compile(textwrap.dedent(source), collector.__code__.co_filename,
                  'exec'), namespace)
-    return namespace[original.__name__]
+    restricted = namespace[collector.__name__]
+    # inspect.getsource unwraps @wraps, but __globals__ belongs to the wrapper.
+    # Compile in the collector's namespace, then retain the authority boundary
+    # around the second call as well. Never mutate the frozen function or cells.
+    if original is collector:
+        return restricted
+    if (not getattr(original, '_g11_daily_authority_boundary', False)
+            or getattr(original, '__wrapped__', None) is not collector
+            or not original.__closure__):
+        raise ValueError('CONTENT_RETRY_UNREVIEWED_BOUNDARY')
+    cells = original.__closure__
+    if sum(cell.cell_contents is collector for cell in cells) != 1:
+        raise ValueError('CONTENT_RETRY_BOUNDARY_CLOSURE')
+    replacement = types.FunctionType(
+        original.__code__, original.__globals__, original.__name__,
+        original.__defaults__, tuple(
+            types.CellType(restricted) if cell.cell_contents is collector else cell
+            for cell in cells))
+    replacement.__kwdefaults__ = original.__kwdefaults__
+    return wraps(restricted)(replacement)
 
 
 def merge_attempts(first, second):
@@ -160,3 +181,4 @@ def bounded_content_retry():
         yield
     finally:
         CanonicalRunner.run_due_predeadline = original
+

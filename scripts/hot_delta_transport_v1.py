@@ -591,6 +591,23 @@ def publish(feed_path: Path, origin: str, research_projection: dict | None = Non
     print("G11_HOT_DELTA_HTTP=" + str(status))
     body = json.loads(response_path.read_text())
     if status < 200 or status >= 300:
+        if body.get('error') == 'ABEKEN_IMMUTABLE_CONFLICT':
+            old_rows = {row['key']: row for row in accepted['races']}
+            diagnostics = []
+            for change in delta['RACES']:
+                shadow = change['CHANGED_FIELDS'].get('abeken_shadow')
+                if not isinstance(shadow, dict):
+                    continue
+                old_shadow = old_rows[change['RACE_KEY']].get('abeken_shadow') or {}
+                def changed_paths(before, patch, prefix):
+                    if isinstance(before, dict) and isinstance(patch, dict):
+                        return [p for k, v in patch.items()
+                                for p in changed_paths(before.get(k), v, prefix + '.' + k)]
+                    return [prefix] if before is not None and before != patch else []
+                paths = changed_paths(old_shadow, shadow, 'abeken_shadow')
+                if paths:
+                    diagnostics.append({'race_key': change['RACE_KEY'], 'changed_existing_paths': paths})
+            print('G11_ABEKEN_CONFLICT_DIAGNOSTIC=' + json.dumps(diagnostics, sort_keys=True))
         raise RuntimeError("HOT_DELTA_REJECTED:" + str(body.get("error")))
     if body.get("status") != "PASS":
         raise RuntimeError("HOT_DELTA_REJECTED")
@@ -636,6 +653,7 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
+
 
 
 

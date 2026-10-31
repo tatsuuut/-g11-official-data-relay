@@ -140,6 +140,45 @@ class RetryTests(unittest.TestCase):
         self.assertTrue(all(at == BASE+timedelta(seconds=30) for _, at in self.writes))
         self.assertIn('ATTEMPTED_ONCE', self.log.getvalue())
 
+    def install_actual_boundary(self):
+        root = Path(os.environ.get('G11_RETRY_SOURCE_ROOT',
+            Path(__file__).resolve().parents[1] / '.g11-private'))
+        ns = {}
+        path = root / 'g11/canonical/daily_runtime_boundary_v1.py'
+        exec(compile(path.read_text(), str(path), 'exec'), ns)
+        for name in ('run_morning', 'run_morning_predictions',
+                     'run_due_predeadline_predictions', 'run_predeadline_cycle', 'run_night'):
+            setattr(self.Runner, name, lambda *a, **k: None)
+        (self.root / 'manifest.json').write_text('{"OPERATIONAL_DATE_JST":"2026-10-30"}')
+        ns['install_daily_boundaries'](self.Runner, root)
+        self.original = self.Runner.run_due_predeadline
+
+    def test_actual_authority_wrapper_keeps_correct_globals_and_rechecks_retry(self):
+        self.install_actual_boundary()
+        calls = []
+        daily = types.SimpleNamespace(
+            verify_runtime=lambda *a, **k: calls.append('runtime'),
+            verify_locks=lambda state, day, phase, **k: calls.append(phase))
+        with patch.dict('sys.modules', {'g11.relay': types.SimpleNamespace(daily_runtime_authority_v1=daily)}):
+            result = self.run_capture()
+        self.assertEqual(len(result['ACQUIRED']), 2)
+        self.assertEqual(calls, ['runtime', 'MORNING', 'PREDEADLINE'] * 2)
+        self.assertNotIn('PREDEADLINE_EARLY_WAIT_SECONDS', self.original.__globals__)
+
+    def test_authority_failure_on_second_call_prevents_retry_writes(self):
+        self.install_actual_boundary()
+        calls = []
+        def verify(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 2:
+                raise RuntimeError('DAILY_RUNTIME_MISMATCH')
+        daily = types.SimpleNamespace(verify_runtime=verify, verify_locks=lambda *a, **k: None)
+        with patch.dict('sys.modules', {'g11.relay': types.SimpleNamespace(daily_runtime_authority_v1=daily)}):
+            with self.assertRaisesRegex(RuntimeError, 'DAILY_RUNTIME_MISMATCH'):
+                self.run_capture()
+        self.assertEqual(len(self.attempts), 2)
+        self.assertEqual(self.writes, [])
+
     def test_permanent_invalid_values_are_never_admitted_and_not_looped(self):
         self.responses = {r['SOURCE_ID']: ['reject'] for r in self.plan}
         result = self.run_capture()
@@ -315,3 +354,4 @@ class RetryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
