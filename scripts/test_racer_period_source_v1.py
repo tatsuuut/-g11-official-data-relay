@@ -222,7 +222,12 @@ class PrivateBoundaryIntegrationTests(unittest.TestCase):
                 runner.run_morning_workbook_projection(fixtures.workbook_profiles())
                 result=store.load_verified_snapshot('morning','workbook-projection')['SNAPSHOT']['PAYLOAD']
                 self.assertEqual(result['COUNTS']['RACES'],24)
-                self.assertEqual(result['COUNTS']['FORMAL'],24)
+                self.assertEqual(result['COUNTS']['FORMAL'],23)
+                locks=[dict(zip(official.LOCK49_FIELDS,row)) for row in result['LOCK49_ROWS']]
+                held=[row for row in locks if row['正式/除外']=='EXCLUDED']
+                self.assertEqual([row['標準レースキー'] for row in held],['20260827-19-01'])
+                self.assertTrue(held[0]['除外理由'])
+                self.assertIsNone(held[0]['実戦買い目'])
                 self.assertEqual(before,store.load_verified_snapshot('morning','official-day-input'))
                 self.assertEqual(len(client.reads),len(set(client.reads)))
 

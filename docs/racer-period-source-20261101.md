@@ -46,3 +46,6 @@ official dash as None from November 1, without substituting zero or an estimate.
 The original raw HTML, URL, response receipt, scope and request evidence stay
 unchanged. Malformed values, missing F/L, wrong identities and arbitrary blanks
 still fail. The original parser and historical-date behavior are retained.
+The full intake regression preserves all 24 race rows and produces 23 formal
+rows; the original P3 structure check excludes the one unavailable-ST race
+without generating practical bets. No prediction requirement is weakened.
