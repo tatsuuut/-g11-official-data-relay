@@ -208,5 +208,127 @@ class NightUtf8Tests(unittest.TestCase):
             self.assertTrue((root / 'night-transport-plan-utf8-v1.json').is_file())
 
 
+class NightNoBodySavedPlanTests(unittest.TestCase):
+    def fixture(self):
+        day = '2026-11-01'
+        row = {'key': '20261101-22-01', 'date_jst': day, 'venue': '福岡',
+               'venue_code': '22', 'race': 1, 'deadline_jst': day + 'T10:30:00+09:00',
+               'formal_status': 'EXCLUDED', 'exclusion_reason': 'BODY_NOT_GENERATED',
+               'research_eligible': False, 'p3_snapshot_sha256': None,
+               'p3_morning_snapshot_sha256': None, 'p3_snapshot': None,
+               'p3_status': None, 'predeadline': None,
+               'abeken_shadow': {'v53': {'morning': {'snapshot_sha256': '1' * 64,
+                   'practical_bets': ['1-2-3'], 'locked_at_jst': day + 'T06:42:04+09:00'}}}}
+        formal = dict(row, key='20261101-22-03', race=3, formal_status='FORMAL',
+                      exclusion_reason=None, research_eligible=True, p3_snapshot_sha256='b' * 64)
+        accepted = {'operational_date_jst': day, 'stage': 'PREDEADLINE', 'races': [row, formal]}
+        feed = copy.deepcopy(accepted)
+        feed.update(stage='NIGHT', counts={'races': 2, 'results': 2, 'pending': 0},
+            source={'projection_sha256': 'a' * 64, 'run_id': 41313903069},
+            generated_at_jst=day + 'T23:04:23+09:00',
+            final_accounting={'by_race': {formal['key']: {'engines': {'p3': {'profit': 500}}}}},
+            daily_runtime={'authority_sha256': 'd' * 64})
+        for result in feed['races']:
+            result.update(result_trifecta='1-2-3', payout=1000,
+                          research_finance={'profit': 500})
+        checkpoint = {'operational_date_jst': day, 'pending': 0,
+                      'authority_sha256': 'd' * 64, 'feed_sha256': 'e' * 64,
+                      'checkpoint_sha256': 'f' * 64}
+        delta = hot.create_delta(feed, accepted, 'c' * 64)
+        # Reproduce the previously persisted sender's null version exactly.
+        next(r for r in delta['RACES'] if r['RACE_KEY'] == row['key'])['EXPECTED_RACE_VERSION'] = None
+        delta['PATCH_SHA256'] = hot.hash_bytes(hot.compact({'stage': 'NIGHT', 'day': day,
+            'top': delta['TOP_LEVEL'], 'races': delta['RACES']}))
+        manifest, chunks = hot.night_chunks(delta, feed, checkpoint)
+        plan = {'checkpoint_sha256': checkpoint['checkpoint_sha256'], 'manifest': manifest, 'chunks': chunks}
+        self.sign(plan)
+        return plan, feed, accepted, checkpoint
+
+    @staticmethod
+    def canonical(value):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                          separators=(',', ':'), allow_nan=False).encode()
+
+    def sign(self, plan):
+        plan.pop('plan_sha256', None)
+        plan['plan_sha256'] = hot.hash_bytes(self.canonical(plan))
+
+    def implementation(self):
+        def immutable(path, value):
+            if path.exists():
+                self.assertEqual(path.read_bytes(), value)
+            else:
+                path.write_bytes(value)
+        return SimpleNamespace(immutable=immutable, json_file=lambda p: json.loads(p.read_bytes()),
+                               digest=hot.hash_bytes, canonical=self.canonical)
+
+    def test_old_plan_is_preserved_and_only_missing_transport_version_changes(self):
+        plan, feed, accepted, checkpoint = self.fixture()
+        before = copy.deepcopy((plan, feed, accepted, checkpoint))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original = root / 'night-transport-plan.json'
+            original.write_bytes(hot.compact(plan))
+            original_bytes = original.read_bytes()
+            args = (root, plan, feed, accepted, checkpoint, self.implementation())
+            fixed = delivery.verified_no_body_night_plan(*args)
+            self.assertEqual(fixed, delivery.verified_no_body_night_plan(*args))
+            self.assertEqual(original.read_bytes(), original_bytes)
+            self.assertTrue((root / 'night-transport-plan-no-body-cas-v1.json').is_file())
+        self.assertEqual((plan, feed, accepted, checkpoint), before)
+        self.assertNotEqual(fixed['manifest']['NIGHT_TRANSACTION_ID'], plan['manifest']['NIGHT_TRANSACTION_ID'])
+        for old_chunk, new_chunk in zip(plan['chunks'], fixed['chunks']):
+            self.assertEqual(old_chunk['TOP_LEVEL'], new_chunk['TOP_LEVEL'])
+            self.assertEqual(old_chunk['RACE_KEYS'], new_chunk['RACE_KEYS'])
+            for old, new in zip(old_chunk['RACES'], new_chunk['RACES']):
+                expected = copy.deepcopy(old)
+                if expected['EXPECTED_RACE_VERSION'] is None:
+                    expected['EXPECTED_RACE_VERSION'] = plan['manifest']['BASE_FEED_SHA']
+                self.assertEqual(new, expected)
+        self.assertEqual(delivery.utf8_night_plan(fixed), fixed)
+        self.assertIs(delivery.verified_no_body_night_plan(Path('.'), fixed, feed, accepted,
+                      checkpoint, self.implementation()), fixed)
+
+    def test_partial_or_different_checkpoint_cannot_be_repaired(self):
+        for field, value in [('checkpoint_sha256', '0' * 64), ('feed_sha256', '0' * 64)]:
+            plan, feed, accepted, checkpoint = self.fixture()
+            checkpoint[field] = value
+            with self.assertRaisesRegex(RuntimeError, 'PLAN_IDENTITY'):
+                delivery.verified_no_body_night_plan(Path('.'), plan, feed, accepted, checkpoint,
+                                                    self.implementation())
+        plan, feed, accepted, checkpoint = self.fixture()
+        accepted['races'].pop()
+        with self.assertRaisesRegex(RuntimeError, 'PLAN_COVERAGE'):
+            delivery.verified_no_body_night_plan(Path('.'), plan, feed, accepted, checkpoint,
+                                                self.implementation())
+
+    def test_formal_or_changed_identity_never_gets_a_fallback(self):
+        for field, value in [('formal_status', 'FORMAL'), ('predeadline', {}),
+                             ('p3_snapshot_sha256', '1' * 64),
+                             ('deadline_jst', '2026-11-01T10:31:00+09:00')]:
+            plan, feed, accepted, checkpoint = self.fixture()
+            feed['races'][0][field] = value
+            with self.assertRaisesRegex(RuntimeError, 'VERSION_SCOPE'):
+                delivery.verified_no_body_night_plan(Path('.'), plan, feed, accepted, checkpoint,
+                                                    self.implementation())
+
+    def test_saved_result_mutation_is_not_relabelled_as_transport_repair(self):
+        plan, feed, accepted, checkpoint = self.fixture()
+        plan['chunks'][-1]['RACES'][0]['CHANGED_FIELDS']['result_trifecta'] = '6-5-4'
+        self.sign(plan)
+        with self.assertRaisesRegex(RuntimeError, 'PAYLOAD_HASH_MISMATCH'):
+            delivery.verified_no_body_night_plan(Path('.'), plan, feed, accepted, checkpoint,
+                                                self.implementation())
+
+    def test_missing_version_field_is_not_an_explicit_null_repair(self):
+        plan, feed, accepted, checkpoint = self.fixture()
+        del plan['chunks'][-1]['RACES'][0]['EXPECTED_RACE_VERSION']
+        self.sign(plan)
+        with self.assertRaisesRegex(RuntimeError, 'VERSION_FIELD_MISSING'):
+            delivery.verified_no_body_night_plan(Path('.'), plan, feed, accepted, checkpoint,
+                                                self.implementation())
+
+
 if __name__ == '__main__':
     unittest.main()
+
