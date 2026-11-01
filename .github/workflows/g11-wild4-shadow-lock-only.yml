@@ -1206,7 +1206,7 @@ jobs:
           pathlib.Path('.relay-output').mkdir(exist_ok=True)
           day=os.environ['OPERATIONAL_DATE']
           feed,_,raw=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date='+day)
-          if len(raw)>8*1024*1024 or feed.get('status')!='PASS' or feed.get('operational_date_jst')!=day:
+          if len(raw)>(16 if feed.get('stage')=='NIGHT' else 8)*1024*1024 or feed.get('status')!='PASS' or feed.get('operational_date_jst')!=day:
               raise SystemExit('GORIPAN_PRIOR_PUBLIC_FEED_BINDING')
           (pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-prior-public-feed.json').write_bytes(raw)
           PYPUBLISHEDLOCK
