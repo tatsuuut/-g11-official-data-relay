@@ -68,6 +68,7 @@ ALLOWED_FILES = {
     "scripts/audit_three_phase_runtime_contract.py",
     "scripts/dynamic_last_race_heartbeat.py",
     "scripts/test_dynamic_last_race_heartbeat.py",
+    "scripts/test_scheduled_phase_routing.py",
     "scripts/predeadline_watchdog_v1.py",
     "scripts/test_predeadline_watchdog_v1.py",
 }

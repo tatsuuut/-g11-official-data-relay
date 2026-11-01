@@ -444,6 +444,7 @@ date() {
   case "$*" in
     +%H) printf '%s' "$TEST_HOUR" ;;
     +%M) printf '24' ;;
+    +%H%M) printf '%02d24' "$TEST_HOUR" ;;
     *yesterday*) printf '2026-10-23' ;;
     *) printf '2026-10-24' ;;
   esac
