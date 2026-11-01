@@ -464,6 +464,263 @@ jobs:
                'deadline':json.loads(p.read_text())['RACE_DEADLINE_AT']}
               for p in files],sort_keys=True))
           PY
+      - name: Restore the authenticated missing original LOCK before NIGHT settlement
+        id: ledger-union
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && steps.day.outputs.day == '2026-11-01' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          GH_TOKEN: ${{ github.token }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="${GITHUB_WORKSPACE}/.g11-private"
+          python3 - <<'PYORIGINALARCHIVE'
+          import hashlib, io, json, os, pathlib, urllib.error, urllib.parse, urllib.request, zipfile
+
+          REPO = 'tatsuuut/-g11-official-data-relay'
+          REPOSITORY_ID = 1367703708
+          RUN_ID = 41291307990
+          ARTIFACT_ID = 13077092759
+          ARTIFACT_NAME = 'g11-wild4-20261101-future-oos-locks-encrypted'
+          ARTIFACT_SIZE = 1250101
+          ARTIFACT_SHA = '8d8456c9bd80d748d8613df94aee4bf9a9b80adc58b4e6d5f678648422f3f791'
+          HEAD_SHA = '04f282fe3522e4247877d7a800875ddba6cb2087'
+
+          def require(ok, reason):
+              if not ok:
+                  raise ValueError('WILD4_ORIGINAL_ARCHIVE_' + reason)
+
+          def verify_metadata(run, listing):
+              require(run.get('id') == RUN_ID and run.get('status') == 'completed'
+                  and run.get('conclusion') == 'success' and run.get('event') == 'workflow_dispatch'
+                  and run.get('path') == '.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml'
+                  and run.get('head_branch') == 'main' and run.get('head_sha') == HEAD_SHA
+                  and run.get('repository', {}).get('id') == REPOSITORY_ID
+                  and run.get('head_repository', {}).get('id') == REPOSITORY_ID, 'RUN')
+              matches = [a for a in listing.get('artifacts', []) if a.get('id') == ARTIFACT_ID]
+              require(len(matches) == 1, 'ID')
+              artifact = matches[0]
+              binding = artifact.get('workflow_run', {})
+              require(artifact.get('name') == ARTIFACT_NAME and artifact.get('expired') is False
+                  and artifact.get('size_in_bytes') == ARTIFACT_SIZE
+                  and artifact.get('digest') == 'sha256:' + ARTIFACT_SHA
+                  and binding.get('id') == RUN_ID and binding.get('head_sha') == HEAD_SHA
+                  and binding.get('head_branch') == 'main'
+                  and binding.get('repository_id') == REPOSITORY_ID
+                  and binding.get('head_repository_id') == REPOSITORY_ID, 'METADATA')
+              return artifact
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, response, code, message, headers, newurl):
+                  return None
+
+          def download_original(temp, token, opener=None):
+              require(os.environ.get('GITHUB_REPOSITORY') == REPO
+                  and os.environ.get('OPERATIONAL_DATE') == '2026-11-01', 'SCOPE')
+              opener = opener or urllib.request.build_opener(NoRedirect())
+              api = 'https://api.github.com/repos/' + REPO
+              headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
+                         'X-GitHub-Api-Version': '2022-11-28'}
+              def get_json(url):
+                  with opener.open(urllib.request.Request(url, headers=headers), timeout=60) as response:
+                      require(response.status == 200, 'HTTP')
+                      raw = response.read(2 * 1024 * 1024 + 1)
+                      require(len(raw) <= 2 * 1024 * 1024, 'METADATA_LIMIT')
+                      return json.loads(raw)
+              run = get_json(api + '/actions/runs/' + str(RUN_ID))
+              artifact = verify_metadata(run, get_json(api + '/actions/runs/' + str(RUN_ID) + '/artifacts?per_page=100'))
+              request = urllib.request.Request(api + '/actions/artifacts/' + str(ARTIFACT_ID) + '/zip', headers=headers)
+              try:
+                  response = opener.open(request, timeout=60)
+              except urllib.error.HTTPError as response:
+                  require(response.code == 302, 'DOWNLOAD_REDIRECT')
+                  location = response.headers.get('Location', '')
+              else:
+                  response.close()
+                  raise ValueError('WILD4_ORIGINAL_ARCHIVE_DOWNLOAD_REDIRECT')
+              parsed = urllib.parse.urlsplit(location)
+              require(parsed.scheme == 'https' and parsed.hostname and parsed.username is None
+                  and parsed.password is None and parsed.port in (None, 443), 'SIGNED_URL')
+              # The authenticated API redirect is followed in a NEW request with no token.
+              with opener.open(urllib.request.Request(location), timeout=60) as response:
+                  require(response.status == 200, 'SIGNED_HTTP')
+                  raw = response.read(ARTIFACT_SIZE + 1)
+              require(len(raw) == ARTIFACT_SIZE and hashlib.sha256(raw).hexdigest() == ARTIFACT_SHA, 'ZIP_SHA')
+              with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                  entries = archive.infolist()
+                  require(len(entries) == 1 and entries[0].filename == 'future-locks.tgz.gpg'
+                      and not entries[0].is_dir() and entries[0].file_size <= 2 * 1024 * 1024
+                      and archive.testzip() is None, 'ZIP_CONTENTS')
+                  encrypted = archive.read(entries[0])
+              with (temp / 'wild4-original-136.tgz.gpg').open('xb') as output:
+                  output.write(encrypted)
+              receipt = {'repository': REPO, 'repository_id': REPOSITORY_ID, 'run_id': RUN_ID,
+                  'artifact_id': ARTIFACT_ID, 'artifact_name': ARTIFACT_NAME, 'artifact_size': ARTIFACT_SIZE,
+                  'artifact_sha256': ARTIFACT_SHA, 'head_sha': HEAD_SHA,
+                  'encrypted_file_sha256': hashlib.sha256(encrypted).hexdigest()}
+              (temp / 'wild4-original-136-metadata.json').write_text(json.dumps(receipt, sort_keys=True) + '\n')
+              print('WILD4_ORIGINAL_ARCHIVE=VERIFIED RUN=' + str(RUN_ID) + ' ARTIFACT=' + str(ARTIFACT_ID))
+
+          if __name__ == '__main__':
+              download_original(pathlib.Path(os.environ['RUNNER_TEMP']), os.environ['GH_TOKEN'])
+          PYORIGINALARCHIVE
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/wild4-original-136.tgz" "${RUNNER_TEMP}/wild4-original-136.tgz.gpg"
+          exec 3<&-
+          python3 - <<'PYSAVEDLEDGERUNION'
+          import hashlib, json, os, pathlib, re, tarfile
+
+          DAY = '2026-11-01'
+          MISSING_KEY = '20261101-19-02'
+          ORIGINAL_LOCK_SHA = '0aa905427444a0c3a8c018bb5055aea3abc9c463cdf068197bf63c16f064df5b'
+          KEY = re.compile(r'[0-9]{8}-[0-9]{2}-(?:0[1-9]|1[0-2])')
+
+          def require(ok, reason):
+              if not ok:
+                  raise ValueError('WILD4_SAVED_UNION_' + reason)
+
+          def canonical(value):
+              return (json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                 separators=(',', ':'), allow_nan=False) + '\n').encode()
+
+          def sealed(value):
+              value = {k: v for k, v in value.items() if k != 'CONTENT_SHA256'}
+              return {**value, 'CONTENT_SHA256': hashlib.sha256(canonical(value)).hexdigest()}
+
+          def inventory(root):
+              require(root.is_dir() and not root.is_symlink(), 'ROOT')
+              found = {}
+              for path in sorted(root.rglob('*')):
+                  require(not path.is_symlink() and (path.is_dir() or path.is_file()), 'FILE_TYPE')
+                  if path.is_file():
+                      found[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+              return found
+
+          def extract_original(archive_path, target):
+              target.mkdir()
+              with tarfile.open(archive_path, 'r:gz') as archive:
+                  members = archive.getmembers()
+                  require(0 < len(members) <= 20000 and sum(m.size for m in members) <= 128 * 1024 * 1024,
+                          'ARCHIVE_LIMIT')
+                  names = set()
+                  for member in members:
+                      path = pathlib.PurePosixPath(member.name)
+                      require(not path.is_absolute() and '..' not in path.parts and path.parts
+                          and path.parts[0] == 'g11-wild4-future-locks'
+                          and (member.isfile() or member.isdir()) and member.name not in names, 'ARCHIVE_PATH')
+                      names.add(member.name)
+                  archive.extractall(target, filter='data')
+              return target / 'g11-wild4-future-locks'
+
+          def verify_model(root, day):
+              from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+              pin = life.read(root / 'day-model-binding.json')
+              state = life.read(life.state_path(root))
+              require(pin.get('schema') == 'G11_WILD4_DAY_MODEL_BINDING_V1' and pin.get('date') == day
+                  and pin.get('authority') == life.AUTHORITY
+                  and state.get('schema') == 'G11_WILD4_LIFECYCLE_V1'
+                  and state.get('authority') == life.AUTHORITY and state.get('active') == pin.get('model')
+                  and life.model_info(root / 'model-registry/models' / pin['model']['identity']) == pin['model'],
+                  'MODEL_BINDING')
+              return pin, state
+
+          def append_original_lock(base, donor, day, metadata, *, expected_lock_sha=ORIGINAL_LOCK_SHA):
+              from g11.wild_pack.v1.wild4_display_projection_v1 import project
+              require(day == DAY, 'DAY')
+              before, donor_before = inventory(base), inventory(donor)
+              base_pin, state = verify_model(base, day)
+              donor_pin, _ = verify_model(donor, day)
+              require((base / 'day-model-binding.json').read_bytes() == (donor / 'day-model-binding.json').read_bytes()
+                  and base_pin == donor_pin, 'DAY_MODEL_IDENTITY')
+              identity = base_pin['model']['identity']
+              prefix = 'model-registry/models/' + identity + '/'
+              require({k: v for k, v in before.items() if k.startswith(prefix)}
+                  == {k: v for k, v in donor_before.items() if k.startswith(prefix)}, 'MODEL_BYTES')
+              model_sha = base_pin['model']['model_sha256']
+              base_projection = project(base, operational_date=day, model_sha256=model_sha)
+              donor_projection = project(donor, operational_date=day, model_sha256=model_sha)
+              base_keys = {r['race_key'] for r in base_projection['races']}
+              donor_keys = {r['race_key'] for r in donor_projection['races']}
+              require(len(donor_keys) == 136 and MISSING_KEY in donor_keys, 'ORIGINAL_COVERAGE')
+              require(not any(k.startswith('settlements/') for k in donor_before), 'ORIGINAL_ALREADY_SETTLED')
+              for key in sorted(base_keys | donor_keys):
+                  root = base if key in base_keys else donor
+                  lock = json.loads((root / (key + '.json')).read_bytes())
+                  require(lock.get('CANDIDATE_REGISTRY_SHA256') == base_pin['model']['registry_sha256'], 'LOCK_REGISTRY')
+                  if 'EFFECTIVE_MODEL_IDENTITY' in lock:
+                      require(lock.get('EFFECTIVE_MODEL_IDENTITY') == identity
+                          and lock.get('CALIBRATION_SHA256') == base_pin['model'].get('calibration_sha256'), 'LOCK_CALIBRATION')
+              for key in sorted(base_keys & donor_keys):
+                  require((base / (key + '.json')).read_bytes() == (donor / (key + '.json')).read_bytes(),
+                          'OVERLAP_BYTES:' + key)
+              original = (donor / (MISSING_KEY + '.json')).read_bytes()
+              require(json.loads(original)['CONTENT_SHA256'] == expected_lock_sha, 'ORIGINAL_LOCK_SHA')
+              missing = donor_keys - base_keys
+              if not missing:
+                  require(len(base_keys) == 151 and donor_keys <= base_keys, 'NOOP_COVERAGE')
+                  require(inventory(base) == before and inventory(donor) == donor_before, 'NOOP_MUTATION')
+                  print('WILD4_SAVED_LEDGER_UNION=VERIFIED_NOOP LOCKS=151 ORIGINAL=136 GENERATIONS=0')
+                  return {'restored': [], 'locks': 151, 'overlap': 136}
+              require(len(base_keys) == 150 and len(base_keys & donor_keys) == 135
+                  and missing == {MISSING_KEY} and len(base_keys | donor_keys) == 151, 'UNION_COVERAGE')
+              require(not any(k.startswith('settlements/') for k in before)
+                  and state.get('last_completed_night') != day
+                  and (state.get('last_attempt') or {}).get('date') != day
+                  and (state.get('night_coverage_retry') or {}).get('binding', {}).get('date') != day,
+                  'BASE_ALREADY_PROCESSED_NIGHT')
+              base_manifest_raw = (base / 'batch-manifest.json').read_bytes()
+              donor_manifest_raw = (donor / 'batch-manifest.json').read_bytes()
+              manifest = json.loads(base_manifest_raw)
+              derived = sealed({**manifest, 'RACE_KEYS': sorted(base_keys | donor_keys), 'LOCKED_BEFORE_DEADLINE': 151})
+              # Original run counters/odds identity remain unchanged; recovery generates no prediction.
+              proof = base / 'recovery-provenance' / '20261101-19-02'
+              require(not proof.exists(), 'RECEIPT_EXISTS')
+              proof.mkdir(parents=True)
+              for name, raw in (('base-batch-manifest.json', base_manifest_raw),
+                                ('original-batch-manifest.json', donor_manifest_raw)):
+                  with (proof / name).open('xb') as output:
+                      output.write(raw)
+              target = base / (MISSING_KEY + '.json')
+              descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+              with os.fdopen(descriptor, 'wb') as output:
+                  output.write(original); output.flush(); os.fsync(output.fileno())
+              require(target.read_bytes() == original, 'COPY_READBACK')
+              pending = base / '.union-batch-manifest.pending'
+              with pending.open('xb') as output:
+                  output.write(canonical(derived)); output.flush(); os.fsync(output.fileno())
+              require((base / 'batch-manifest.json').read_bytes() == base_manifest_raw, 'MANIFEST_CONCURRENT_CHANGE')
+              os.replace(pending, base / 'batch-manifest.json')
+              projection = project(base, operational_date=day, model_sha256=model_sha)
+              require({r['race_key'] for r in projection['races']} == base_keys | donor_keys, 'PROJECTED_COVERAGE')
+              after = inventory(base)
+              require(all(after.get(k) == v for k, v in before.items() if k != 'batch-manifest.json')
+                  and set(after) - set(before) == {MISSING_KEY + '.json',
+                      'recovery-provenance/20261101-19-02/base-batch-manifest.json',
+                      'recovery-provenance/20261101-19-02/original-batch-manifest.json'}
+                  and inventory(donor) == donor_before, 'EXISTING_FILE_MUTATION')
+              receipt = sealed({'schema': 'G11_WILD4_ORIGINAL_LOCK_UNION_V1', 'date': day,
+                  'original_artifact': metadata, 'restored_race_keys': [MISSING_KEY],
+                  'original_lock_sha256': expected_lock_sha, 'original_lock_file_sha256': hashlib.sha256(original).hexdigest(),
+                  'overlap_count': 135, 'overlap_original_bytes_equal': True, 'locks_before': 150, 'locks_after': 151,
+                  'generation_count': 0, 'settlement_generated_by_union': False,
+                  'model_odds_lifecycle_and_existing_files_unchanged': True,
+                  'base_manifest_file_sha256': hashlib.sha256(base_manifest_raw).hexdigest(),
+                  'original_manifest_file_sha256': hashlib.sha256(donor_manifest_raw).hexdigest(),
+                  'derived_manifest_sha256': derived['CONTENT_SHA256'],
+                  'inventory_before': before, 'inventory_after_before_receipt': after})
+              with (proof / 'receipt.json').open('xb') as output:
+                  output.write(canonical(receipt))
+              require(json.loads((proof / 'receipt.json').read_bytes()) == receipt, 'RECEIPT_READBACK')
+              print('WILD4_SAVED_LEDGER_UNION=VERIFIED LOCKS=151 OVERLAP_BYTES=135 RESTORED=' + MISSING_KEY + ' GENERATIONS=0')
+              return {'restored': [MISSING_KEY], 'locks': 151, 'overlap': 135}
+
+          if __name__ == '__main__':
+              temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+              donor = extract_original(temp / 'wild4-original-136.tgz', temp / 'wild4-original-136')
+              metadata = json.loads((temp / 'wild4-original-136-metadata.json').read_bytes())
+              append_original_lock(temp / 'g11-wild4-future-locks', donor, os.environ['OPERATIONAL_DATE'], metadata)
+          PYSAVEDLEDGERUNION
       - name: Carry previous-day model registry without copying previous predictions
         if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.prior.outputs.id == '' && steps.day.outputs.lifecycle_enabled == 'true'
         env:
@@ -1235,6 +1492,39 @@ jobs:
           print("GORIPAN_RESCUE_SHADOW_PROJECTION="+str(len(projection["races"])))
           PYRESCUEPROJECTION
           fi
+          if [ '${{ steps.ledger-union.outcome }}' = 'success' ]; then
+            python3 - <<'PYUNIONPUBLIC'
+          import json, os, pathlib
+
+          def exact(value):
+              return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+          def verify_published_union(prior, projection):
+              if (prior.get('status') != 'PASS' or prior.get('operational_date_jst') != '2026-11-01'
+                      or prior.get('goripan', {}).get('status') != 'VERIFIED_CANONICAL_PROJECTION'
+                      or projection.get('date') != '2026-11-01'):
+                  raise ValueError('WILD4_UNION_PUBLIC_DAY')
+              rows = projection['races']
+              current = {r['race_key']: r for r in rows}
+              old_rows = [r['wild_pack']['wild4']['goripan'] for r in prior['races']
+                          if isinstance(r.get('wild_pack', {}).get('wild4', {}).get('goripan'), dict)]
+              old = {r['race_key']: r for r in old_rows}
+              if len(current) != len(rows) or len(current) != 151 or len(old) != len(old_rows) or len(old) not in (136, 151) or not old.keys() <= current.keys():
+                  raise ValueError('WILD4_UNION_PUBLIC_COVERAGE')
+              for key, row in old.items():
+                  saved = current[key]
+                  if exact({k: v for k, v in row.items() if k != 'settlement'}) != exact({k: v for k, v in saved.items() if k != 'settlement'}):
+                      raise ValueError('WILD4_UNION_PUBLIC_IMMUTABLE:' + key)
+                  if row.get('settlement') is not None and exact(row['settlement']) != exact(saved.get('settlement')):
+                      raise ValueError('WILD4_UNION_PUBLIC_SETTLEMENT:' + key)
+              print('WILD4_UNION_PUBLIC_READBACK=PASS PRIOR=' + str(len(old)) + ' PROJECTED=151')
+
+          if __name__ == '__main__':
+              temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+              verify_published_union(json.loads((temp / 'goripan-prior-public-feed.json').read_bytes()),
+                                     json.loads((temp / 'goripan-public-projection.json').read_bytes()))
+          PYUNIONPUBLIC
+          fi
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
       - name: Deliver WILD4 public projection and verify exact Site GET readback
         id: public-delivery
@@ -1312,6 +1602,13 @@ jobs:
             --projection "${RUNNER_TEMP}/goripan-public-projection.json" \
             --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json"
 
+      - name: Require successful attempted public projection and delivery
+        if: always() && !cancelled() && (steps.public-source.outcome == 'failure' || steps.public-projection.outcome == 'failure' || steps.public-projection.outputs.ready == 'true')
+        run: |
+          if [ '${{ steps.public-source.outcome }}' = 'failure' ] || [ '${{ steps.public-projection.outcome }}' = 'failure' ] || { [ '${{ steps.public-projection.outputs.ready }}' = 'true' ] && [ '${{ steps.public-delivery.outcome }}' != 'success' ]; }; then
+            echo 'WILD4_ATTEMPTED_PUBLICATION_NOT_VERIFIED' >&2
+            exit 1
+          fi
       - name: Require completion for verified NIGHT handoff
         if: always() && !cancelled() && (inputs.night_checkpoint_key != '' || steps.settlement.outputs.complete == 'true' || (steps.settlement.outputs.held != '' && steps.settlement.outputs.held != '0'))
         run: |
