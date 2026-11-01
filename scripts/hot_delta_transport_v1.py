@@ -303,6 +303,21 @@ def fetch_stored_rescue(origin: str, day: str) -> tuple[dict, dict[str, str], by
     return feed, headers, raw
 
 
+def unversioned_no_body_exclusion(row: dict) -> bool:
+    """Only an explicit nonresearch exclusion with no formal prediction proof.
+
+    Empty/malformed versions or a partial live object are not absence. Keep
+    those rows on the existing fail-closed transport path instead of hiding
+    them. A valid excluded SG prediction also keeps its ordinary CAS version.
+    """
+    return (row.get("formal_status") == "EXCLUDED"
+            and row.get("exclusion_reason") == "BODY_NOT_GENERATED"
+            and row.get("research_eligible") is False
+            and all(row.get(field) is None for field in (
+                "p3_snapshot_sha256", "p3_morning_snapshot_sha256",
+                "p3_snapshot", "p3_status", "predeadline")))
+
+
 def create_delta(incoming: dict, accepted: dict, base_sha: str, research_projection: dict | None = None,
                  *, sequence_offset: int = 1) -> dict:
     if sequence_offset not in (0, 1) or (sequence_offset == 0 and incoming['stage'] != 'PREDEADLINE'):
@@ -338,6 +353,24 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
             if previous != current and delta != {}:
                 fields[output_field] = delta
         if not fields:
+            continue
+        if (incoming["stage"] == "PREDEADLINE"
+                and unversioned_no_body_exclusion(row)
+                and unversioned_no_body_exclusion(prior)
+                and row.get("date_jst") == prior.get("date_jst") == day
+                and isinstance(row.get("deadline_jst"), str)
+                and bool(row["deadline_jst"])
+                and all(row.get(field) == prior.get(field) for field in (
+                    "deadline_jst", "venue", "venue_code", "race"))):
+            # Keep excluded research in the encrypted canonical feed. There
+            # is no formal version for the Site's CAS; never invent one or let
+            # this research-only row reject unrelated saved formal LOCKs.
+            # NIGHT must retain every row and all result/accounting fields.
+            print("G11_HOT_DELTA_HELD_RACE=" + json.dumps({
+                "race_key": row["key"],
+                "reason": "EXCLUDED_BODY_NOT_GENERATED_WITHOUT_FORMAL_VERSION",
+                "changed_fields": sorted(fields),
+            }, sort_keys=True))
             continue
         live = row.get("predeadline")
         if isinstance(live, dict) and isinstance(fields.get("predeadline"), dict):
@@ -653,6 +686,7 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
+
 
 
 

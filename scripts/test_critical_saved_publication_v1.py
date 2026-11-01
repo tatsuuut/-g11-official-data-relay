@@ -1,6 +1,8 @@
 """Failure tests for the saved-only early publication boundary."""
 import copy
+from contextlib import redirect_stdout
 from datetime import datetime
+import io
 import json
 import os
 from pathlib import Path
@@ -142,6 +144,199 @@ class EarlyPublicationTests(unittest.TestCase):
             os.chdir(old)
 
 
+class ExcludedNoBodyTransportTests(unittest.TestCase):
+    """Nov 1 accepted-feed identity/version projection; pending changes are synthetic.
+
+    The public feed at 10:39:37 had no P3 or live version for 福岡1R/2R.
+    The SG exclusion and formal row below both had valid saved versions.
+    Only `wild_pack.changed` is varied here; no prediction is generated.
+    """
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        cwd = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, cwd)
+        Path('.relay-output').mkdir()
+        self.feed_path = Path('canonical-feed.json')
+        self.accepted = {
+            'operational_date_jst': '2026-11-01', 'stage': 'PREDEADLINE',
+            'source': {'run_id': 41261629519},
+            'generated_at_jst': '2026-11-01T10:39:37+09:00',
+            'races': [
+                {'key': '20261101-02-01', 'formal_status': 'FORMAL',
+                 'exclusion_reason': None, 'research_eligible': True,
+                 'p3_snapshot': 'MORNING', 'p3_status': 'PASS',
+                 'p3_snapshot_sha256': 'd2ba4f6af6c1eb3f22d40d82fa8d7e50dd4a36eab553bc14b866dc746dd55047',
+                 'deadline_jst': '2026-11-01T10:45:00+09:00',
+                 'predeadline': {'snapshot_sha256': 'c26c49bb6367d1203b2b2cc58eea8279f9750ff2f9d2c9ba07dfcac455c5c4b2',
+                                 'captured_at_jst': '2026-11-01T10:38:45+09:00'},
+                 'wild_pack': {'changed': None}},
+                {'key': '20261101-13-01', 'formal_status': 'EXCLUDED',
+                 'exclusion_reason': 'SG開催｜研究・通知対象外', 'research_eligible': False,
+                 'p3_snapshot': 'MORNING', 'p3_status': 'PASS',
+                 'p3_snapshot_sha256': 'b5dae98062f6ce3abfbace50fb087f822e287e7b05bcbd2c95c528e36ec07079',
+                 'deadline_jst': '2026-11-01T10:37:00+09:00',
+                 'predeadline': {'snapshot_sha256': '9825f319ea3794c7acfe33e9b589831075de48f00d17abd7d3a8365fee82158c',
+                                 'captured_at_jst': '2026-11-01T10:32:11+09:00'},
+                 'wild_pack': {'changed': False}},
+                *[{'key': key, 'formal_status': 'EXCLUDED',
+                   'exclusion_reason': 'BODY_NOT_GENERATED', 'research_eligible': False,
+                   'deadline_jst': '2026-11-01T' + deadline + '+09:00',
+                   'predeadline': None, 'wild_pack': {'changed': None}}
+                  for key, deadline in (('20261101-22-01', '10:49:00'),
+                                        ('20261101-22-02', '11:16:00'))],
+            ],
+        }
+        for row in self.accepted['races']:
+            row.update(date_jst='2026-11-01', venue_code=row['key'].split('-')[1],
+                       race=int(row['key'].split('-')[2]))
+        self.incoming = copy.deepcopy(self.accepted)
+        self.incoming.update(source={'run_id': 41262073496},
+                             generated_at_jst='2026-11-01T10:46:00+09:00')
+        for row in self.incoming['races']:
+            row['wild_pack']['changed'] = True
+        self.site = copy.deepcopy(self.accepted)
+        self.posts = []
+        self.corrupt_readback = False
+
+    def delta(self, incoming=None, accepted=None):
+        with redirect_stdout(io.StringIO()) as output:
+            result = hot.create_delta(incoming or self.incoming, accepted or self.accepted, 'a'*64)
+        return result, output.getvalue()
+
+    def test_mixed_actual_projection_holds_only_the_two_unversioned_exclusions(self):
+        before = copy.deepcopy((self.incoming, self.accepted))
+        delta, output = self.delta()
+        self.assertEqual([r['RACE_KEY'] for r in delta['RACES']],
+                         ['20261101-02-01', '20261101-13-01'])
+        self.assertEqual([r['EXPECTED_RACE_VERSION'] for r in delta['RACES']],
+                         [r['predeadline']['snapshot_sha256'] for r in self.accepted['races'][:2]])
+        held = [json.loads(line.split('=', 1)[1]) for line in output.splitlines()
+                if line.startswith('G11_HOT_DELTA_HELD_RACE=')]
+        self.assertEqual([r['race_key'] for r in held], ['20261101-22-01', '20261101-22-02'])
+        self.assertTrue(all(r['reason'] == 'EXCLUDED_BODY_NOT_GENERATED_WITHOUT_FORMAL_VERSION'
+                            and r['changed_fields'] == ['wild_pack'] for r in held))
+        self.assertEqual((self.incoming, self.accepted), before)
+
+    def test_guard_requires_explicit_matching_exclusion_and_absence_on_both_sides(self):
+        cases = [('formal_status', 'FORMAL'), ('formal_status', 'UNKNOWN'),
+                 ('formal_status', None), ('exclusion_reason', None),
+                 ('exclusion_reason', 'SG開催｜研究・通知対象外'),
+                 ('research_eligible', True), ('research_eligible', 0),
+                 ('research_eligible', None), ('p3_snapshot_sha256', ''),
+                 ('p3_snapshot_sha256', 'malformed'), ('p3_snapshot_sha256', 'a'*64),
+                 ('p3_morning_snapshot_sha256', 'a'*64), ('p3_snapshot', 'MORNING'),
+                 ('p3_status', 'PASS'), ('predeadline', {}),
+                 ('deadline_jst', None), ('deadline_jst', ''),
+                 ('deadline_jst', '2026-11-01T10:50:00+09:00'),
+                 ('date_jst', None), ('date_jst', '2026-11-02'), ('venue_code', '01')]
+        for side in ('incoming', 'accepted'):
+            for field, value in cases:
+                with self.subTest(side=side, field=field, value=value):
+                    incoming, accepted = copy.deepcopy((self.incoming, self.accepted))
+                    selected = incoming if side == 'incoming' else accepted
+                    selected['races'][2][field] = value
+                    delta, _ = self.delta(incoming, accepted)
+                    self.assertIn('20261101-22-01', [r['RACE_KEY'] for r in delta['RACES']])
+        # A claimed formal live object is still validated, never silently held.
+        self.incoming['races'][2]['predeadline'] = {
+            'snapshot_sha256': None, 'captured_at_jst': '2026-11-01T10:42:00+09:00'}
+        with self.assertRaisesRegex(RuntimeError, 'HOT_POST_DEADLINE_FORECAST'):
+            self.delta()
+
+    def test_unknown_race_still_fails_closed(self):
+        self.incoming['races'][2]['key'] = '20261101-22-03'
+        with self.assertRaisesRegex(RuntimeError, 'HOT_UNKNOWN_RACE'):
+            self.delta()
+
+    def test_night_retains_missing_versions_and_complete_result_rows(self):
+        self.incoming.update(stage='NIGHT', counts={'races': 4, 'results': 4, 'pending': 0})
+        for row in self.incoming['races']:
+            row.update(result_trifecta='1-2-3', payout=100)
+        delta, output = self.delta()
+        self.assertEqual(len(delta['RACES']), 4)
+        self.assertEqual([r['EXPECTED_RACE_VERSION'] for r in delta['RACES'][2:]], [None, None])
+        self.assertTrue(all(r['CHANGED_FIELDS']['result_trifecta'] == '1-2-3'
+                            and r['CHANGED_FIELDS']['payout'] == 100 for r in delta['RACES']))
+        self.assertNotIn('G11_HOT_DELTA_HELD_RACE=', output)
+        self.incoming['counts']['pending'] = 1
+        with self.assertRaisesRegex(RuntimeError, 'HOT_NIGHT_INCOMPLETE_SOURCE'):
+            self.delta()
+
+    def fetch(self, url):
+        value = copy.deepcopy(self.site)
+        source_sha = hot.hash_bytes(hot.compact(self.site))
+        if self.posts and self.corrupt_readback:
+            value['races'][0]['wild_pack']['changed'] = None
+        return value, {'x-g11-source-feed-sha256': source_sha}, hot.compact(value)
+
+    def send(self, args, **kwargs):
+        # Substitute only the remote Site; reject missing/invalid CAS versions.
+        delta = json.loads(Path(args[args.index('--data-binary')+1][1:]).read_bytes())
+        self.posts.append(delta)
+        if any(not isinstance(row['EXPECTED_RACE_VERSION'], str)
+               or len(row['EXPECTED_RACE_VERSION']) != 64 for row in delta['RACES']):
+            status, response = 409, {'status': 'FAIL', 'error': 'HOT_DELTA_RACE'}
+        else:
+            self.site.update(copy.deepcopy(delta['TOP_LEVEL']))
+            rows = {r['key']: r for r in self.site['races']}
+            for change in delta['RACES']:
+                rows[change['RACE_KEY']]['wild_pack'].update(change['CHANGED_FIELDS']['wild_pack'])
+            status, response = 200, {'status': 'PASS',
+                                    'payload_sha256': hot.hash_bytes(hot.compact(self.site))}
+        Path(args[args.index('--output')+1]).write_text(json.dumps(response))
+        return subprocess.CompletedProcess(args, 0, stdout=str(status), stderr='')
+
+    def publish(self):
+        original = hot.compact(self.incoming) + b'\n'
+        self.feed_path.write_bytes(original)
+        before = copy.deepcopy((self.incoming, self.accepted))
+        with patch.object(hot, 'fetch', side_effect=self.fetch), \
+             patch.object(hot.subprocess, 'run', side_effect=self.send), \
+             patch.dict(os.environ, {'G11_SYNC_OIDC': 'fixture-only', 'GITHUB_OUTPUT': 'output'}), \
+             redirect_stdout(io.StringIO()) as output:
+            try:
+                hot.publish(self.feed_path, 'https://example.invalid')
+            finally:
+                self.assertEqual(self.feed_path.read_bytes(), original)
+                self.assertEqual((self.incoming, self.accepted), before)
+        return output.getvalue()
+
+    def test_mixed_publish_verifies_sent_rows_and_retains_held_rows_unchanged(self):
+        output = self.publish()
+        self.assertEqual(len(self.posts), 1)
+        self.assertEqual(self.site['races'][2:], self.accepted['races'][2:])
+        self.assertTrue(all(r['wild_pack']['changed'] for r in self.site['races'][:2]))
+        self.assertIn('G11_HOT_DELTA_READBACK=PASS', output)
+        self.assertEqual(Path('.relay-output/hot-delta-accepted').read_text().strip(),
+                         hot.hash_bytes(hot.compact(self.site)))
+        self.assertEqual(json.loads(Path('.relay-output/hot-delta-readback.json').read_bytes()), self.site)
+
+    def test_all_held_is_no_post_and_does_not_advance_public_timestamps(self):
+        self.incoming['races'][:2] = copy.deepcopy(self.accepted['races'][:2])
+        output = self.publish()
+        self.assertEqual(self.posts, [])
+        self.assertEqual(self.site, self.accepted)
+        self.assertIn('G11_HOT_DELTA_NO_CHANGE=PASS', output)
+        self.assertEqual(Path('.relay-output/hot-delta-accepted').read_text().strip(),
+                         hot.hash_bytes(hot.compact(self.accepted)))
+
+    def test_held_rows_do_not_weaken_formal_readback_or_invalid_version_rejection(self):
+        self.corrupt_readback = True
+        with self.assertRaisesRegex(RuntimeError, 'HOT_DELTA_READBACK_FIELD:20261101-02-01:wild_pack'):
+            self.publish()
+        self.assertFalse(Path('.relay-output/hot-delta-accepted').exists())
+        self.corrupt_readback = False
+        self.site = copy.deepcopy(self.accepted)
+        for feed in (self.incoming, self.accepted, self.site):
+            feed['races'][2]['formal_status'] = 'FORMAL'
+        with self.assertRaisesRegex(RuntimeError, 'HOT_DELTA_REJECTED:HOT_DELTA_RACE'):
+            self.publish()
+        self.assertFalse(Path('.relay-output/hot-delta-accepted').exists())
+
+
 class CaptureBoundaryTests(unittest.TestCase):
     def task(self, due, deadline, key='a'):
         return {'DUE_AT_JST': DAY+'T'+due+'+09:00',
@@ -245,3 +440,4 @@ class PublishedGoripanTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
