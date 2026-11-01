@@ -201,6 +201,82 @@ def verified_utf8_plan(root, plan, implementation):
     return fixed
 
 
+def verified_no_body_night_plan(root, plan, feed, accepted, checkpoint, implementation):
+    """Bind missing P3 versions to the accepted full-feed CAS, transport only.
+
+    Keep the original failed plan and all checkpoint, prediction, result and
+    accounting bytes. A distinct immutable transaction retries only the two
+    sides' strictly admitted no-P3-body exclusion case.
+    """
+    changes = [change for chunk in plan['chunks'] for change in chunk['RACES']]
+    require(all('EXPECTED_RACE_VERSION' in change for change in changes),
+            'NIGHT_NO_BODY_VERSION_FIELD_MISSING')
+    pending = [change for change in changes if change['EXPECTED_RACE_VERSION'] is None]
+    if not pending:
+        return plan
+    manifest = plan['manifest']
+    day = manifest['OPERATIONAL_DATE']
+    require(feed.get('stage') == 'NIGHT'
+            and accepted.get('stage') in ('MORNING', 'PREDEADLINE')
+            and feed.get('operational_date_jst') == accepted.get('operational_date_jst') == day
+            and plan['checkpoint_sha256'] == checkpoint['checkpoint_sha256']
+            and manifest['CHECKPOINT_SHA256'] == checkpoint['checkpoint_sha256']
+            and manifest['CANONICAL_FEED_SHA256'] == checkpoint['feed_sha256']
+            and manifest['DAILY_AUTHORITY_SHA256'] == checkpoint['authority_sha256']
+            and manifest['SOURCE_NIGHT_SHA'] == feed['source']['projection_sha256'],
+            'NIGHT_NO_BODY_PLAN_IDENTITY')
+    unsigned = dict(plan)
+    expected = unsigned.pop('plan_sha256', None)
+    require(expected == implementation.digest(implementation.canonical(unsigned)),
+            'NIGHT_NO_BODY_PRIOR_PLAN_HASH')
+    # This verifies the prior payload hash before any version is replaced.
+    fixed = utf8_night_plan(plan)
+    current = {row['key']: row for row in feed['races']}
+    prior = {row['key']: row for row in accepted['races']}
+    require(set(current) == set(prior)
+            and len(current) == len(feed['races']) == len(accepted['races'])
+            and manifest['EXPECTED_RACES'] == manifest['EXPECTED_RESULTS'] == len(current)
+            and manifest['EXPECTED_PENDING'] == 0
+            and manifest['EXPECTED_RACE_KEY_SET_SHA'] == hot.site_hash(sorted(current)),
+            'NIGHT_NO_BODY_PLAN_COVERAGE')
+    changed = []
+    top, races = {}, []
+    def merge(base, patch):
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(base.get(key), dict):
+                merge(base[key], value)
+            else:
+                base[key] = deepcopy(value)
+    for chunk in fixed['chunks']:
+        merge(top, chunk['TOP_LEVEL'])
+        for change in chunk['RACES']:
+            if change['EXPECTED_RACE_VERSION'] is None:
+                key = change['RACE_KEY']
+                require(key in prior and key in current, 'NIGHT_NO_BODY_UNKNOWN_RACE')
+                version = hot.night_no_body_base_version(prior[key], current[key], day,
+                                                         manifest['BASE_FEED_SHA'])
+                require(version is not None, 'NIGHT_NO_BODY_VERSION_SCOPE:' + key)
+                change['EXPECTED_RACE_VERSION'] = version
+                changed.append(key)
+            races.append(change)
+    require(len(changed) == len(set(changed)) == len(pending), 'NIGHT_NO_BODY_DUPLICATE_RACE')
+    fixed['manifest']['PATCH_SHA256'] = hot.hash_bytes(hot.compact({
+        'stage': 'NIGHT', 'day': day, 'top': top, 'races': races}))
+    fixed = utf8_night_plan(fixed)
+    # Only transport identity/hash fields may differ; canonical authorities,
+    # result coverage, finance and final-accounting fingerprints stay exact.
+    mutable = {'PATCH_SHA256', 'CHUNK_SHA256', 'NIGHT_TRANSACTION_ID', 'MANIFEST_SHA256'}
+    require({k: v for k, v in fixed['manifest'].items() if k not in mutable}
+            == {k: v for k, v in manifest.items() if k not in mutable},
+            'NIGHT_NO_BODY_CANONICAL_BINDING_CHANGED')
+    path = root / 'night-transport-plan-no-body-cas-v1.json'
+    implementation.immutable(path, hot.compact(fixed))
+    require(implementation.json_file(path) == fixed, 'NIGHT_NO_BODY_PLAN_READBACK')
+    print('G11_NIGHT_NO_BODY_BASE_CAS=PASS RACES=' + ','.join(changed)
+          + ' PREDICTION_CHANGED=0 RESULT_CHANGED=0 ACCOUNTING_CHANGED=0 CANONICAL_FILES_CHANGED=0')
+    return fixed
+
+
 def published_lock_night_20261031(feed, accepted, checkpoint):
     """Bind today's result display to the original published LOCK, in memory only.
 
@@ -423,6 +499,8 @@ def send_night(state, day, feed, checkpoint, authority, implementation, origin, 
             plan = published_lock_night_plan(root, plan, wire_feed, accepted, checkpoint,
                                              lock_proof, implementation)
             manifest, chunks = plan['manifest'], plan['chunks']
+        plan = verified_no_body_night_plan(root, plan, wire_feed, accepted, checkpoint, implementation)
+        manifest, chunks = plan['manifest'], plan['chunks']
         hot.post(origin, token, manifest, "/api/g11-night-transaction")
         for chunk in chunks:
             hot.post(origin, token, chunk, "/api/g11-night-transaction")
@@ -930,6 +1008,7 @@ if __name__ == "__main__":
                 raise SystemExit('OFFICIAL_RESULT_PUBLICATION_INCOMPLETE')
             from deme_research_delivery_v1 import optional_publish
             optional_publish(args.state_root, args.feed, args.origin)
+
 
 
 

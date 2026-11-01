@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -318,6 +319,38 @@ def unversioned_no_body_exclusion(row: dict) -> bool:
                 "p3_snapshot", "p3_status", "predeadline")))
 
 
+def night_no_body_base_version(prior: dict, row: dict, day: str,
+                               base_sha: str) -> str | None:
+    """Use the verified stored feed's CAS only for an unchanged no-body identity.
+
+    This is a transport version, never a prediction snapshot or a new LOCK.
+    The receiver must independently verify the stored BASE_FEED_SHA and scope.
+    """
+    from datetime import datetime
+    if (not unversioned_no_body_exclusion(prior)
+            or not unversioned_no_body_exclusion(row)
+            or row.get("date_jst") != day
+            or any(type(row.get(field)) is not type(prior.get(field))
+                   or row.get(field) != prior.get(field) for field in (
+                "key", "date_jst", "venue", "venue_code", "race", "deadline_jst"))
+            or not isinstance(row.get("venue"), str) or not row["venue"].strip()
+            or not isinstance(row.get("venue_code"), str)
+            or re.fullmatch(r"(?:0[1-9]|1[0-9]|2[0-4])", row["venue_code"]) is None
+            or type(row.get("race")) is not int or not 1 <= row["race"] <= 12
+            or row.get("key") != day.replace("-", "") + f'-{row["venue_code"]}-{row["race"]:02d}'
+            or not isinstance(row.get("deadline_jst"), str)
+            or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00", row["deadline_jst"]) is None):
+        return None
+    try:
+        if datetime.fromisoformat(row["deadline_jst"]).date().isoformat() != day:
+            return None
+    except ValueError:
+        return None
+    if not isinstance(base_sha, str) or re.fullmatch(r"[a-f0-9]{64}", base_sha) is None:
+        raise RuntimeError("HOT_NIGHT_BASE_HASH")
+    return base_sha
+
+
 def create_delta(incoming: dict, accepted: dict, base_sha: str, research_projection: dict | None = None,
                  *, sequence_offset: int = 1) -> dict:
     if sequence_offset not in (0, 1) or (sequence_offset == 0 and incoming['stage'] != 'PREDEADLINE'):
@@ -380,6 +413,11 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
             if captured >= deadline or len(str(live.get("snapshot_sha256", ""))) != 64:
                 raise RuntimeError("HOT_POST_DEADLINE_FORECAST")
         version = (prior.get("predeadline") or {}).get("snapshot_sha256") or prior.get("p3_snapshot_sha256")
+        if incoming["stage"] == "NIGHT":
+            if version is None:
+                version = night_no_body_base_version(prior, row, day, base_sha)
+            if not isinstance(version, str) or re.fullmatch(r"[a-f0-9]{64}", version) is None:
+                raise RuntimeError("HOT_NIGHT_RACE_VERSION:" + row["key"])
         changes.append({"RACE_KEY": row["key"], "EXPECTED_RACE_VERSION": version, "CHANGED_FIELDS": fields})
     top = {"source": incoming["source"], "generated_at_jst": incoming["generated_at_jst"]}
     if "daily_runtime" in incoming:

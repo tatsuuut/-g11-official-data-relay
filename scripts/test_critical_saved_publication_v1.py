@@ -192,6 +192,7 @@ class ExcludedNoBodyTransportTests(unittest.TestCase):
         for row in self.accepted['races']:
             row.update(date_jst='2026-11-01', venue_code=row['key'].split('-')[1],
                        race=int(row['key'].split('-')[2]))
+            row['venue'] = {'02': '戸田', '13': '尼崎', '22': '福岡'}[row['venue_code']]
         self.incoming = copy.deepcopy(self.accepted)
         self.incoming.update(source={'run_id': 41262073496},
                              generated_at_jst='2026-11-01T10:46:00+09:00')
@@ -251,17 +252,100 @@ class ExcludedNoBodyTransportTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'HOT_UNKNOWN_RACE'):
             self.delta()
 
-    def test_night_retains_missing_versions_and_complete_result_rows(self):
+    def test_night_uses_stored_base_cas_for_only_the_two_no_body_rows(self):
         self.incoming.update(stage='NIGHT', counts={'races': 4, 'results': 4, 'pending': 0})
         for row in self.incoming['races']:
             row.update(result_trifecta='1-2-3', payout=100)
+        before = copy.deepcopy((self.incoming, self.accepted))
         delta, output = self.delta()
         self.assertEqual(len(delta['RACES']), 4)
-        self.assertEqual([r['EXPECTED_RACE_VERSION'] for r in delta['RACES'][2:]], [None, None])
+        self.assertEqual([r['EXPECTED_RACE_VERSION'] for r in delta['RACES'][:2]],
+                         [r['predeadline']['snapshot_sha256'] for r in self.accepted['races'][:2]])
+        self.assertEqual([r['EXPECTED_RACE_VERSION'] for r in delta['RACES'][2:]], ['a'*64, 'a'*64])
         self.assertTrue(all(r['CHANGED_FIELDS']['result_trifecta'] == '1-2-3'
                             and r['CHANGED_FIELDS']['payout'] == 100 for r in delta['RACES']))
+        self.assertEqual((self.incoming, self.accepted), before)
         self.assertNotIn('G11_HOT_DELTA_HELD_RACE=', output)
         self.incoming['counts']['pending'] = 1
+        with self.assertRaisesRegex(RuntimeError, 'HOT_NIGHT_INCOMPLETE_SOURCE'):
+            self.delta()
+
+    def test_night_base_cas_rejects_unverified_exclusions_and_identity_changes(self):
+        self.incoming.update(stage='NIGHT', counts={'races': 4, 'results': 4, 'pending': 0})
+        cases = [('formal_status', 'FORMAL'), ('exclusion_reason', 'UNKNOWN'),
+                 ('exclusion_reason', 'SG開催｜研究・通知対象外'),
+                 ('research_eligible', True), ('research_eligible', 0),
+                 ('p3_snapshot_sha256', ''), ('p3_snapshot_sha256', 'malformed'),
+                 ('p3_morning_snapshot_sha256', 'b'*64),
+                 ('p3_snapshot', 'MORNING'), ('p3_status', 'PASS'), ('predeadline', {}),
+                 ('date_jst', None), ('date_jst', '2026-11-02'),
+                 ('venue', None), ('venue', ''), ('venue', ' '),
+                 ('venue_code', '00'), ('venue_code', '25'), ('venue_code', '03'),
+                 ('race', 0), ('race', 13), ('race', True), ('race', '1'), ('race', 2),
+                 ('deadline_jst', None), ('deadline_jst', ''),
+                 ('deadline_jst', '2026-11-02T10:49:00+09:00'),
+                 ('deadline_jst', '2026-11-01T24:49:00+09:00'),
+                 ('deadline_jst', '2026-11-01T10:49:00Z'),
+                 ('deadline_jst', '2026-11-01T10:49:00.000+09:00')]
+        for side in ('incoming', 'accepted', 'both'):
+            for field, value in cases:
+                with self.subTest(side=side, field=field, value=value):
+                    incoming, accepted = copy.deepcopy((self.incoming, self.accepted))
+                    if side in ('incoming', 'both'):
+                        incoming['races'][2][field] = value
+                    if side in ('accepted', 'both'):
+                        accepted['races'][2][field] = value
+                    with self.assertRaisesRegex(RuntimeError, 'HOT_NIGHT_RACE_VERSION'):
+                        self.delta(incoming, accepted)
+        # Even a valid replacement identity cannot reuse the prior row's CAS.
+        incoming = copy.deepcopy(self.incoming)
+        incoming['races'][2]['venue'] = '別会場'
+        with self.assertRaisesRegex(RuntimeError, 'HOT_NIGHT_RACE_VERSION'):
+            self.delta(incoming, self.accepted)
+
+    def test_night_base_cas_requires_real_base_digest_and_missing_formal_versions_fail(self):
+        self.incoming.update(stage='NIGHT', counts={'races': 4, 'results': 4, 'pending': 0})
+        for invalid in (None, '', 'a'*63, 'A'*64, 'z'*64):
+            with self.subTest(base=invalid), self.assertRaisesRegex(RuntimeError, 'HOT_NIGHT_BASE_HASH'):
+                with redirect_stdout(io.StringIO()):
+                    hot.create_delta(self.incoming, self.accepted, invalid)
+        for invalid in (None, '', 'invalid', 'a'*63, 'A'*64):
+            with self.subTest(version=invalid):
+                incoming, accepted = copy.deepcopy((self.incoming, self.accepted))
+                for feed in (incoming, accepted):
+                    feed['races'][0]['predeadline'] = None
+                    feed['races'][0]['p3_snapshot_sha256'] = invalid
+                with self.assertRaisesRegex(RuntimeError, 'HOT_NIGHT_RACE_VERSION'):
+                    self.delta(incoming, accepted)
+
+    def test_night_preserves_all_166_rows_and_refuses_partial_coverage(self):
+        # Nov 1 admitted key set; result values are transport-only fixtures.
+        venues = ('02', '03', '04', '06', '07', '09', '13', '14', '17', '18', '19', '21', '22', '24')
+        original = copy.deepcopy(self.accepted['races'])
+        rows = []
+        for venue in venues:
+            for number in range(1, 13):
+                if venue == '17' and number in (6, 12):
+                    continue
+                source = original[number + 1] if venue == '22' and number <= 2 else original[0]
+                row = copy.deepcopy(source)
+                row.update(key=f'20261101-{venue}-{number:02d}', venue_code=venue,
+                           venue='福岡' if venue == '22' else '検証会場', race=number)
+                rows.append(row)
+        self.accepted['races'] = rows
+        self.incoming = copy.deepcopy(self.accepted)
+        self.incoming.update(stage='NIGHT', counts={'races': 166, 'results': 166, 'pending': 0})
+        for row in self.incoming['races']:
+            row.update(result_trifecta='1-2-3', payout=100)
+        before = copy.deepcopy((self.incoming, self.accepted))
+        delta, _ = self.delta()
+        self.assertEqual(166, len(delta['RACES']))
+        self.assertEqual({r['key'] for r in rows}, {r['RACE_KEY'] for r in delta['RACES']})
+        self.assertEqual(['20261101-22-01', '20261101-22-02'],
+                         [r['RACE_KEY'] for r in delta['RACES'] if r['EXPECTED_RACE_VERSION'] == 'a'*64])
+        self.assertEqual((self.incoming, self.accepted), before)
+        self.incoming['races'].pop()
+        self.incoming['counts'].update(races=165, results=165)
         with self.assertRaisesRegex(RuntimeError, 'HOT_NIGHT_INCOMPLETE_SOURCE'):
             self.delta()
 
