@@ -87,18 +87,22 @@ class ScheduledPhaseRoutingTests(unittest.TestCase):
                 with self.subTest(clock=clock, cron=cron):
                     self.assert_route(f"2026-11-01T{clock}+09:00", "predeadline", cron=cron)
 
-    def test_delayed_cron_before_morning_does_not_restart_morning(self):
+    def test_early_hours_preserve_existing_cron_policy_and_date_rollover(self):
         for clock, day in (("00:00:00", "2026-10-31"), ("01:59:59", "2026-10-31"),
                            ("02:00:00", "2026-11-01"), ("02:14:59", "2026-11-01")):
             for cron in MORNING_CRONS + DAY_CRONS:
                 with self.subTest(clock=clock, cron=cron):
-                    self.assert_route(f"2026-11-01T{clock}+09:00", "auto", day, cron=cron)
+                    phase = "morning" if cron in MORNING_CRONS else "predeadline"
+                    self.assert_route(f"2026-11-01T{clock}+09:00", phase, day, cron=cron)
 
-    def test_late_cron_uses_existing_automatic_night_boundary(self):
+    def test_late_hours_preserve_policy_without_imposing_a_fixed_night_start(self):
+        # Saved race deadlines can extend past 22:00; this daytime hotfix must
+        # not change the verified last-race NIGHT dispatcher or LIVE heartbeat.
         for clock in ("22:00:00", "23:59:59"):
             for cron in MORNING_CRONS + DAY_CRONS:
                 with self.subTest(clock=clock, cron=cron):
-                    self.assert_route(f"2026-11-01T{clock}+09:00", "auto", cron=cron)
+                    phase = "morning" if cron in MORNING_CRONS else "predeadline"
+                    self.assert_route(f"2026-11-01T{clock}+09:00", phase, cron=cron)
 
     def test_yesterdays_daytime_cron_at_next_morning_targets_current_day(self):
         for cron in DAY_CRONS:

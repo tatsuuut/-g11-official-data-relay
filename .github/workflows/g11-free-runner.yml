@@ -100,12 +100,11 @@ jobs:
             fi
           elif [ "${EVENT_NAME}" = "schedule" ]; then
             hhmm="$(date +%H%M)"
-            if (( 10#${hhmm} >= 215 && 10#${hhmm} < 800 )); then phase=morning
-            elif (( 10#${hhmm} < 800 || 10#${hhmm} >= 2200 )); then phase=auto
-            else
+            if (( 10#${hhmm} >= 215 && 10#${hhmm} < 800 )); then phase=morning; else
             case "${SCHEDULE_EXPRESSION}" in
               "15-55/5 17 * * *"|"*/5 18-21 * * *"|"0-5/5 22 * * *")
-                phase="predeadline"
+                phase="morning"
+                if (( 10#${hhmm} >= 800 && 10#${hhmm} < 2200 )); then phase=predeadline; fi
                 ;;
               "*/5 23 * * *"|"*/5 0-11 * * *"|"0-10/5 12 * * *")
                 phase="predeadline"
@@ -2177,6 +2176,5 @@ jobs:
 
 
 # Verified paths
-
 
 
