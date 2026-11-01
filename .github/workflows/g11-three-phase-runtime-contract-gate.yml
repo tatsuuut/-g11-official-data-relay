@@ -189,7 +189,7 @@ jobs:
       - name: Checkout reviewed retained LOCK guard
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 391dcb333928bd4afeb7b0642889c56f500761f4
+          ref: e765767bf9456edc2b3d4a86765d62de7b231bcd
           path: .g11-retained-guard
           persist-credentials: false
 
@@ -197,6 +197,7 @@ jobs:
         run: |
           "$(go env GOPATH)/bin/actionlint" "$WILD4_WORKFLOW_PATH"
           python3 -m unittest discover -s scripts -p test_wild4_retained_lock_v1.py -v
+          python3 -m unittest discover -s scripts -p test_wild4_public_feed_budget_v1.py -v
         env:
           WILD4_WORKFLOW_PATH: .g11-retained-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
 
