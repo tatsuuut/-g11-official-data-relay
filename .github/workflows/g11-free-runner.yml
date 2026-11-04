@@ -452,6 +452,8 @@ jobs:
           payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
             '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
           curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-max-time 40 \
+            --connect-timeout 8 --max-time 20 \
             -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H 'Accept: application/vnd.github+json' \
@@ -2062,6 +2064,8 @@ jobs:
             fi
           done
           curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-max-time 40 \
+            --connect-timeout 8 --max-time 20 \
             -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H 'Accept: application/vnd.github+json' \
