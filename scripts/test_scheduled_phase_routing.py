@@ -132,6 +132,23 @@ class ScheduledPhaseRoutingTests(unittest.TestCase):
                 self.resolve("2026-11-01T09:45:00+09:00", event="workflow_dispatch", cron="",
                     phase=phase, day=day, succeeds=False)
 
+    def test_predeadline_dispatches_retry_transient_github_500(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        dispatch = (
+            "curl --fail-with-body --silent --show-error \\"
+            "\n            --retry 3 --retry-delay 2 --retry-max-time 40 \\"
+            "\n            --connect-timeout 8 --max-time 20 \\"
+            "\n            -X POST \\"
+        )
+        for step_name in (
+            "Keep the predeadline relay alive between delayed cron starts",
+            "Bootstrap PREDEADLINE after a verified public MORNING",
+        ):
+            with self.subTest(step=step_name):
+                step = workflow.split(f"      - name: {step_name}\n", 1)[1]
+                step = step.split("\n      - name:", 1)[0]
+                self.assertIn(dispatch, step)
+
     def test_existing_explicit_push_recovery_routes_are_preserved(self):
         for commit, phase in (("[morning-current]", "morning"),
                               ("[night-current]", "night"),
