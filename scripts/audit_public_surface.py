@@ -19,6 +19,7 @@ ALLOWED_FILES = {
     "scripts/test_wild4_retained_lock_v1.py",
     "scripts/test_wild4_public_feed_budget_v1.py",
     "scripts/test_wild4_saved_ledger_union_v1.py",
+    "scripts/test_wild4_night_recovery_date_v1.py",
     "scripts/test_deme_research_delivery_nikoshi.py",
     "scripts/predeadline_content_retry_v1.py",
     "scripts/test_predeadline_content_retry_v1.py",
