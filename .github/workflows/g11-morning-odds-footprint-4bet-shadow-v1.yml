@@ -21,6 +21,7 @@ on:
           - wild4
           - wild4-settle
           - wild4-recover-20261013
+          - wild4-republish-20261103
       operational_date:
         description: YYYY-MM-DD; defaults to current JST date
         required: false
@@ -52,7 +53,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-recover-20261013')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
+  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-recover-20261013' || inputs.mode == 'wild4-republish-20261103')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
   cancel-in-progress: false
 
 jobs:
@@ -63,7 +64,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.event_name != 'workflow_run' &&
       github.event_name != 'push' &&
-      !(github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle')) &&
+      !(github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-republish-20261103')) &&
       !(github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))
     runs-on: ubuntu-24.04
     timeout-minutes: 9
@@ -428,3 +429,57 @@ jobs:
 
 
 
+
+  republish-saved-night:
+    name: Republish exact Nov 3 saved WILD4 settlements
+    if: >-
+      github.repository_id == '1367703708' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'wild4-republish-20261103'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      RECOVERY_MODE: ${{ inputs.mode }}
+      RECOVERY_DATE: ${{ inputs.operational_date }}
+      PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
+      NIGHT_CHECKPOINT_KEY: ${{ inputs.night_checkpoint_key }}
+    steps:
+      - name: Checkout reviewed republication adapter
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Checkout original settlement verifier
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 4cccd89537ea98fc41ddbe55ff204ac7c0f6c02e
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .saved-settlement-verifier
+          persist-credentials: false
+      - name: Verify original artifact and all 143 saved settlements without source writes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          python3 scripts/wild4_republish_20261103.py prepare \
+            --work "${RUNNER_TEMP}/saved-night" \
+            --settlement .saved-settlement-verifier/g11/wild_pack/v1/wild4_official_settlement_v1.py
+      - name: Retain byte-identical encrypted original ledger
+        uses: actions/upload-artifact@v4
+        with:
+          name: g11-wild4-20261103-future-oos-locks-encrypted
+          path: ${{ runner.temp }}/saved-night/future-locks.tgz.gpg
+          retention-days: 30
+          if-no-files-found: error
+      - name: Read back the persisted ciphertext
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-wild4-20261103-future-oos-locks-encrypted
+          path: .saved-night-readback
+      - name: Publish existing settlement references and verify canonical NIGHT is unchanged
+        run: |
+          python3 scripts/wild4_republish_20261103.py publish \
+            --work "${RUNNER_TEMP}/saved-night" \
+            --saved-archive .saved-night-readback/future-locks.tgz.gpg

@@ -141,6 +141,11 @@ jobs:
           g11.wild_pack.v1.test_wild4_rescue_settlement_v1
           g11.wild_pack.v1.test_wild4_official_settlement_v1
 
+      - name: Verify exact saved Nov 3 settlement republication
+        env:
+          WILD4_SETTLEMENT_SOURCE: .g11-rescue-settlement/g11/wild_pack/v1/wild4_official_settlement_v1.py
+        run: python3 -m unittest discover -s scripts -p test_wild4_republish_20261103.py -v
+
       - name: Checkout pinned isolated WILD4 guard
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
