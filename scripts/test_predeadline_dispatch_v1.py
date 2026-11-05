@@ -107,7 +107,9 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(c.post_count,0)
 
     def test_incomplete_and_malformed_lists_fail_closed(self):
-        for value in ({}, {'total_count':1,'workflow_runs':[]}, {'total_count':0,'workflow_runs':None}):
+        for value in ({}, {'total_count':1,'workflow_runs':[]}, {'total_count':0,'workflow_runs':None},
+                      {'total_count':2,'workflow_runs':[row(99,99)]},
+                      {'total_count':0,'workflow_runs':[row(99,99)]}):
             c=FakeClient(); c.invalid=value
             with self.assertRaises(DispatchError): self.run_dispatch(c)
             self.assertEqual(c.post_count,0)

@@ -104,7 +104,8 @@ def active_successor(client, day, current_id, current_number, mode, sleep):
             rows, total = data.get('workflow_runs'), data.get('total_count')
             if not isinstance(rows, list) or type(total) is not int or total < 0:
                 raise DispatchError('RUN_LIST_SHAPE')
-            if len(rows) > 100 or (not rows and total > 100 * (page - 1)):
+            expected = min(100, max(0, total - 100 * (page - 1)))
+            if len(rows) != expected:
                 raise DispatchError('RUN_LIST_INCOMPLETE')
             for row in rows:
                 if not isinstance(row, dict):
