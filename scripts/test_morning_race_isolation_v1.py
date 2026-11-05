@@ -44,9 +44,10 @@ def prior_k(day, damage=None):
 
 
 class SavedSourceClient:
-    def __init__(self,store,*,damage=None,bad_b=False,missing_racers=()):
+    def __init__(self,store,*,damage=None,bad_b=False,missing_racers=(),six_prior_days=False):
         self.store=store;self.damage=damage;self.bad_b=bad_b;self.reads=[]
         self.missing_racers=set(missing_racers)
+        self.six_prior_days=six_prior_days
         self.clock=lambda:fixtures.at(60)
     def fetch_once(self,source,url):
         old=self.store.response_receipt(source)
@@ -57,7 +58,10 @@ class SavedSourceClient:
             if self.bad_b:
                 line=next(line for line in b.splitlines() if line.startswith('6 4016'))
                 b=b.replace(line,'DAMAGED',1)
-            raw=(b+'\n'+second_venue(schedule_fixture())).encode('cp932')
+            combined=b+'\n'+second_venue(schedule_fixture())
+            if self.six_prior_days:
+                combined=combined.replace('第 4日','第 7日')
+            raw=combined.encode('cp932')
         elif source.startswith('racer-period-'):
             raw=b'\r\n'.join(fixtures.racer_record(base+race*10+boat)
                 for base in (4000,5000) for race in range(1,13) for boat in range(1,7)
@@ -174,13 +178,31 @@ class MorningIsolationTests(unittest.TestCase):
                 assert entered and name=='g11.relay.delayed_morning_recovery_v1'
                 assert sys.argv==[name,'--date','2026-11-06']
                 assert run_name=='__main__'
-            with patch.object(entry,'official_input_compatibility',scope), patch('runpy.run_module',side_effect=invoke) as run:
+            with patch.object(entry,'official_input_compatibility',scope), patch('runpy.run_module',side_effect=invoke) as run, patch('repair_saved_morning_receipts_v1.run_if_reviewed',return_value=False):
                 entry.run_relay()
                 assert run.call_count==1
             assert sys.argv==argv and not entered
         ''')
         result=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True)
         self.assertEqual(0,result.returncode,result.stderr)
+
+    def test_twenty_three_receipts_reach_rescue_and_saved_prediction_projection(self):
+        from g11.relay import rescue_v1
+        missing={4000+race*10+1 for race in range(1,13)} | {5000+race*10+1 for race in range(1,4)}
+        with official_input_compatibility():
+            store,runner,client=self.run_morning(missing_racers=missing,six_prior_days=True)
+            verified=store.load_verified_snapshot('morning','official-day-input')
+            self.assertEqual(23,len(verified['SNAPSHOT']['SOURCE_RECEIPTS']))
+            future,deadlines=rescue_v1._future_keys(verified,fixtures.at(0))
+            self.assertEqual(24,len(future));self.assertEqual(24,len(deadlines))
+            prediction=runner.run_morning_predictions()
+            self.assertEqual([],prediction['FAILED'])
+            self.assertEqual(24,len(prediction['COMPLETED']))
+            runner.run_morning_workbook_projection(fixtures.workbook_profiles())
+            projection=store.load_verified_snapshot('morning','workbook-projection')['SNAPSHOT']['PAYLOAD']
+            self.assertEqual(24,projection['COUNTS']['FORMAL'])
+            self.assertEqual(verified,store.load_verified_snapshot('morning','official-day-input'))
+            self.assertEqual(23,len(client.reads))
 
     def test_unknown_racer_identity_holds_only_dependent_venue(self):
         with official_input_compatibility():

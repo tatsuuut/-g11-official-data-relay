@@ -64,8 +64,14 @@ def morning_metadata_bridge(gate):
         raise ValueError('MORNING_METADATA_BRIDGE_CONTRACT_CHANGED')
     source = source.replace(old, 'and _valid_quarantine(payload)\n'
         '        and (set(payload) - {"QUARANTINED_RACES", "RESULT_QUARANTINE"})\n', 1)
+    if source.count('maximum_receipts=20,') != 1:
+        raise ValueError('MORNING_RECEIPT_LIMIT_CONTRACT_CHANGED')
+    source = source.replace('maximum_receipts=20,',
+        'maximum_receipts=_receipt_limit(verified_snapshot),', 1)
     namespace = dict(original.__globals__)
     namespace['_valid_quarantine'] = valid_quarantine
+    from morning_source_receipt_limit_v1 import receipt_limit
+    namespace['_receipt_limit'] = receipt_limit
     exec(compile(source, original.__code__.co_filename, 'exec'), namespace)
     return namespace[original.__name__]
 
@@ -79,19 +85,35 @@ def official_input_compatibility():
     parser=official.parse_result_text
     gate=official.FORMAL_GATE
     bridge=gate.build_canonical_official_morning_input
+    invocation=official.FORMAL_ADAPTER
+    verify_permit=invocation.verify_formal_p3_invocation
     morning=official.CanonicalRunner.run_morning
     night_binding=official._night_sg_race_keys_from_saved_b
     def adapted(text,target_date,*,require_full_races=False):
         return parse_night_results(text,target_date,official,parser,require_full_races=require_full_races)
     try:
         official.parse_result_text=adapted
-        gate.build_canonical_official_morning_input=morning_metadata_bridge(gate)
+        compiled_bridge=morning_metadata_bridge(gate)
+        admitted={}
+        def admitted_bridge(verified):
+            result=compiled_bridge(verified)
+            admitted[result['G11_SNAPSHOT_SHA256']]=tuple(result['G11_SOURCE_SHA256'])
+            return result
+        gate.build_canonical_official_morning_input=admitted_bridge
+        from morning_race_isolation_v1 import replace_pinned
+        from morning_source_receipt_limit_v1 import admitted_digest_limit
+        invocation.verify_formal_p3_invocation=replace_pinned(verify_permit,
+            'db65b3a9f8885f95f4b8548717d5dee37e37aa67389606510f3487c6433f593e',[
+            ('2 <= len(source_hashes) <= 20','2 <= len(source_hashes) <= _admitted_limit(payload, 0)'),
+            ('4 <= len(source_hashes) <= 22','4 <= len(source_hashes) <= _admitted_limit(payload, 2)'),
+            ],{'_admitted_limit':lambda payload,extra:admitted_digest_limit(payload,admitted,extra)})
         official.CanonicalRunner.run_morning=adapted_period_morning(official,adapted_morning(official,parser))
         official._night_sg_race_keys_from_saved_b=adapted_night_binding(official,parser)
         yield
     finally:
         official.parse_result_text=parser
         gate.build_canonical_official_morning_input=bridge
+        invocation.verify_formal_p3_invocation=verify_permit
         official.CanonicalRunner.run_morning=morning
         official._night_sg_race_keys_from_saved_b=night_binding
 
@@ -120,6 +142,10 @@ def run_relay():
         print('G11_OFFICIAL_L_ROW_ADAPTER_V1:ACTIVE', file=sys.stderr)
         print('G11_MORNING_RACE_ISOLATION_V1:ACTIVE', file=sys.stderr)
         with official_input_compatibility():
+            if original_argv[1] == '--delayed-recovery':
+                from repair_saved_morning_receipts_v1 import run_if_reviewed
+                if run_if_reviewed(original_argv[2:]):
+                    return
             runpy.run_module(target, run_name='__main__')
     finally:
         sys.argv = original_argv

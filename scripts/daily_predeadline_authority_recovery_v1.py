@@ -419,8 +419,10 @@ def main():
         state = Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve()
         if (state / "rescue/feed.json").is_file():
             sys.path.insert(0, str(Path.cwd()))
-            run(state, day, Path(sys.argv[sys.argv.index("--feed-output") + 1]),
-                sys.argv[sys.argv.index("--public-run-id") + 1])
+            from rescue_night_result_parser_v1 import official_input_compatibility
+            with official_input_compatibility():
+                run(state, day, Path(sys.argv[sys.argv.index("--feed-output") + 1]),
+                    sys.argv[sys.argv.index("--public-run-id") + 1])
             return 0
     if mode == "predeadline" and _run_same_day_rescue_predeadline(day):
         return 0
