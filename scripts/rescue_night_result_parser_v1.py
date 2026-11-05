@@ -64,8 +64,14 @@ def morning_metadata_bridge(gate):
         raise ValueError('MORNING_METADATA_BRIDGE_CONTRACT_CHANGED')
     source = source.replace(old, 'and _valid_quarantine(payload)\n'
         '        and (set(payload) - {"QUARANTINED_RACES", "RESULT_QUARANTINE"})\n', 1)
+    if source.count('maximum_receipts=20,') != 1:
+        raise ValueError('MORNING_RECEIPT_LIMIT_CONTRACT_CHANGED')
+    source = source.replace('maximum_receipts=20,',
+        'maximum_receipts=_receipt_limit(verified_snapshot),', 1)
     namespace = dict(original.__globals__)
     namespace['_valid_quarantine'] = valid_quarantine
+    from morning_source_receipt_limit_v1 import receipt_limit
+    namespace['_receipt_limit'] = receipt_limit
     exec(compile(source, original.__code__.co_filename, 'exec'), namespace)
     return namespace[original.__name__]
 
@@ -120,6 +126,10 @@ def run_relay():
         print('G11_OFFICIAL_L_ROW_ADAPTER_V1:ACTIVE', file=sys.stderr)
         print('G11_MORNING_RACE_ISOLATION_V1:ACTIVE', file=sys.stderr)
         with official_input_compatibility():
+            if original_argv[1] == '--delayed-recovery':
+                from repair_saved_morning_receipts_v1 import run_if_reviewed
+                if run_if_reviewed(original_argv[2:]):
+                    return
             runpy.run_module(target, run_name='__main__')
     finally:
         sys.argv = original_argv

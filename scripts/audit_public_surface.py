@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/morning_source_receipt_limit_v1.py",
+    "scripts/repair_saved_morning_receipts_v1.py",
+    "scripts/test_morning_source_receipt_limit_v1.py",
     "scripts/encrypt_runtime_state_v1.py",
     "scripts/test_predeadline_latency_v1.py",
     "docs/predeadline-latency-20261106.md",

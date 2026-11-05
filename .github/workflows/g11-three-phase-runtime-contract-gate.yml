@@ -89,7 +89,9 @@ jobs:
       - name: Verify one-race input isolation through saved morning admission
         env:
           PYTHONPATH: .g11-private:scripts
-        run: python3 -m unittest discover -s scripts -p test_morning_race_isolation_v1.py -v
+        run: |
+          python3 -m unittest discover -s scripts -p test_morning_source_receipt_limit_v1.py -v
+          python3 -m unittest discover -s scripts -p test_morning_race_isolation_v1.py -v
 
       - name: Verify official application period without changing retained authority
         env:
