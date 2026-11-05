@@ -213,6 +213,12 @@ def adapted_morning(official, parser):
         ('        _require(\n            1 <= len(races)',
          '        races, quarantined_races, prior_dates, result_quarantine = _isolation_prepare(self, target_date, races, quarantined_races)\n        _require(\n            1 <= len(races)'),
         ('len(quarantined_races) <= MAX_RACELIST_RECOVERY_RACES','len(quarantined_races) <= len(VENUES) * 12'),
+        # Every recovered row must still name its own fetched official race
+        # page. The fixed 12-race guard stranded the whole day at 15 on Nov 6.
+        # Bound recovery by the verified B scope; the original HTTP ledger,
+        # 588-request ceiling, host pacing and retries remain authoritative.
+        ('1 <= len(affected_races) <= MAX_RACELIST_RECOVERY_RACES',
+         '1 <= len(affected_races) <= len(races) <= len(VENUES) * 12'),
         ('        earliest_start = min(date.fromisoformat(race.meet_start_date) for race in races)\n        prior_dates = [earliest_start + timedelta(days=offset) for offset in range((target_date - earliest_start).days)]\n',''),
         ('prior_results.extend(parse_result_text(decode_cp932(member), prior_date))','prior_results.extend(_isolation_parse(decode_cp932(member), prior_date))'),
         ('statuses = parse_racelist_racer_status_html(', 'statuses = _status_parser_for(target_date)('),

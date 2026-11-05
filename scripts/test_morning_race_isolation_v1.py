@@ -44,8 +44,9 @@ def prior_k(day, damage=None):
 
 
 class SavedSourceClient:
-    def __init__(self,store,*,damage=None,bad_b=False):
+    def __init__(self,store,*,damage=None,bad_b=False,missing_racers=()):
         self.store=store;self.damage=damage;self.bad_b=bad_b;self.reads=[]
+        self.missing_racers=set(missing_racers)
         self.clock=lambda:fixtures.at(60)
     def fetch_once(self,source,url):
         old=self.store.response_receipt(source)
@@ -59,7 +60,14 @@ class SavedSourceClient:
             raw=(b+'\n'+second_venue(schedule_fixture())).encode('cp932')
         elif source.startswith('racer-period-'):
             raw=b'\r\n'.join(fixtures.racer_record(base+race*10+boat)
-                for base in (4000,5000) for race in range(1,13) for boat in range(1,7))
+                for base in (4000,5000) for race in range(1,13) for boat in range(1,7)
+                if base+race*10+boat not in self.missing_racers)
+        elif source.startswith('racelist-recovery-'):
+            venue,race=source.rsplit('-',2)[-2:]
+            base=4000 if venue=='19' else 5000
+            raw=fixtures.racelist_status_html()
+            for boat in range(1,7):
+                raw=raw.replace(str(4000+boat).encode(),str(base+int(race)*10+boat).encode())
         else:
             compact=source[-8:];day=date(int(compact[:4]),int(compact[4:6]),int(compact[6:]))
             raw=prior_k(day,self.damage if day==DAY-timedelta(days=1) else None).encode('cp932')
@@ -114,6 +122,65 @@ class MorningIsolationTests(unittest.TestCase):
             _,eligible,_=runner._formal_prediction_scope(verified,failure_prefix='TEST')
             self.assertEqual(len(eligible),23)
             official._night_sg_race_keys_from_saved_b(store,DAY,set(eligible),fixtures.IdentityArchiveExtractor())
+
+    def test_fifteen_recovery_races_keep_own_receipts_and_complete_saved_scope(self):
+        missing={4000+race*10+1 for race in range(1,13)} | {5000+race*10+1 for race in range(1,4)}
+        with official_input_compatibility():
+            store,runner,client=self.run_morning(missing_racers=missing)
+            verified=store.load_verified_snapshot('morning','official-day-input')
+            payload=verified['SNAPSHOT']['PAYLOAD']
+            recovered=[s for s in client.reads if s.startswith('racelist-recovery-')]
+            self.assertEqual(15,len(recovered)); self.assertEqual(15,len(set(recovered)))
+            self.assertEqual(24,payload['SCOPE']['EXPECTED_RACE_COUNT'])
+            self.assertEqual(24*6,len(payload['RAW38_ROWS']))
+            index={name:i for i,name in enumerate(payload['RAW38_FIELDS'])}
+            for row in payload['RAW38_ROWS']:
+                if row[index['登録番号']] not in missing: continue
+                key=row[index['標準レースキー']]
+                receipt=store.response_receipt('racelist-recovery-'+key.lower())
+                self.assertIn(receipt,verified['SNAPSHOT']['SOURCE_RECEIPTS'])
+                self.assertEqual(receipt['URL'],row[index['公式URL']])
+                self.assertEqual(official.racelist_url(DAY,key[9:11],int(key[-2:])),receipt['URL'])
+            _,eligible,_=runner._formal_prediction_scope(verified,failure_prefix='TEST')
+            self.assertEqual(24,len(eligible))
+            self.assertEqual(official.daily_request_cap(24),store.ledger.effective_scope()['DYNAMIC_REQUEST_CAP'])
+            self.assertEqual(588,official.HARD_MAX_REQUESTS)
+            official._night_sg_race_keys_from_saved_b(store,DAY,set(eligible),fixtures.IdentityArchiveExtractor())
+            before=store.load_verified_snapshot('morning','official-day-input')
+            # Saved responses are reused on retry; no second network request.
+            runner.run_morning(DAY,'https://www.boatrace.jp/owpc/pc/extra/data/fan2604.lzh',fixtures.at(0).isoformat())
+            self.assertEqual(15,len([s for s in client.reads if s.startswith('racelist-recovery-')]))
+            self.assertEqual(before,store.load_verified_snapshot('morning','official-day-input'))
+
+    def test_delayed_recovery_cli_uses_same_adapters_and_restores_arguments(self):
+        import contextlib
+        import subprocess
+        import sys
+        import textwrap
+        # Fresh process isolates the retained rescue module's import adapters.
+        code=textwrap.dedent('''
+            import contextlib,sys
+            from unittest.mock import patch
+            import rescue_night_result_parser_v1 as entry
+            argv=['entry','--delayed-recovery','--date','2026-11-06']
+            sys.argv=argv[:]
+            entered=[]
+            @contextlib.contextmanager
+            def scope():
+                entered.append(True)
+                yield
+                entered.pop()
+            def invoke(name,run_name):
+                assert entered and name=='g11.relay.delayed_morning_recovery_v1'
+                assert sys.argv==[name,'--date','2026-11-06']
+                assert run_name=='__main__'
+            with patch.object(entry,'official_input_compatibility',scope), patch('runpy.run_module',side_effect=invoke) as run:
+                entry.run_relay()
+                assert run.call_count==1
+            assert sys.argv==argv and not entered
+        ''')
+        result=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True)
+        self.assertEqual(0,result.returncode,result.stderr)
 
     def test_unknown_racer_identity_holds_only_dependent_venue(self):
         with official_input_compatibility():
