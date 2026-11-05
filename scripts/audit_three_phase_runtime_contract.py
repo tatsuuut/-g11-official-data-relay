@@ -145,9 +145,18 @@ def audit_public() -> dict[str, object]:
     require("-ge 2110" not in continuation, "PREDEADLINE_FIXED_2110_CUTOFF")
     require_text(
         continuation,
-        'actions/workflows/g11-free-runner.yml/dispatches',
+        'python3 scripts/predeadline_dispatch_v1.py --day "${OPERATIONAL_DATE}" --mode continuation',
         "PREDEADLINE_CHAIN_DISPATCH_TARGET",
     )
+    dispatch_source = (ROOT / "scripts/predeadline_dispatch_v1.py").read_text(encoding="utf-8")
+    require_text(dispatch_source, "WORKFLOW = 'g11-free-runner.yml'",
+                 "PREDEADLINE_DISPATCH_WORKFLOW")
+    require_text(dispatch_source, "REPOSITORY = 'tatsuuut/-g11-official-data-relay'",
+                 "PREDEADLINE_DISPATCH_REPOSITORY")
+    require_text(dispatch_source, "client.request('POST', '/actions/workflows/' + WORKFLOW + '/dispatches', body)",
+                 "PREDEADLINE_DISPATCH_ENDPOINT")
+    require_text(dispatch_source, "'ref': 'main', 'inputs': {'phase': 'predeadline', 'operational_date': day}",
+                 "PREDEADLINE_DISPATCH_EXPLICIT_DAY")
     require(
         "morning-predictions.manifest.json" not in continuation,
         "PREDEADLINE_CHAIN_TRUE_AI_GATE",

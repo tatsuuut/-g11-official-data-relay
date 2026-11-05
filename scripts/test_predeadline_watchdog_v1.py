@@ -344,11 +344,12 @@ class DaytimeMissingMorningTests(unittest.TestCase):
 
 class PredeadlineChainTests(unittest.TestCase):
     """Run the actual workflow shell against stale GitHub responses; no network."""
-    def exercise(self, runs, jobs=None, heartbeat='CONTINUE', post_status=0):
+    def exercise(self, runs, jobs=None, heartbeat='CONTINUE', post_status=0, after_runs=None):
         import json
         import os
         from pathlib import Path
         import subprocess
+        import sys
         import tempfile
         import textwrap
         source = (Path(__file__).resolve().parents[1] /
@@ -359,7 +360,13 @@ class PredeadlineChainTests(unittest.TestCase):
         # Keep jq and the real shell control flow. Replace only external I/O
         # and the deliberate delay; POST is recorded rather than sent.
         stubs = '''
-python3() { printf '%s\\n' "$TEST_HEARTBEAT"; }
+python3() {
+  case "$1" in
+    scripts/dynamic_last_race_heartbeat.py) printf '%s\\n' "$TEST_HEARTBEAT" ;;
+    scripts/predeadline_dispatch_v1.py) command "$TEST_PYTHON" "$TEST_DISPATCH_DRIVER" "$@" ;;
+    *) return 99 ;;
+  esac
+}
 sleep() { :; }
 curl() {
   case "$*" in
@@ -371,10 +378,58 @@ curl() {
 '''
         with tempfile.TemporaryDirectory() as tmp:
             posts = Path(tmp) / 'posts'
+            driver = Path(tmp) / 'dispatch_driver.py'
+            driver.write_text(textwrap.dedent('''\
+                import json, os, sys
+                from datetime import datetime
+                from pathlib import Path
+                from urllib.parse import parse_qs, urlsplit
+                import predeadline_dispatch_v1 as live
+
+                class FixedDatetime(datetime):
+                    @classmethod
+                    def now(cls, tz=None):
+                        return datetime.fromisoformat(os.environ['OPERATIONAL_DATE'] + 'T12:00:00+09:00')
+
+                class SchedulingClient:
+                    def request(self, method, path, body=None):
+                        if method == 'POST':
+                            assert path == '/actions/workflows/g11-free-runner.yml/dispatches'
+                            assert body == {'ref': 'main', 'inputs': {
+                                'phase': 'predeadline', 'operational_date': os.environ['OPERATIONAL_DATE']}}
+                            with open(os.environ['TEST_POSTS'], 'a') as handle:
+                                handle.write('POST\\n')
+                            if int(os.environ['TEST_POST_STATUS']):
+                                raise live.ApiError(500)
+                            return None
+                        assert method == 'GET'
+                        assert path.startswith('/actions/workflows/g11-free-runner.yml/runs?')
+                        query = parse_qs(urlsplit(path).query)
+                        rows = json.loads(os.environ['TEST_RUNS'])['workflow_runs']
+                        if Path(os.environ['TEST_POSTS']).exists() and os.environ['TEST_AFTER_RUNS'] != 'null':
+                            rows = json.loads(os.environ['TEST_AFTER_RUNS'])
+                        rows = [r for r in rows if r['status'] == query['status'][0]]
+                        page = int(query['page'][0])
+                        return {'workflow_runs': rows[(page-1)*100:page*100], 'total_count': len(rows)}
+
+                live.Client = lambda token: SchedulingClient()
+                live.datetime = FixedDatetime
+                live.dispatch.__kwdefaults__['sleep'] = lambda seconds: None
+                sys.argv = sys.argv[1:]
+                try:
+                    live.main()
+                except live.DispatchError as exc:
+                    print('G11_SAFE_PREDEADLINE_DISPATCH=HELD REASON=' + str(exc))
+                    raise SystemExit(1)
+                '''))
             env = dict(os.environ, GH_TOKEN='test', GITHUB_RUN_ID='39915815315',
-                       GITHUB_RUN_NUMBER='200', GITHUB_REPOSITORY='example/relay',
+                       GITHUB_RUN_NUMBER='200', GITHUB_REPOSITORY='tatsuuut/-g11-official-data-relay',
+                       GITHUB_REF='refs/heads/main', TEST_PYTHON=sys.executable,
+                       TEST_DISPATCH_DRIVER=str(driver),
+                       PYTHONPATH=str(Path(__file__).resolve().parent),
                        OPERATIONAL_DATE='2026-10-23', TEST_HEARTBEAT=heartbeat,
                        TEST_POST_STATUS=str(post_status), TEST_POSTS=str(posts),
+                       TEST_AFTER_RUNS=json.dumps(after_runs),
                        TEST_RUNS=json.dumps({'workflow_runs': runs}),
                        TEST_JOBS=json.dumps({'jobs': jobs or []}))
             result = subprocess.run(['bash', '-c', stubs + script], env=env,
@@ -420,11 +475,18 @@ curl() {
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(posts, 0)
 
-    def test_ambiguous_dispatch_failure_is_not_retried_or_reported_accepted(self):
+    def test_persistent_dispatch_failure_is_bounded_and_not_reported_accepted(self):
         result, posts = self.exercise([], post_status=22)
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(posts, 1)
+        self.assertEqual(posts, 3)
+        self.assertIn('DISPATCH_RETRY_EXHAUSTED', result.stdout)
         self.assertNotIn('DISPATCH_ACCEPTED', result.stdout)
+
+    def test_ambiguous_dispatch_acceptance_is_reconciled_without_reposting(self):
+        result, posts = self.exercise([], post_status=22, after_runs=[self.run_row(201)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(posts, 1)
+        self.assertIn('ACCEPTED_AFTER_AMBIGUOUS_RESPONSE', result.stdout)
 
 
 class PushRoutingTests(unittest.TestCase):

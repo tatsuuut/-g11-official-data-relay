@@ -132,6 +132,37 @@ class ScheduledPhaseRoutingTests(unittest.TestCase):
                 self.resolve("2026-11-01T09:45:00+09:00", event="workflow_dispatch", cron="",
                     phase=phase, day=day, succeeds=False)
 
+    def test_predeadline_dispatches_reconcile_before_retries(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        for name, mode in (
+            ("Keep the predeadline relay alive between delayed cron starts", "continuation"),
+            ("Bootstrap PREDEADLINE after a verified public MORNING", "bootstrap"),
+        ):
+            with self.subTest(step=name):
+                step = workflow.split(f"      - name: {name}\n",1)[1].split("\n      - name:",1)[0]
+                self.assertIn('python3 scripts/predeadline_dispatch_v1.py',step)
+                self.assertIn('--mode '+mode,step)
+                self.assertNotIn('-X POST',step)
+
+    def test_live_rerun_cannot_reuse_runtime_cache_identity(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.phase == 'predeadline' && github.run_attempt != '1')",workflow)
+        retry=workflow.split('  reroute-predeadline-rerun:\n',1)[1]
+        self.assertIn('--mode rerun',retry)
+        self.assertIn("github.run_attempt != '1'",retry)
+        self.assertNotIn('.relay-state',retry)
+        self.assertNotIn('actions/cache',retry)
+        self.assertIn('cancel-in-progress: false',workflow)
+
+    def test_other_predeadline_reruns_fail_before_state_restore(self):
+        workflow=WORKFLOW.read_text(encoding="utf-8")
+        guard=workflow.index('      - name: Reject reused PREDEADLINE cache identity')
+        restore=workflow.index('      - name: Restore only encrypted runtime state')
+        self.assertLess(guard,restore)
+        end=workflow.index('      - name: Select newest same-day persisted checkpoint')
+        self.assertIn("steps.scheduled.outputs.phase == 'predeadline'",workflow[guard:end])
+        self.assertIn('exit 1',workflow[guard:end])
+
     def test_existing_explicit_push_recovery_routes_are_preserved(self):
         for commit, phase in (("[morning-current]", "morning"),
                               ("[night-current]", "night"),

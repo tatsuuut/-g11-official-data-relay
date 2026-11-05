@@ -46,6 +46,7 @@ jobs:
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
       inputs.phase != 'repair-20260928' &&
+      !(github.event_name == 'workflow_dispatch' && inputs.phase == 'predeadline' && github.run_attempt != '1') &&
       vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -172,6 +173,11 @@ jobs:
           PY
           printf 'operational_date=%s\nphase=%s\n' \
             "${operational_date}" "${phase}" >> "${GITHUB_OUTPUT}"
+      - name: Reject reused PREDEADLINE cache identity
+        if: github.run_attempt != '1' && steps.scheduled.outputs.phase == 'predeadline'
+        run: |
+          echo 'G11_PREDEADLINE_RERUN_REQUIRES_FRESH_DISPATCH' >&2
+          exit 1
       - name: Select newest same-day persisted checkpoint
         if: steps.scheduled.outputs.phase=='predeadline'||steps.scheduled.outputs.phase=='night'
         id: checkpoint-choice
@@ -449,16 +455,8 @@ jobs:
               exit 0
             fi
           done
-          payload="$(jq -cn --arg day "${OPERATIONAL_DATE}" \
-            '{ref:"main",inputs:{phase:"predeadline",operational_date:$day}}')"
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
-            -d "${payload}"
-          echo "G11_PREDEADLINE_CHAIN=DISPATCH_ACCEPTED after=${GITHUB_RUN_ID}"
+          python3 scripts/predeadline_dispatch_v1.py --day "${OPERATIONAL_DATE}" --mode continuation
+
       - name: Checkout hash-locked research runtime
         if: (steps.due.outputs.phase!='predeadline'||steps.authority.outputs.rescue_bootstrap=='true')&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.authority.outputs.frozen!='true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -2061,14 +2059,8 @@ jobs:
               exit 0
             fi
           done
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" \
-            -d '{"ref":"main","inputs":{"phase":"predeadline"}}'
-          echo "G11_PUBLIC_PREDEADLINE_BOOTSTRAP=DISPATCHED_ONCE"
+          python3 scripts/predeadline_dispatch_v1.py --day "${OPERATIONAL_DATE}" --mode bootstrap
+
       - name: Propagate private runtime failure after state checkpoint
         if: always()&&steps.runtime.outcome=='failure'&&steps.due.outputs.phase!='predeadline'
         run: exit 1
@@ -2178,3 +2170,28 @@ jobs:
 # Verified paths
 
 
+
+  reroute-predeadline-rerun:
+    name: Reroute LIVE retry to a fresh run identity
+    if: >-
+      github.repository_id == '1367703708' && github.ref == 'refs/heads/main' &&
+      vars.G11_RELAY_ENABLED == 'true' && github.event_name == 'workflow_dispatch' &&
+      inputs.phase == 'predeadline' && github.run_attempt != '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Schedule current-day LIVE without restoring or saving state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_DATE: ${{ inputs.operational_date }}
+          TZ: Asia/Tokyo
+        run: |
+          set -euo pipefail
+          test -n "${REQUESTED_DATE}"
+          python3 scripts/predeadline_dispatch_v1.py --day "${REQUESTED_DATE}" --mode rerun
