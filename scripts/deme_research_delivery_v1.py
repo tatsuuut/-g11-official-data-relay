@@ -124,3 +124,46 @@ def optional_publish(state, feed_path, origin):
     print(json.dumps({'deme_research_delivery':result},ensure_ascii=False,sort_keys=True))
     return result
 
+
+def publish_persisted_live(state, feed_path, *, opener=None, publisher=optional_publish):
+    """Reuse the established research route after verified LIVE persistence."""
+    from urllib.request import Request, urlopen
+    from daily_runtime_delivery_v1 import ORIGIN
+    opener = opener or urlopen
+    feed = json.loads(Path(feed_path).read_bytes())
+    if (os.environ.get('RESEARCH_CHECKPOINT_VERIFIED') != 'true'
+            or os.environ.get('G11_APP_ORIGIN') != ORIGIN
+            or feed.get('stage') != 'PREDEADLINE' or feed.get('status') != 'PASS'
+            or feed.get('same_day_rescue') or feed.get('SNAPSHOT_CLASS')):
+        raise ValueError('RESEARCH_LIVE_PERSISTENCE_REQUIRED')
+    request = Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' +
+        os.environ['G11_OIDC_AUDIENCE'], headers={
+            'Authorization': 'bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN'],
+            'Accept': 'application/json'})
+    with opener(request, timeout=20) as response:
+        token = json.loads(response.read())['value']
+    prior = os.environ.get('G11_SYNC_OIDC')
+    try:
+        os.environ['G11_SYNC_OIDC'] = token
+        return publisher(Path(state), Path(feed_path), ORIGIN)
+    finally:
+        if prior is None:
+            os.environ.pop('G11_SYNC_OIDC', None)
+        else:
+            os.environ['G11_SYNC_OIDC'] = prior
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--state-root', type=Path, required=True)
+    parser.add_argument('--feed', type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        result = publish_persisted_live(args.state_root, args.feed)
+        raise SystemExit(0 if result.get('status') == 'PASS' else 1)
+    except Exception as exc:
+        # Never log signed URLs, response bodies or credentials.
+        print('G11_DEFERRED_RESEARCH=HELD TYPE=' + type(exc).__name__)
+        raise SystemExit(1) from None
+

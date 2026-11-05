@@ -157,10 +157,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--day', required=True)
     parser.add_argument('--select-restore', action='store_true')
+    parser.add_argument('--continuation-delay', action='store_true')
     args = parser.parse_args()
     if args.select_restore:
         return select_restore(args.day)
     root = Path.cwd()
+    if args.continuation_delay:
+        result = json.loads((root / '.relay-output/result.json').read_bytes())
+        print(continuation_delay(result, args.day, os.environ['GITHUB_RUN_ID'], datetime.now(JST)))
+        return
     output = root / '.relay-output/critical-feed.json'
     require(os.environ.get('CRITICAL_CHECKPOINT_VERIFIED') == 'true',
             'EARLY_PUBLICATION_PERSISTENCE_REQUIRED')
@@ -179,10 +184,12 @@ def main():
     from daily_runtime_delivery_v1 import deliver, ORIGIN
     require(os.environ['G11_APP_ORIGIN'] == ORIGIN, 'EARLY_PUBLICATION_ORIGIN')
     receipt = deliver(root / '.relay-state', output, ORIGIN, include_optional_inputs=False)
-    # HOME's condition comparison also needs the saved odds proof. Send just
-    # current, newly saved races now; the regular path retains the full history.
     feed = json.loads(output.read_bytes())
     critical = json.loads((root / '.relay-state/relay-state.json').read_bytes())['CRITICAL']
+    print('G11_PREDEADLINE_PUBLICATION_TIMING=' + json.dumps(
+        publication_timing(feed, critical, datetime.now(JST)), sort_keys=True), flush=True)
+    # HOME's condition comparison also needs the saved odds proof. Send just
+    # current, newly saved races now; the regular path retains the full history.
     fresh = fresh_input_source(feed, critical, datetime.now(JST))
     if fresh['races']:
         from selective_alert_input_v1 import deliver_optional
@@ -197,6 +204,41 @@ def fresh_input_source(feed, critical, now):
     rows = [row for row in feed['races'] if row['key'] in keys
             and datetime.fromisoformat(row['deadline_jst']) > now]
     return {**feed, 'races': rows}
+
+
+def publication_timing(feed, critical, verified_at):
+    """Server readback completion is an upper bound, never device arrival."""
+    require(verified_at.utcoffset() == timedelta(hours=9)
+            and verified_at.date().isoformat() == feed['operational_date_jst'],
+            'PUBLICATION_TIMING_DAY')
+    keys = set(critical.get('V53_LOCKED_BEFORE_DEADLINE', [])) | set(
+        critical.get('PREDICTION_LOCKED_BEFORE_DEADLINE', []))
+    rows = []
+    for row in feed['races']:
+        if row['key'] not in keys:
+            continue
+        deadline = datetime.fromisoformat(row['deadline_jst'])
+        require(deadline.utcoffset() == timedelta(hours=9), 'PUBLICATION_TIMING_ZONE')
+        remaining = round((deadline - verified_at).total_seconds(), 3)
+        rows.append({'race': row['key'], 'deadline': deadline.isoformat(),
+                     'readback_remaining_seconds': remaining,
+                     'five_minute_target_met': remaining >= 300,
+                     'before_deadline': remaining > 0})
+    return {'verified_at': verified_at.isoformat(), 'scope': 'SERVER_READBACK_NOT_DEVICE_ARRIVAL',
+            'races': rows}
+
+
+def continuation_delay(result, day, run_id, now):
+    """Retain 45s after capture completion, crediting persistence/publication."""
+    c = result.get('CRITICAL', {})
+    require(c.get('OPERATIONAL_DATE') == day == now.date().isoformat()
+            and c.get('CRITICAL_CHECKPOINT_STATUS') == 'PASS'
+            and c.get('LAST_CRITICAL_RUN_ID') == str(run_id)
+            and now.utcoffset() == timedelta(hours=9), 'CONTINUATION_SPACING_BINDING')
+    at = datetime.fromisoformat(c['CRITICAL_CAPTURE_AT'])
+    require(at.utcoffset() == timedelta(hours=9) and at.date() == now.date()
+            and at <= now, 'CONTINUATION_SPACING_CLOCK')
+    return max(0, round(45 - (now - at).total_seconds(), 3))
 
 
 if __name__ == '__main__':
