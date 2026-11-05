@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from morning_source_receipt_limit_v1 import receipt_limit
+from morning_source_receipt_limit_v1 import receipt_limit, admitted_digest_limit
 from repair_saved_morning_receipts_v1 import inspect_attempts, DAY, SOURCE, ATTEMPTS, REASON
 
 
@@ -41,6 +41,19 @@ class ReceiptLimitTests(unittest.TestCase):
     def test_legacy_admission_limit_is_unchanged(self):
         value=envelope(); value['SNAPSHOT']['SOURCE_RECEIPTS']=value['SNAPSHOT']['SOURCE_RECEIPTS'][:20]
         self.assertEqual(20,receipt_limit(value))
+
+    def test_permit_expansion_requires_exact_previously_admitted_snapshot_and_hashes(self):
+        hashes=[f'{i:064x}' for i in range(23)]
+        admitted={'a'*64:tuple(hashes)}
+        payload={'G11_SNAPSHOT_SHA256':'a'*64,'G11_SOURCE_SHA256':hashes[:]}
+        self.assertEqual(23,admitted_digest_limit(payload,admitted))
+        self.assertEqual(20,admitted_digest_limit(payload,{}))
+        payload['G11_SOURCE_SHA256'][0]='f'*64
+        self.assertEqual(20,admitted_digest_limit(payload,admitted))
+        payload['G11_SOURCE_SHA256']=hashes+['b'*64,'c'*64]
+        self.assertEqual(25,admitted_digest_limit(payload,admitted,2))
+        payload['G11_SOURCE_SHA256'].append('d'*64)
+        self.assertEqual(22,admitted_digest_limit(payload,admitted,2))
 
     def test_extra_unbound_wrong_day_redirect_duplicate_and_result_sources_are_rejected(self):
         changes = [
@@ -108,6 +121,29 @@ class RepairBoundaryTests(unittest.TestCase):
             inspect_attempts(self.root,DAY,SOURCE,self.now+timedelta(days=1))
         with self.assertRaisesRegex(RuntimeError,'FROZEN_SOURCE'):
             inspect_attempts(self.root,DAY,'f'*40,self.now)
+
+    def test_rescue_continuation_keeps_saved_input_admission_adapter(self):
+        import contextlib
+        import sys
+        from unittest.mock import patch
+        import daily_predeadline_authority_recovery_v1 as live
+        (self.root/'rescue/feed.json').write_text('{}')
+        active=[]
+        @contextlib.contextmanager
+        def adapter():
+            active.append(True)
+            try:yield
+            finally:active.pop()
+        def invoke(*args):
+            self.assertTrue(active)
+            self.assertEqual(args[0],self.root)
+        argv=['entry','predeadline','--operational-date',DAY,'--state-root',str(self.root),
+              '--feed-output',str(self.root/'out.json'),'--public-run-id','123']
+        with patch.object(sys,'argv',argv), patch.object(live,'run',side_effect=invoke) as run, \
+                patch('rescue_night_result_parser_v1.official_input_compatibility',adapter):
+            self.assertEqual(0,live.main())
+            run.assert_called_once()
+        self.assertFalse(active)
 
 
 if __name__=='__main__':unittest.main()

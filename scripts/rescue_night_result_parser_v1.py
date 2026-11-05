@@ -85,19 +85,35 @@ def official_input_compatibility():
     parser=official.parse_result_text
     gate=official.FORMAL_GATE
     bridge=gate.build_canonical_official_morning_input
+    invocation=official.FORMAL_ADAPTER
+    verify_permit=invocation.verify_formal_p3_invocation
     morning=official.CanonicalRunner.run_morning
     night_binding=official._night_sg_race_keys_from_saved_b
     def adapted(text,target_date,*,require_full_races=False):
         return parse_night_results(text,target_date,official,parser,require_full_races=require_full_races)
     try:
         official.parse_result_text=adapted
-        gate.build_canonical_official_morning_input=morning_metadata_bridge(gate)
+        compiled_bridge=morning_metadata_bridge(gate)
+        admitted={}
+        def admitted_bridge(verified):
+            result=compiled_bridge(verified)
+            admitted[result['G11_SNAPSHOT_SHA256']]=tuple(result['G11_SOURCE_SHA256'])
+            return result
+        gate.build_canonical_official_morning_input=admitted_bridge
+        from morning_race_isolation_v1 import replace_pinned
+        from morning_source_receipt_limit_v1 import admitted_digest_limit
+        invocation.verify_formal_p3_invocation=replace_pinned(verify_permit,
+            'db65b3a9f8885f95f4b8548717d5dee37e37aa67389606510f3487c6433f593e',[
+            ('2 <= len(source_hashes) <= 20','2 <= len(source_hashes) <= _admitted_limit(payload, 0)'),
+            ('4 <= len(source_hashes) <= 22','4 <= len(source_hashes) <= _admitted_limit(payload, 2)'),
+            ],{'_admitted_limit':lambda payload,extra:admitted_digest_limit(payload,admitted,extra)})
         official.CanonicalRunner.run_morning=adapted_period_morning(official,adapted_morning(official,parser))
         official._night_sg_race_keys_from_saved_b=adapted_night_binding(official,parser)
         yield
     finally:
         official.parse_result_text=parser
         gate.build_canonical_official_morning_input=bridge
+        invocation.verify_formal_p3_invocation=verify_permit
         official.CanonicalRunner.run_morning=morning
         official._night_sg_race_keys_from_saved_b=night_binding
 

@@ -3,6 +3,17 @@ from datetime import date
 import re
 
 
+def admitted_digest_limit(payload, admitted, extra=0):
+    """Only a fully admitted snapshot may expand a later permit's hash list."""
+    fallback = 20 + extra
+    known = admitted.get(payload.get('G11_SNAPSHOT_SHA256'))
+    hashes = payload.get('G11_SOURCE_SHA256')
+    if (not known or type(hashes) is not list or len(hashes) != len(known) + extra
+            or tuple(hashes[:len(known)]) != known):
+        return fallback
+    return max(fallback, len(known) + extra)
+
+
 def receipt_limit(verified):
     # Preserve the original admission path for its previously supported size.
     # Returning 20 on any unrecognized expanded envelope keeps C04 closed.

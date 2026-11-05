@@ -195,7 +195,9 @@ class MorningIsolationTests(unittest.TestCase):
             self.assertEqual(23,len(verified['SNAPSHOT']['SOURCE_RECEIPTS']))
             future,deadlines=rescue_v1._future_keys(verified,fixtures.at(0))
             self.assertEqual(24,len(future));self.assertEqual(24,len(deadlines))
-            runner.run_morning_predictions()
+            prediction=runner.run_morning_predictions()
+            self.assertEqual([],prediction['FAILED'])
+            self.assertEqual(24,len(prediction['COMPLETED']))
             runner.run_morning_workbook_projection(fixtures.workbook_profiles())
             projection=store.load_verified_snapshot('morning','workbook-projection')['SNAPSHOT']['PAYLOAD']
             self.assertEqual(24,projection['COUNTS']['FORMAL'])
