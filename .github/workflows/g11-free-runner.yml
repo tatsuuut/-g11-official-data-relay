@@ -761,7 +761,7 @@ jobs:
               command=(python3 g11/relay/same_day_boundary_20261006.py run)
             else
               python3 -m unittest g11.relay.test_delayed_morning_recovery_v1
-              command=(python3 -m g11.relay.delayed_morning_recovery_v1 --date "${{steps.due.outputs.operational_date}}")
+              command=(python3 ../scripts/rescue_night_result_parser_v1.py --delayed-recovery --date "${{steps.due.outputs.operational_date}}")
             fi
             "${command[@]}" \
               --state "${GITHUB_WORKSPACE}/.relay-state" --output "${GITHUB_WORKSPACE}/.relay-output/feed.json" \

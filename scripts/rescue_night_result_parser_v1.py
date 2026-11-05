@@ -105,16 +105,22 @@ def run_relay():
     import runpy
     import sys
     from pathlib import Path
-    if sys.argv[1:2] != ['--relay']:
+    if sys.argv[1:2] not in (['--relay'], ['--delayed-recovery']):
         raise SystemExit('EXPECTED_RELAY_MODE')
     sys.path.insert(0, str(Path.cwd()))
     original_argv = sys.argv[:]
+    target = 'g11.relay.v1'
+    if original_argv[1] == '--delayed-recovery':
+        # Install the retained rescue parser before wrapping it, so its
+        # normalizer and the public input adapters both stay active.
+        from g11.relay import rescue_entry_v2  # noqa: F401
+        target = 'g11.relay.delayed_morning_recovery_v1'
     try:
-        sys.argv = ['g11.relay.v1', *original_argv[2:]]
+        sys.argv = [target, *original_argv[2:]]
         print('G11_OFFICIAL_L_ROW_ADAPTER_V1:ACTIVE', file=sys.stderr)
         print('G11_MORNING_RACE_ISOLATION_V1:ACTIVE', file=sys.stderr)
         with official_input_compatibility():
-            runpy.run_module('g11.relay.v1', run_name='__main__')
+            runpy.run_module(target, run_name='__main__')
     finally:
         sys.argv = original_argv
 
