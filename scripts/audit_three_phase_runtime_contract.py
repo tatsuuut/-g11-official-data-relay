@@ -138,7 +138,7 @@ def audit_public() -> dict[str, object]:
     )
     require_text(
         continuation,
-        "sleep 45",
+        "--continuation-delay",
         "PREDEADLINE_CHAIN_SPACING",
     )
     require_text(continuation, "scripts/dynamic_last_race_heartbeat.py", "PREDEADLINE_MORNING_DEADLINE_POLICY")

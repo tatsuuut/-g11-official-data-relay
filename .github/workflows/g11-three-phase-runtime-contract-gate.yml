@@ -78,6 +78,11 @@ jobs:
             .github/workflows/g11-explicit-night-dispatcher.yml \
             .github/workflows/g11-three-phase-runtime-contract-gate.yml
 
+      - name: Verify complete encrypted checkpoints and LIVE publication priority
+        env:
+          G11_REQUIRE_ENCRYPTION_TESTS: "1"
+        run: python3 -m unittest discover -s scripts -p test_predeadline_latency_v1.py -v
+
       - name: Audit three runtime phases
         run: python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-private
 

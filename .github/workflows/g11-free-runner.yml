@@ -354,12 +354,9 @@ jobs:
           jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
           mkdir -p .relay-cache
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-          tar -I 'gzip -1' -cf - -C .relay-state . | \
-            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-              --symmetric --cipher-algo AES256 \
-              --output .relay-cache/state.tgz.gpg.tmp
+          python3 scripts/encrypt_runtime_state_v1.py --state-root .relay-state \
+            --output .relay-cache/state.tgz.gpg
           exec 3<&-
-          mv .relay-cache/state.tgz.gpg.tmp .relay-cache/state.tgz.gpg
           test -s .relay-cache/state.tgz.gpg
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
       - name: Save early encrypted critical checkpoint
@@ -415,7 +412,7 @@ jobs:
             echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
             exit 0
           fi
-          sleep 45
+          sleep "$(python3 scripts/critical_saved_publication_v1.py --day "${OPERATIONAL_DATE}" --continuation-delay)"
           heartbeat="$(python3 scripts/dynamic_last_race_heartbeat.py \
             --result .relay-output/result.json --operational-date "${OPERATIONAL_DATE}")"
           if [ "${heartbeat}" = RESCUE_HANDOFF ]; then
@@ -924,7 +921,7 @@ jobs:
           sparse-checkout: g11/canonical/deme_discovery*
           sparse-checkout-cone-mode: false
       - name: P3 research update
-        if: steps.deme-source.outcome=='success'
+        if: steps.deme-source.outcome=='success'&&steps.due.outputs.phase!='predeadline'
         continue-on-error: true
         env:
           G11_PRIVATE_REPO_TOKEN: ""
@@ -947,13 +944,10 @@ jobs:
           fi
           mkdir -p .relay-cache
           encrypted=".relay-cache/state.tgz.gpg"
-          temporary="${encrypted}.tmp"
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-          tar -I 'gzip -1' -cf - -C .relay-state . | \
-            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-              --symmetric --cipher-algo AES256 --output "${temporary}"
-          exec 3<&-
-          mv "${temporary}" "${encrypted}"
+          python3 scripts/encrypt_runtime_state_v1.py --state-root .relay-state \
+            --output "${encrypted}"
+          exec 3<&-"
           test -s "${encrypted}"
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
       - name: Save only encrypted runtime state
@@ -1786,10 +1780,22 @@ jobs:
             exit 1
           fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+      - name: P3 research update after LIVE publication
+        if: steps.deme-source.outcome=='success'&&steps.due.outputs.phase=='predeadline'
+        id: deme-live
+        continue-on-error: true
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          rm -f .relay-output/deme-discovery-public.json
+          timeout 120 python3 .g11-deme-research/g11/canonical/deme_discovery_thirty_entry.py \
+            --store .relay-state/store --feed .relay-output/feed.json \
+            --projection-output .relay-output/deme-discovery-public.json
       - name: Persist delivery receipts
         if: >-
           always() && !cancelled() && steps.due.outputs.phase != 'dry-run' &&
-          (steps.due.outputs.phase != 'predeadline' || steps.publish.outcome == 'success')
+          (steps.due.outputs.phase != 'predeadline' || steps.publish.outcome == 'success' || steps.deme-live.outcome == 'success')
         id: delivery-state
         env:
           G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
@@ -1801,20 +1807,24 @@ jobs:
           fi
           mkdir -p .relay-cache
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
-          tar -I 'gzip -1' -cf - -C .relay-state . | \
-            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-              --symmetric --cipher-algo AES256 --output .relay-cache/state-delivery.tgz.gpg.tmp
+          python3 scripts/encrypt_runtime_state_v1.py --state-root .relay-state \
+            --output .relay-cache/state-delivery.tgz.gpg
           exec 3<&-
-          mv .relay-cache/state-delivery.tgz.gpg.tmp .relay-cache/state-delivery.tgz.gpg
           cp .relay-cache/state-delivery.tgz.gpg .relay-cache/state.tgz.gpg
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
           [ '${{steps.wild4-followup.outputs.needed}}' = false ] || [ '${{steps.wild4-followup.outputs.sent}}' = true ] || { [ '${{steps.wild4-early.outputs.sent}}' = true ] && [ '${{steps.wild4-followup.outputs.needed}}' != true ]; } || [ '${{steps.due.outputs.phase}}' != predeadline ] || GH_TOKEN="${{github.token}}" gh workflow run g11-morning-odds-footprint-4bet-shadow-v1.yml -f mode=wild4 -f operational_date='${{steps.due.outputs.operational_date}}' || echo WILD4_DISPATCH_RETRY
       - name: Save state
         if: always()&&steps.delivery-state.outputs.ready=='true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: delivery-checkpoint
+        uses: ./.github/actions/g11-publication-checkpoint
         with:
-          path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
+          cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
+      - name: Publish persisted LIVE research after predictions
+        if: steps.deme-live.outcome=='success'&&steps.publish.outcome=='success'&&steps.delivery-checkpoint.outputs.ready=='true'
+        continue-on-error: true
+        env:
+          RESEARCH_CHECKPOINT_VERIFIED: ${{steps.delivery-checkpoint.outputs.ready}}
+        run: python3 scripts/deme_research_delivery_v1.py --state-root .relay-state --feed .relay-output/feed.json
       - name: Verify source identity and projected app readback
         id: readback
         if: steps.publish.outcome=='success'&&steps.publish.outputs.immutable_night!='true'

@@ -363,6 +363,7 @@ class PredeadlineChainTests(unittest.TestCase):
 python3() {
   case "$1" in
     scripts/dynamic_last_race_heartbeat.py) printf '%s\\n' "$TEST_HEARTBEAT" ;;
+    scripts/critical_saved_publication_v1.py) printf '0\\n' ;;
     scripts/predeadline_dispatch_v1.py) command "$TEST_PYTHON" "$TEST_DISPATCH_DRIVER" "$@" ;;
     *) return 99 ;;
   esac
