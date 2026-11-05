@@ -947,7 +947,7 @@ jobs:
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
           python3 scripts/encrypt_runtime_state_v1.py --state-root .relay-state \
             --output "${encrypted}"
-          exec 3<&-"
+          exec 3<&-
           test -s "${encrypted}"
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
       - name: Save only encrypted runtime state

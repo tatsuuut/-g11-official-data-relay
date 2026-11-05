@@ -150,6 +150,16 @@ class ArchiveTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_changed_archive_shell_blocks_parse(self):
+        import textwrap
+        text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
+        for name in ['Encrypt critical state before optional work', 'Encrypt changed state before persistence',
+                     'Persist delivery receipts', 'Keep the predeadline relay alive between delayed cron starts']:
+            step = text.split('      - name: '+name+'\n', 1)[1].split('      - name:', 1)[0]
+            script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+            result = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True)
+            self.assertEqual(0, result.returncode, name + ': ' + result.stderr)
+
     def test_live_research_cannot_block_prediction_publication_or_skip_persistence(self):
         text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
         step = lambda name: text.split('      - name: '+name+'\n', 1)[1].split('      - name:', 1)[0]
