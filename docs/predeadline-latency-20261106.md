@@ -31,10 +31,13 @@ Changes:
    prior checkpoint retention on failure. Do not omit state or model files.
 3. For normal PREDEADLINE, run the existing P3 research update after canonical
    prediction publication. Persist and read back that research state before
-   sending its existing dedicated projection. Preserve MORNING/NIGHT order,
+   sending its existing dedicated projection. Preserve MORNING/NIGHT/rescue order,
    every research invocation, failure isolation, original LOCKs and all
    prediction/model pins. A failed canonical publication still retains a
    successful research update, without publishing the research projection.
+   Keep the original receipt-cache behavior outside deferred LIVE research,
+   including NIGHT retries; only the new research delivery needs another
+   verified checkpoint.
 4. Log per-race remaining time at verified early publication, including
    five-minute misses and post-deadline readbacks. This is a server-readback
    measurement, not a device-arrival guarantee.

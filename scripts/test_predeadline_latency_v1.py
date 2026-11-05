@@ -166,13 +166,38 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("steps.due.outputs.phase!='predeadline'", step('P3 research update'))
         self.assertIn("steps.due.outputs.phase=='predeadline'", step('P3 research update after LIVE publication'))
         order = ['Publish a newly verified feed through OIDC', 'P3 research update after LIVE publication',
-                 'Persist delivery receipts', 'Save state', 'Publish persisted LIVE research after predictions']
+                 'Persist delivery receipts', 'Save deferred LIVE research state', 'Publish persisted LIVE research after predictions']
         positions = [text.index('      - name: '+name+'\n') for name in order]
         self.assertEqual(sorted(positions), positions)
         self.assertIn("steps.deme-live.outcome == 'success'", step('Persist delivery receipts'))
-        self.assertIn('uses: ./.github/actions/g11-publication-checkpoint', step('Save state'))
+        self.assertIn('uses: ./.github/actions/g11-publication-checkpoint', step(order[-2]))
+        self.assertIn("steps.deme-live.outcome=='success'", step(order[-2]))
+        self.assertIn('uses: actions/cache/save@', step('Save state'))
+        self.assertIn("steps.deme-live.outcome!='success'", step('Save state'))
         self.assertIn("steps.delivery-checkpoint.outputs.ready=='true'", step(order[-1]))
         self.assertEqual(3, text.count('python3 scripts/encrypt_runtime_state_v1.py'))
+
+    def test_only_normal_frozen_live_defers_research_and_failed_publish_keeps_it(self):
+        import itertools
+        import re
+        text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
+        def condition(name, values):
+            step = text.split('      - name: '+name+'\n', 1)[1].split('      - name:', 1)[0]
+            expression = ' '.join(re.split(r'\n {8}(?=\S)', step.split('        if: >-\n', 1)[1], 1)[0].split())
+            expression = re.sub(r'steps\.[\w.-]+', lambda m: repr(values[m[0]]), expression)
+            expression = expression.replace('always()', 'True').replace('cancelled()', 'False')
+            expression = expression.replace('&&', ' and ').replace('||', ' or ')
+            expression = re.sub(r'!(?!=)', ' not ', expression)
+            return eval(expression, {'__builtins__': {}}, {})
+        for phase, frozen, rescue, bootstrap in itertools.product(
+                ['morning', 'predeadline', 'night'], ['true', 'false'], ['true', ''], ['true', '']):
+            values = {'steps.deme-source.outcome': 'success', 'steps.due.outputs.phase': phase,
+                'steps.authority.outputs.frozen': frozen, 'steps.critical.outputs.rescue': rescue,
+                'steps.authority.outputs.rescue_bootstrap': bootstrap}
+            deferred = phase == 'predeadline' and frozen == 'true' and rescue != 'true' and bootstrap != 'true'
+            with self.subTest(**values):
+                self.assertEqual(not deferred, condition('P3 research update', values))
+                self.assertEqual(deferred, condition('P3 research update after LIVE publication', values))
 
 
 if __name__ == '__main__': unittest.main()

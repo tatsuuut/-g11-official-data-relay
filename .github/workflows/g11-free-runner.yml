@@ -921,7 +921,10 @@ jobs:
           sparse-checkout: g11/canonical/deme_discovery*
           sparse-checkout-cone-mode: false
       - name: P3 research update
-        if: steps.deme-source.outcome=='success'&&steps.due.outputs.phase!='predeadline'
+        if: >-
+          steps.deme-source.outcome=='success' &&
+          (steps.due.outputs.phase!='predeadline' || steps.authority.outputs.frozen!='true' ||
+          steps.critical.outputs.rescue=='true' || steps.authority.outputs.rescue_bootstrap=='true')
         continue-on-error: true
         env:
           G11_PRIVATE_REPO_TOKEN: ""
@@ -1781,7 +1784,10 @@ jobs:
           fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
       - name: P3 research update after LIVE publication
-        if: steps.deme-source.outcome=='success'&&steps.due.outputs.phase=='predeadline'
+        if: >-
+          always() && !cancelled() && steps.deme-source.outcome=='success' &&
+          steps.due.outputs.phase=='predeadline' && steps.authority.outputs.frozen=='true' &&
+          steps.critical.outputs.rescue!='true' && steps.authority.outputs.rescue_bootstrap!='true'
         id: deme-live
         continue-on-error: true
         env:
@@ -1814,7 +1820,13 @@ jobs:
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
           [ '${{steps.wild4-followup.outputs.needed}}' = false ] || [ '${{steps.wild4-followup.outputs.sent}}' = true ] || { [ '${{steps.wild4-early.outputs.sent}}' = true ] && [ '${{steps.wild4-followup.outputs.needed}}' != true ]; } || [ '${{steps.due.outputs.phase}}' != predeadline ] || GH_TOKEN="${{github.token}}" gh workflow run g11-morning-odds-footprint-4bet-shadow-v1.yml -f mode=wild4 -f operational_date='${{steps.due.outputs.operational_date}}' || echo WILD4_DISPATCH_RETRY
       - name: Save state
-        if: always()&&steps.delivery-state.outputs.ready=='true'
+        if: always()&&steps.delivery-state.outputs.ready=='true'&&steps.deme-live.outcome!='success'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
+      - name: Save deferred LIVE research state
+        if: always()&&steps.delivery-state.outputs.ready=='true'&&steps.deme-live.outcome=='success'
         id: delivery-checkpoint
         uses: ./.github/actions/g11-publication-checkpoint
         with:
