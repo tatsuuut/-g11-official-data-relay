@@ -82,6 +82,36 @@ def dependency_scope(races, quarantine, rejected):
     return healthy, sorted(held,key=lambda r:r['RACE_KEY'])
 
 
+def results_for_saved_morning(text, target, morning, official, parser):
+    """Join complete healthy results to the immutable morning scope.
+
+    Official bytes remain saved whole. Only already excluded morning races
+    may be withheld; a new broken or missing result still stops settlement.
+    """
+    if morning.get('OPERATIONAL_DATE_JST') != target.isoformat() or not valid_quarantine(morning):
+        raise official.PipelineError('NIGHT_SAVED_SCOPE_INVALID')
+    expected = {f"{r['operational_date'].replace('-', '')}-{r['venue_code']}-{r['race_no']:02d}"
+                for r in morning['RACES']}
+    excluded = {r['RACE_KEY']:r['REASON'] for r in morning.get('QUARANTINED_RACES', [])}
+    if not expected or len(expected) != len(morning['RACES']):
+        raise official.PipelineError('NIGHT_SAVED_SCOPE_DUPLICATE')
+    results, rejected = isolated_results(text, target, official, parser)
+    by_key = {r.race_key:r for r in results}
+    rejected_by_key = {r['RACE_KEY']:r for r in rejected}
+    if (len(by_key) != len(results) or len(rejected_by_key) != len(rejected)
+            or set(by_key) & set(rejected_by_key)
+            or not expected <= set(by_key)
+            or not set(rejected_by_key) <= set(excluded)
+            or not set(by_key) <= expected | set(excluded)):
+        raise official.PipelineError('NIGHT_OFFICIAL_INCOMPLETE')
+    audit = [{'RACE_KEY':key,'MORNING_EXCLUSION':reason,
+              'RESULT_STATUS':('PARSED_BUT_EXCLUDED' if key in by_key else
+                               'QUARANTINED' if key in rejected_by_key else 'NOT_PRESENT'),
+              **({'RESULT_REJECTION':rejected_by_key[key]} if key in rejected_by_key else {})}
+             for key,reason in sorted(excluded.items())]
+    return [r for r in results if r.race_key in expected], audit
+
+
 def prior_dates_for(races, target, official):
     if not races:
         raise official.PipelineError('MORNING_RACES_EMPTY')

@@ -1115,16 +1115,21 @@ def run_delayed_night(state, day, output, origin):
     require(morning['OPERATIONAL_DATE_JST']==day,'NIGHT_MORNING_DAY')
     expected={r['operational_date'].replace('-','')+f"-{r['venue_code']}-{r['race_no']:02d}" for r in morning['RACES']}
     require(expected=={r['key'] for r in accepted['races']},'NIGHT_INPUT_SCOPE')
+    excluded_results=[]
     def parse(raw):
         from g11.canonical import official_pipeline
-        from rescue_night_result_parser_v1 import parse_night_results
-        results=parse_night_results(decode_cp932(runner.extractor.extract_one(raw,runner._archive_member(url))),target,official_pipeline,parse_result_text)
+        from morning_race_isolation_v1 import results_for_saved_morning
+        results, exclusions=results_for_saved_morning(
+            decode_cp932(runner.extractor.extract_one(raw,runner._archive_member(url))),
+            target,morning,official_pipeline,parse_result_text)
         require(len(results)==len(expected) and {r.race_key for r in results}==expected,'NIGHT_OFFICIAL_INCOMPLETE')
+        excluded_results[:]=exclusions
         return results
     receipt,results=runner.client.fetch_validated_once(f'result-k-{target:%Y%m%d}',url,parse)
     store.commit_snapshot('night','official-day-results',{'STATUS':'NIGHT_RESULTS_COMPLETE','OPERATIONAL_DATE_JST':day,
       'EXPECTED_RESULT_COUNT':len(expected),'PENDING_RESULT_COUNT':0,'PENDING_RACE_KEYS':[],
-      'RESULTS':[_serializable(r) for r in results]},[receipt])
+      'RESULTS':[_serializable(r) for r in results],
+      'EXCLUDED_MORNING_RACE_RESULTS':excluded_results},[receipt])
     # Existing accepted forecasts must still be backed by the immutable rescue baseline.
     proof_holds=night_saved_forecast_holds(accepted,json.loads(baseline_bytes),set(before[2].values()),set(before[3].values()))
     out=night_overlay(accepted,results,clock())
@@ -1161,7 +1166,8 @@ def run_delayed_night(state, day, output, origin):
     atomic(saved,data);atomic(report,canonical({'runtime_result':result,'official_url':url,
         'official_receipt':_serializable(receipt),'feed_sha256':sha(data),'accepted_feed_sha256':sha(raw),
         'protected_sha256':sha(canonical(before)),
-        'operational_protected_sha256':night_operational_inventory_hash(before),'by_race':scores})+b'\n')
+        'operational_protected_sha256':night_operational_inventory_hash(before),'by_race':scores,
+        'excluded_morning_race_results':excluded_results})+b'\n')
     output.write_bytes(data);print(json.dumps(result,sort_keys=True))
 
 
