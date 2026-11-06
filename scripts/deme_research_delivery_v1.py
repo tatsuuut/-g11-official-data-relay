@@ -125,6 +125,40 @@ def optional_publish(state, feed_path, origin):
     return result
 
 
+
+def verify_published_morning(state, feed):
+    """An idle LIVE run retains the sealed MORNING feed until a race is due."""
+    from daily_runtime_bootstrap_v1 import retained_module
+    from daily_runtime_delivery_v1 import identity
+    day = feed.get('operational_date_jst')
+    if not isinstance(day, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
+        raise ValueError('RESEARCH_MORNING_PERSISTENCE_REQUIRED')
+    implementation = retained_module(Path(state), day)
+    authority = implementation.load(Path(state), day)
+    identity(feed, authority, 'MORNING')
+    for phase in ('MORNING', 'PREDEADLINE'):
+        implementation.verify_locks(Path(state), day, phase, exact=True)
+    receipts = implementation.day_root(Path(state), day)/'delivery/MORNING'
+    for path in receipts.glob('*.json'):
+        if path.is_symlink() or not path.is_file():
+            continue
+        receipt = json.loads(path.read_bytes())
+        unsigned = dict(receipt)
+        digest = unsigned.pop('receipt_sha256', None)
+        if (digest == sha(compact(unsigned))
+                and receipt.get('schema') == 'G11_DAILY_SITE_DELIVERY_RECEIPT_V1'
+                and receipt.get('phase') == 'MORNING'
+                and receipt.get('operational_date_jst') == day
+                and receipt.get('authority_sha256') == authority['authority_sha256']
+                and receipt.get('runtime_source_sha') == authority['runtime_source_sha']
+                and receipt.get('http_success') is True
+                and receipt.get('site_get_readback') == 'PASS'
+                and re.fullmatch('[a-f0-9]{64}', str(receipt.get('site_payload_sha256', '')))
+                and path.stem == receipt['site_payload_sha256']):
+            return
+    raise ValueError('RESEARCH_MORNING_DELIVERY_REQUIRED')
+
+
 def publish_persisted_live(state, feed_path, *, opener=None, publisher=optional_publish):
     """Reuse the established research route after verified LIVE persistence."""
     from urllib.request import Request, urlopen
@@ -160,6 +194,8 @@ def publish_persisted_live(state, feed_path, *, opener=None, publisher=optional_
                 or receipt.get('operational_date_jst') != day
                 or receipt.get('authority_sha256') != authority):
             raise ValueError('RESEARCH_RESCUE_PERSISTENCE_REQUIRED')
+    elif feed.get('stage') == 'MORNING':
+        verify_published_morning(Path(state), feed)
     elif feed.get('stage') != 'PREDEADLINE':
         raise ValueError('RESEARCH_LIVE_PERSISTENCE_REQUIRED')
     request = Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' +

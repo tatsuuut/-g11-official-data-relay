@@ -96,6 +96,51 @@ class DailyDeliveryTests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
+
+    def test_idle_live_research_accepts_only_verified_published_morning(self):
+        import io
+        from unittest.mock import Mock
+        import deme_research_delivery_v1 as research
+        feed = copy.deepcopy(StagedSite(self.s).feed)
+        feed['stage'] = 'MORNING'
+        feed['daily_runtime'] = d.feed_binding(self.s.authority, 'MORNING')
+        self.s.feed_path.write_bytes(hot.compact(feed))
+        receipt = dict(schema='G11_DAILY_SITE_DELIVERY_RECEIPT_V1',
+            operational_date_jst=DAY, phase='MORNING',
+            authority_sha256=self.s.authority['authority_sha256'],
+            runtime_source_sha=self.s.authority['runtime_source_sha'],
+            site_payload_sha256='a'*64, http_success=True, site_get_readback='PASS')
+        receipt['receipt_sha256'] = research.sha(research.compact(receipt))
+        path = d.day_root(self.s.state, DAY)/'delivery/MORNING'/('a'*64+'.json')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(research.compact(receipt))
+        before = {str(p):p.read_bytes() for p in self.s.state.rglob('*') if p.is_file()}
+        env = dict(RESEARCH_CHECKPOINT_VERIFIED='true', G11_APP_ORIGIN=delivery.ORIGIN,
+            ACTIONS_ID_TOKEN_REQUEST_URL='https://oidc.invalid/?test=1',
+            ACTIONS_ID_TOKEN_REQUEST_TOKEN='synthetic', G11_OIDC_AUDIENCE='synthetic')
+        opener = Mock(side_effect=lambda *a, **kw: io.BytesIO(b'{"value":"synthetic"}'))
+        sender = Mock(return_value={'status':'PASS'})
+        with patch.dict(os.environ, env):
+            value = research.publish_persisted_live(self.s.state, self.s.feed_path,
+                opener=opener, publisher=sender)
+        self.assertEqual(value['status'], 'PASS')
+        sender.assert_called_once()
+        self.assertEqual(before, {str(p):p.read_bytes() for p in self.s.state.rglob('*') if p.is_file()})
+        for field, bad in [('authority_sha256','b'*64),('site_get_readback','FAIL'),
+                           ('operational_date_jst','2026-01-01'),('receipt_sha256','0'*64)]:
+            changed = dict(receipt); changed[field] = bad
+            if field != 'receipt_sha256':
+                changed['receipt_sha256'] = research.sha(research.compact(
+                    {k:v for k,v in changed.items() if k != 'receipt_sha256'}))
+            path.write_bytes(research.compact(changed))
+            opener.reset_mock()
+            with patch.dict(os.environ, env), self.assertRaises(ValueError):
+                research.publish_persisted_live(self.s.state, self.s.feed_path, opener=opener)
+            opener.assert_not_called()
+        path.unlink()
+        with patch.dict(os.environ, env), self.assertRaises(ValueError):
+            research.publish_persisted_live(self.s.state, self.s.feed_path, opener=opener)
+
     def test_C_chunk_failure_retries_checkpoint_transport_only(self):
         site = StagedSite(self.s, failure="chunk")
         # Any attempt to settle after checkpoint creation is a regression.
