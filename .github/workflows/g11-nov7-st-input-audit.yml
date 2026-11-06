@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: g11-three-phase-runtime-contract-gate-${{ github.ref }}
+  group: g11-st-input-audit-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-published-2026-11-07-42298623458
+          key: g11-state-v4-published-2026-11-07-42304855479
           fail-on-cache-miss: true
       - name: Extract a read-only audit copy of saved morning evidence
         env:
