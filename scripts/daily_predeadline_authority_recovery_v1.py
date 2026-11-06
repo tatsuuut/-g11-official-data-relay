@@ -882,6 +882,10 @@ def deliver(state, feed_path, origin):
         "not_published_after_deadline": added["expired"], "site_payload_sha256": sha(data),
         "verified_p3_live_count": sum(bool(r.get("predeadline")) for r in actual.values()),
         "verified_v4_live_count": sum(bool(((r.get("abeken_shadow") or {}).get("v53") or {}).get("live")) for r in actual.values())}
+    from critical_saved_publication_v1 import publication_timing
+    receipt['publication_timing'] = publication_timing(out, {
+        'PREDICTION_LOCKED_BEFORE_DEADLINE': added['p3'],
+        'V53_LOCKED_BEFORE_DEADLINE': added['v4']}, clock())
     atomic(state / "rescue/predeadline-delivery.json", canonical(receipt) + b"\n")
     print(json.dumps(receipt, sort_keys=True))
     # The accepted immutable rescue feed is the only source. This metadata-only
@@ -930,6 +934,35 @@ def night_overlay(accepted, results, now):
     return out
 
 
+def saved_p3_abstain(row, live=False):
+    """Recognize a saved variable-policy zero without treating missing bets as zero."""
+    source = row.get('predeadline') if live else row
+    if not isinstance(source, dict): return False
+    c = source.get('trifecta_confidence') or {}
+    if not isinstance(c, dict): return False
+    if (source.get('practical_bets') != [] or type(source.get('production_points')) is not int
+            or source['production_points'] != 0
+            or row.get('special_case_id') or row.get('special_strength')
+            or row.get('p3_logic_id') != 'CURRENT_GROWTH_P3' or row.get('p3_status') != 'PASS'
+            or c.get('schema') != 'G11_P3_TRIFECTA_CONFIDENCE_V2'
+            or c.get('selection_policy') != 'TRUE_MORNING_JOINT_MASS_VARIABLE_0_15_V1'
+            or c.get('morning_or_live') != ('LIVE' if live else 'MORNING')
+            or c.get('race_id') != row['key'] or c.get('race_deadline_at') != row['deadline_jst']
+            or type(c.get('production_bet_count')) is not int or c['production_bet_count'] != 0
+            or c.get('production_bet_order') != []
+            or any(not re.fullmatch(r'[a-f0-9]{64}', str(c.get(k, '')))
+                   for k in ('bet_artifact_sha', 'snapshot_id', 'p3_engine_fingerprint'))): return False
+    try:
+        predicted, captured, deadline = [datetime.fromisoformat(c[k])
+            for k in ('prediction_locked_at', 'confidence_captured_at', 'race_deadline_at')]
+        if not all(t.tzinfo is not None for t in (predicted, captured, deadline)) or not predicted <= captured < deadline:
+            return False
+    except (TypeError, ValueError, KeyError): return False
+    return (source.get('status') == 'READY' and source.get('morning_lock_mutated') is False
+            and saved_p3_abstain(row)
+            and c['p3_engine_fingerprint'] == row['trifecta_confidence']['p3_engine_fingerprint']) if live else True
+
+
 def night_scores(feed, results, held=None):
     """Separate rescue audit, never a formal BET or research ledger."""
     official={r.race_key:r for r in results};audit={}
@@ -946,13 +979,18 @@ def night_scores(feed, results, held=None):
             reason=(held or {}).get(row['key'],{}).get(system)
             if reason:
                 entries[system]={'status':'HELD_INVALID_FIXED_PREDICTION','reason':reason};continue
-            if not bets or not at:
+            abstain = bets == [] and system in {'p3_rescue', 'p3_live'} and saved_p3_abstain(row, system == 'p3_live')
+            if (not bets and not abstain) or not at:
                 entries[system]={'status':'NO_FIXED_PREDICTION'};continue
             try:
                 fixed,deadline=datetime.fromisoformat(at),datetime.fromisoformat(row['deadline_jst'])
                 require(type(bets) is list and len(set(bets))==len(bets)
                     and fixed.tzinfo is not None and deadline.tzinfo is not None and fixed<deadline, 'NIGHT_FIXED_PROOF')
                 require(all(type(b) is str and re.fullmatch(r'[1-6]-[1-6]-[1-6]',b) and len(set(b.split('-')))==3 for b in bets), 'NIGHT_BETS')
+                if abstain:
+                    entries[system]={'status':'ABSTAIN','fixed_at':at,'bets':[], 'hit':False,
+                      'virtual_investment':0,'virtual_refund':0,'virtual_payout':0,'virtual_profit':0}
+                    continue
                 gross=100*len(bets);refund=100*sum(bool(set(map(int,b.split('-')))&set(r.refund_boats)) for b in bets)
                 payout=sum(s.payout for s in r.trifecta_settlements if s.combination in bets)
                 entries[system]={'status':'SETTLED','fixed_at':at,'bets':bets,'hit':any(s.combination in bets for s in r.trifecta_settlements),
@@ -1156,6 +1194,7 @@ def run_delayed_night(state, day, output, origin):
         'RESULTS':len(results),'RACES':len(expected),'PENDING':0,'PREDICTION_RECALCULATION':0,
         'CANONICAL_MORNING_PROMOTED':False,'NIGHT_RESEARCH_CONNECTED':False,
         'SETTLED_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='SETTLED' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
+        'ABSTAIN_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='ABSTAIN' for v in scores.values()) for s in ('p3_rescue','p3_live')},
         'HELD_BY_SYSTEM':{s:sum(v['engines'][s]['status']=='HELD_INVALID_FIXED_PREDICTION' for v in scores.values()) for s in ('p3_rescue','abeken_rescue','p3_live','abeken_live')},
         'GORIPAN':'SEPARATE_SAVED_LOCK_LEDGER_NO_BACKFILL','PROTECTED_UNCHANGED':True,'FIXED_BUT_NOT_PUBLISHED_LIVE':unpublished}
     data=canonical(out)+b'\n'

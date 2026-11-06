@@ -50,6 +50,23 @@ class ContinuationTests(unittest.TestCase):
         self.assertFalse(result['races'][1]['before_deadline'])
         self.assertEqual('SERVER_READBACK_NOT_DEVICE_ARRIVAL', result['scope'])
 
+    def test_rescue_publication_elapsed_time_uses_the_same_spacing(self):
+        result = {'STATUS': 'SAME_DAY_RESCUE_COMPLETE', 'PHASE': 'PREDEADLINE_RESCUE',
+            'OPERATIONAL_DATE_JST': DAY, 'FEED_EMITTED': True, 'MORNING_IMMUTABLE': True}
+        feed = {'operational_date_jst': DAY, 'stage': 'MORNING', 'status': 'PASS',
+            'SNAPSHOT_CLASS': 'SAME_DAY_RESCUE_BOUNDARY', 'source': {'run_id': 42}}
+        for elapsed, expected in [(0, 45), (30, 15), (45, 0), (90, 0)]:
+            feed['generated_at_jst'] = (NOW-timedelta(seconds=elapsed)).isoformat()
+            self.assertEqual(expected, critical.rescue_continuation_delay(result, feed, DAY, '42', NOW))
+        for target, field, value in [('feed', 'generated_at_jst', (NOW+timedelta(seconds=1)).isoformat()),
+                ('feed', 'source', {'run_id': 41}), ('feed', 'stage', 'NIGHT'),
+                ('result', 'MORNING_IMMUTABLE', False), ('result', 'PHASE', 'SAME_DAY_RESCUE'),
+                ('result', 'OPERATIONAL_DATE_JST', '2026-11-05')]:
+            bad_result, bad_feed = copy.deepcopy(result), copy.deepcopy(feed)
+            (bad_feed if target == 'feed' else bad_result)[field] = value
+            with self.subTest(target=target, field=field), self.assertRaises(RuntimeError):
+                critical.rescue_continuation_delay(bad_result, bad_feed, DAY, '42', NOW)
+
 
 class ResearchTests(unittest.TestCase):
     def setUp(self):
@@ -91,6 +108,41 @@ class ResearchTests(unittest.TestCase):
                 research.publish_persisted_live(self.root, self.feed, opener=self.opener,
                     publisher=Mock(side_effect=RuntimeError('synthetic')))
             self.assertEqual('prior', os.environ['G11_SYNC_OIDC'])
+
+    def test_verified_rescue_uses_existing_sender_after_delivery_and_keeps_locks(self):
+        from test_rescue_transport_contract_v1 import scenario
+        import daily_runtime_delivery_v1 as delivery
+        with scenario('2026-10-22') as (state, feed, site, saved), patch.dict(os.environ, self.env):
+            delivery.deliver(state, feed, delivery.ORIGIN)
+            before = feed.read_bytes()
+            sender = Mock(return_value={'status': 'PASS'})
+            result = research.publish_persisted_live(state, feed, opener=self.opener, publisher=sender)
+            self.assertEqual('PASS', result['status'])
+            self.assertEqual(before, feed.read_bytes())
+            sender.assert_called_once_with(state, feed, delivery.ORIGIN)
+            for path, raw in saved.items():
+                self.assertEqual(raw, path.read_bytes())
+
+    def test_rescue_wrong_receipt_or_cohort_never_requests_credentials(self):
+        from test_rescue_transport_contract_v1 import scenario
+        import daily_runtime_delivery_v1 as delivery
+        for change in ['authority', 'failed', 'day', 'formal']:
+            with self.subTest(change=change), scenario('2026-10-22') as (state, feed, site, saved), \
+                    patch.dict(os.environ, self.env):
+                delivery.deliver(state, feed, delivery.ORIGIN)
+                receipt_path = state/'rescue/predeadline-delivery.json'
+                receipt = json.loads(receipt_path.read_bytes())
+                if change == 'authority': receipt['authority_sha256'] = '0'*64
+                if change == 'failed': receipt['site_get_readback'] = 'FAIL'
+                if change == 'day': receipt['operational_date_jst'] = '2026-10-21'
+                receipt_path.write_text(json.dumps(receipt))
+                if change == 'formal':
+                    value = json.loads(feed.read_bytes()); value['races'][0]['research_eligible'] = True
+                    feed.write_text(json.dumps(value))
+                opener = Mock()
+                with self.assertRaises(ValueError):
+                    research.publish_persisted_live(state, feed, opener=opener)
+                opener.assert_not_called()
 
 
 class ArchiveTests(unittest.TestCase):
@@ -154,7 +206,7 @@ class WorkflowTests(unittest.TestCase):
         import textwrap
         text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
         for name in ['Encrypt critical state before optional work', 'Encrypt changed state before persistence',
-                     'Persist delivery receipts', 'Keep the predeadline relay alive between delayed cron starts']:
+                     'Persist delivery receipts', 'Keep the predeadline relay alive between delayed cron starts', 'Rescue']:
             step = text.split('      - name: '+name+'\n', 1)[1].split('      - name:', 1)[0]
             script = textwrap.dedent(step.split('        run: |\n', 1)[1])
             result = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True)
@@ -177,7 +229,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("steps.delivery-checkpoint.outputs.ready=='true'", step(order[-1]))
         self.assertEqual(3, text.count('python3 scripts/encrypt_runtime_state_v1.py'))
 
-    def test_only_normal_frozen_live_defers_research_and_failed_publish_keeps_it(self):
+    def test_normal_and_rescue_live_defer_research_and_failed_publish_keeps_it(self):
         import itertools
         import re
         text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
@@ -194,10 +246,19 @@ class WorkflowTests(unittest.TestCase):
             values = {'steps.deme-source.outcome': 'success', 'steps.due.outputs.phase': phase,
                 'steps.authority.outputs.frozen': frozen, 'steps.critical.outputs.rescue': rescue,
                 'steps.authority.outputs.rescue_bootstrap': bootstrap}
-            deferred = phase == 'predeadline' and frozen == 'true' and rescue != 'true' and bootstrap != 'true'
+            deferred = phase == 'predeadline' and (frozen == 'true' or rescue == 'true' or bootstrap == 'true')
             with self.subTest(**values):
                 self.assertEqual(not deferred, condition('P3 research update', values))
                 self.assertEqual(deferred, condition('P3 research update after LIVE publication', values))
+
+    def test_rescue_continuation_uses_verified_elapsed_time_and_safe_dispatch(self):
+        text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
+        step = text.split('      - name: Rescue\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('--rescue-continuation-delay', step)
+        self.assertLess(step.index('dynamic_last_race_heartbeat.py'), step.index('--rescue-continuation-delay'))
+        self.assertEqual(2, step.count('dynamic_last_race_heartbeat.py'))
+        self.assertIn('predeadline_dispatch_v1.py --day "$d" --mode continuation', step)
+        self.assertNotIn('gh workflow run g11-free-runner.yml', step)
 
 
 if __name__ == '__main__': unittest.main()

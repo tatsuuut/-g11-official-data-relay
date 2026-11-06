@@ -193,6 +193,10 @@ class RescueTransportContractTests(unittest.TestCase):
                 self.assertEqual(receipt["site_get_readback"], "PASS")
                 self.assertEqual(receipt["verified_p3_live_count"], 1)
                 self.assertEqual(receipt["verified_v4_live_count"], 1)
+                timing = receipt['publication_timing']
+                self.assertEqual('SERVER_READBACK_NOT_DEVICE_ARRIVAL', timing['scope'])
+                self.assertEqual(1, len(timing['races']))
+                self.assertTrue(timing['races'][0]['five_minute_target_met'])
                 self.assertEqual(site.reads, ["display", "stored", "stored"])
                 self.assertEqual(len(site.posts), 1)
                 self.assertEqual(receipt["site_payload_sha256"], hot.hash_bytes(site.raw))
