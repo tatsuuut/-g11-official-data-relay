@@ -6,8 +6,60 @@ from pathlib import Path
 import tempfile
 import types
 import unittest
+import subprocess
+import sys
 
 import daily_predeadline_authority_recovery_v1 as recovery
+
+
+class SelectedSourceBootstrapTests(unittest.TestCase):
+    def run_freeze(self, *, missing_dependency=False, phase="morning"):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "selected-private"
+            relay = source / "g11/relay"
+            relay.mkdir(parents=True)
+            (source / "g11/__init__.py").write_text("")
+            if not missing_dependency:
+                (source / "g11/fixed_model_fixture.py").write_text("PIN = 'selected-fixed-release'\n")
+            (relay / "daily_runtime_authority_v1.py").write_text(
+                "def create(state, day, source, sha):\n"
+                "    from g11.fixed_model_fixture import PIN\n"
+                "    assert PIN == 'selected-fixed-release'\n"
+                "    return {'runtime_source_sha': sha, 'authority_sha256': PIN}\n"
+                "def load(state, day):\n"
+                "    raise RuntimeError('EXISTING_AUTHORITY_REQUIRED')\n"
+                "def verify_runtime(state, day, source):\n"
+                "    from g11.fixed_model_fixture import PIN\n"
+                "    assert PIN == 'selected-fixed-release'\n")
+            decoy = root / "unselected/g11"
+            decoy.mkdir(parents=True)
+            (decoy / "__init__.py").write_text("")
+            (decoy / "fixed_model_fixture.py").write_text("PIN = 'unselected-release'\n")
+            env = dict(os.environ, PYTHONPATH=str(decoy.parent))
+            env.pop("GITHUB_OUTPUT", None)
+            return subprocess.run([sys.executable,
+                str(Path(__file__).with_name("daily_runtime_bootstrap_v1.py").resolve()),
+                "freeze", "--state-root", str(root / "state"),
+                "--source-root", str(source), "--source-sha", "a" * 40,
+                "--operational-date", "2026-11-07", "--phase", phase],
+                cwd=root, env=env, capture_output=True, text=True)
+
+    def test_clean_cli_imports_selected_source_for_create_and_verify(self):
+        result = self.run_freeze()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["authority_sha256"], "selected-fixed-release")
+
+    def test_missing_selected_dependency_still_fails_without_fallback(self):
+        result = self.run_freeze(missing_dependency=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ModuleNotFoundError", result.stderr)
+        self.assertNotIn('"status": "PASS"', result.stdout)
+
+    def test_night_does_not_create_a_new_authority(self):
+        result = self.run_freeze(phase="night")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("EXISTING_AUTHORITY_REQUIRED", result.stderr)
 
 
 class RecoveryTests(unittest.TestCase):
@@ -810,4 +862,5 @@ class StoredRescueTransportTests(unittest.TestCase):
             self.assertIn("audience=g11-race-lab",mint.call_args.args[0].full_url)
             self.assertEqual(read.call_args.kwargs,{"token":"fixture-night"})
             self.assertNotIn("G11_SYNC_OIDC",os.environ)
+
 
