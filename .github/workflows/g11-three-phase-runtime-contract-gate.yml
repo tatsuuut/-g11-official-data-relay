@@ -84,18 +84,24 @@ jobs:
             if any(s in file.name.lower() for s in ('report','failure','health')):
              print('DIAGNOSTIC_CONTENT',rel,json.dumps(obj,ensure_ascii=False)[:24000])
           from g11.canonical import official_pipeline as official
-          saved=official.OfficialArtifactStore(store).load_verified_snapshot('morning','official-day-input')
-          bridge=official.FORMAL_GATE.build_canonical_official_morning_input(saved)
-          gate=official.FORMAL_GATE.assess_day_bundle(bridge['RAW_DAY'],bridge['FIELD_OBSERVATIONS'])
-          print('GATE_EXCLUSIONS',json.dumps(gate['EXCLUDED_RACES'],ensure_ascii=False))
-          missing=['20261107-02-03','20261107-02-07','20261107-10-01','20261107-10-07','20261107-11-03','20261107-11-07','20261107-23-01','20261107-23-04','20261107-23-08','20261107-23-09']
-          for key in missing:
-           try:
-            invocation=official.FORMAL_ADAPTER.prepare_canonical_official_morning_invocation(saved,key)
-            print('SAVED_ADMISSION',key,'PASS',list(invocation))
-           except Exception as exc:
-            print('SAVED_ADMISSION',key,type(exc).__name__,str(exc))
+          sys.path.insert(0,'scripts')
+          from rescue_night_result_parser_v1 import official_input_compatibility
+          with official_input_compatibility():
+           saved=official.OfficialArtifactStore(store).load_verified_snapshot('morning','official-day-input')
+           bridge=official.FORMAL_GATE.build_canonical_official_morning_input(saved)
+           gate=official.FORMAL_GATE.assess_day_bundle(bridge['RAW_DAY'],bridge['FIELD_OBSERVATIONS'])
+           print('GATE_EXCLUSIONS',json.dumps(gate['EXCLUDED_RACES'],ensure_ascii=False))
+           missing=['20261107-02-03','20261107-02-07','20261107-10-01','20261107-10-07','20261107-11-03','20261107-11-07','20261107-23-01','20261107-23-04','20261107-23-08','20261107-23-09']
+           for key in missing:
+            try:
+             invocation=official.FORMAL_ADAPTER.prepare_canonical_official_morning_invocation(saved,key)
+             print('SAVED_ADMISSION',key,'PASS',list(invocation))
+            except Exception as exc:
+             print('SAVED_ADMISSION',key,type(exc).__name__,str(exc))
           print('PREDICTIONS_EXECUTED',0)
+          for file in sorted((store/'snapshots/morning').glob('current-growth-p3-*.json'))[:3]:
+           p=json.loads(file.read_bytes())['PAYLOAD']
+           print('P3_TIME',file.name,p.get('PREDICTION_AT'),p.get('DATA_CAPTURED_AT'))
           print('READ_ONLY_DIAGNOSTICS_COMPLETE')
           PY
   saved-rescue-publication-audit:
