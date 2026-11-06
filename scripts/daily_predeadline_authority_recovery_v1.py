@@ -940,12 +940,15 @@ def saved_p3_abstain(row, live=False):
     if not isinstance(source, dict): return False
     c = source.get('trifecta_confidence') or {}
     if not isinstance(c, dict): return False
+    policy = c.get('selection_policy')
+    weather_policy = 'P3_MORNING_LIVE_JOINT_MASS_0_15_V1'
+    first_day = {'TRUE_MORNING_JOINT_MASS_VARIABLE_0_15_V1': '20261105', weather_policy: '20261107'}.get(policy)
     if (source.get('practical_bets') != [] or type(source.get('production_points')) is not int
             or source['production_points'] != 0
             or row.get('special_case_id') or row.get('special_strength')
             or row.get('p3_logic_id') != 'CURRENT_GROWTH_P3' or row.get('p3_status') != 'PASS'
             or c.get('schema') != 'G11_P3_TRIFECTA_CONFIDENCE_V2'
-            or c.get('selection_policy') != 'TRUE_MORNING_JOINT_MASS_VARIABLE_0_15_V1'
+            or first_day is None or row.get('key', '')[:8] < first_day
             or c.get('morning_or_live') != ('LIVE' if live else 'MORNING')
             or c.get('race_id') != row['key'] or c.get('race_deadline_at') != row['deadline_jst']
             or type(c.get('production_bet_count')) is not int or c['production_bet_count'] != 0
@@ -958,8 +961,32 @@ def saved_p3_abstain(row, live=False):
         if not all(t.tzinfo is not None for t in (predicted, captured, deadline)) or not predicted <= captured < deadline:
             return False
     except (TypeError, ValueError, KeyError): return False
+    morning_saved = saved_p3_abstain(row) if live else False
+    if live and policy == weather_policy and not morning_saved:
+        # LIVE may decline an originally positive saved MORNING selection.
+        # Verify the original receipt instead of requiring MORNING to be zero.
+        m = row.get('trifecta_confidence') or {}
+        bets, count = row.get('practical_bets'), row.get('production_points')
+        proof = row.get('same_day_rescue_lock') or {}
+        try:
+            predicted, captured, fixed, deadline = [datetime.fromisoformat(v) for v in
+                (m['prediction_locked_at'],m['confidence_captured_at'],proof['p3_locked_at_jst'],row['deadline_jst'])]
+            morning_saved = (m.get('schema') == 'G11_P3_TRIFECTA_CONFIDENCE_V2'
+                and m.get('selection_policy') == policy and m.get('morning_or_live') == 'MORNING'
+                and m.get('race_id') == row['key'] and m.get('race_deadline_at') == row['deadline_jst']
+                and type(count) is int and 1 <= count <= 15 and type(bets) is list and len(bets) == count
+                and len(set(bets)) == count and all(type(b) is str and re.fullmatch(r'[1-6]-[1-6]-[1-6]',b)
+                    and len(set(b.split('-'))) == 3 for b in bets)
+                and m.get('production_bet_count') == count and m.get('production_bet_order') == bets
+                and all(re.fullmatch(r'[a-f0-9]{64}',str(m.get(k,'')))
+                    for k in ('snapshot_id','bet_artifact_sha','p3_engine_fingerprint'))
+                and re.fullmatch(r'[a-f0-9]{64}',str(row.get('p3_snapshot_sha256',''))) is not None
+                and proof.get('p3_snapshot_sha256') == row.get('p3_snapshot_sha256')
+                and all(t.tzinfo is not None for t in (predicted,captured,fixed,deadline))
+                and predicted <= captured <= fixed < deadline)
+        except (TypeError, ValueError, KeyError): morning_saved = False
     return (source.get('status') == 'READY' and source.get('morning_lock_mutated') is False
-            and saved_p3_abstain(row)
+            and morning_saved
             and c['p3_engine_fingerprint'] == row['trifecta_confidence']['p3_engine_fingerprint']) if live else True
 
 
