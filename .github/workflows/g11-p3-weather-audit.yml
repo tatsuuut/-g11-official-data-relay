@@ -14,7 +14,7 @@ jobs:
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: p3-weather-readonly-20261106-6ecc5a73
+          key: p3-weather-readonly-20261106-25aef7f6
           restore-keys: |
             g11-state-v4-published-2026-11-06-
       - name: Restore isolated saved state
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{secrets.PRIVATE_SOURCE_REPO}}
-          ref: 6ecc5a7391df6d714bf17c6c92b343dcafffda66
+          ref: 25aef7f6e4c203f6e6cf29bff0756938e980f6b8
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
