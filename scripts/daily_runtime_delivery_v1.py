@@ -912,6 +912,14 @@ def deliver_rescue_predeadline(state, feed_path, origin):
     print(json.dumps(receipt, sort_keys=True))
     return receipt
 
+def recount_rescue_abeken(feed):
+    """Count only retained wire snapshots, never the pre-filter model total."""
+    if isinstance(feed.get('abeken'), dict):
+        feed['abeken']['predictions_emitted'] = sum(
+            isinstance((row.get('abeken_shadow') or {}).get(stage), dict)
+            for row in feed['races'] for stage in ('morning', 'live'))
+
+
 def deliver_rescue(state, feed_path, origin, attempts, pause):
     """Transport one explicitly nonresearch boundary; no canonical fallback."""
     boundary_path = state.resolve() / 'rescue/boundary.json'
@@ -948,6 +956,7 @@ def deliver_rescue(state, feed_path, origin, attempts, pause):
         for row in projected['races']:
             if proofs[row['key']]:
                 row['same_day_rescue_lock'] = proofs[row['key']]
+        recount_rescue_abeken(projected)
         data = hot.compact(projected)
         path.write_bytes(data)
         response = Path(directory) / 'response.json'
@@ -972,6 +981,10 @@ def deliver_rescue(state, feed_path, origin, attempts, pause):
                 and headers.get('x-g11-source-feed-sha256') == hot.hash_bytes(data) == ack.get('payload_sha256'),
                 'RESCUE_SITE_READBACK_IDENTITY')
         expected = {r['key']: r for r in projected['races']}
+        require(len(readback['races']) == len(expected)
+                and {r['key'] for r in readback['races']} == set(expected)
+                and readback.get('abeken') == projected.get('abeken'),
+                'RESCUE_SITE_READBACK_SCOPE')
         for row in readback['races']:
             before = expected[row['key']]
             for field in ('same_day_rescue_lock', 'practical_bets', 'p3_snapshot_sha256', 'abeken_shadow'):
