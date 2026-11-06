@@ -83,6 +83,19 @@ jobs:
             obj=json.loads(file.read_bytes())
             if any(s in file.name.lower() for s in ('report','failure','health')):
              print('DIAGNOSTIC_CONTENT',rel,json.dumps(obj,ensure_ascii=False)[:24000])
+          from g11.canonical import official_pipeline as official
+          saved=official.OfficialArtifactStore(store).load_verified_snapshot('morning','official-day-input')
+          bridge=official.FORMAL_GATE.build_canonical_official_morning_input(saved)
+          gate=official.FORMAL_GATE.assess_day_bundle(bridge['RAW_DAY'],bridge['FIELD_OBSERVATIONS'])
+          print('GATE_EXCLUSIONS',json.dumps(gate['EXCLUDED_RACES'],ensure_ascii=False))
+          missing=['20261107-02-03','20261107-02-07','20261107-10-01','20261107-10-07','20261107-11-03','20261107-11-07','20261107-23-01','20261107-23-04','20261107-23-08','20261107-23-09']
+          for key in missing:
+           try:
+            invocation=official.FORMAL_ADAPTER.prepare_canonical_official_morning_invocation(saved,key)
+            print('SAVED_ADMISSION',key,'PASS',list(invocation))
+           except Exception as exc:
+            print('SAVED_ADMISSION',key,type(exc).__name__,str(exc))
+          print('PREDICTIONS_EXECUTED',0)
           print('READ_ONLY_DIAGNOSTICS_COMPLETE')
           PY
   saved-rescue-publication-audit:
