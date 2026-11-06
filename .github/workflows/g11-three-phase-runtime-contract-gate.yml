@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   nov7-saved-morning-audit:
-    if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov7-live-gate-scope'
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov7-yotsuba-time'
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -65,36 +65,28 @@ jobs:
           PYTHONPATH: .g11-private
         run: |
           python3 - "${RUNNER_TEMP}/morning-audit" <<'PY'
-          import gzip,hashlib,json,pathlib,sys,collections
-          root=pathlib.Path(sys.argv[1]); store=root/'store'; day='2026-11-07'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]);store=root/'store';day='2026-11-07'
           from g11.relay import daily_runtime_authority_v1 as daily
-          a=daily.load(root,day)
           daily.verify_runtime(root,day,pathlib.Path('.g11-private').resolve())
-          locks=daily.verify_locks(root,day,'MORNING',exact=True)
-          print('SAVED_AUTHORITY',json.dumps({'sha':a['authority_sha256'],'source':a['runtime_source_sha'],'lock_count':len(locks)}))
-          p=store/'g11/p3-true-only-v2'/day
-          m=json.loads((p/'manifest.json').read_bytes())
-          hraw=(p/'racer-history.json.gz').read_bytes();h=json.loads(gzip.decompress(hraw))
-          print('P3_MANIFEST',json.dumps(m,ensure_ascii=False))
-          print('RACER_HISTORY',json.dumps({'sha':hashlib.sha256(hraw).hexdigest(),'target':h['TARGET_DAY'],'days':h['COVERAGE_DAYS'],'missing':h['MISSING_DAYS'],'events':len(h['EVENTS']),'latest':max(e['day'] for e in h['EVENTS'])}))
-          for file in sorted((store/'snapshots/morning').glob('*.json')):
-           v=json.loads(file.read_bytes()); payload=v.get('PAYLOAD',{})
-           if file.name=='official-day-input.json':
-            print('OFFICIAL_SCOPE',json.dumps({k:v for k,v in payload.items() if any(x in k for x in ['SCOPE','QUARANT','ISOLAT','EXCLUD','COUNT'])},ensure_ascii=False))
-            print('OFFICIAL_INPUT_KEYS',list(payload))
-           if file.name.startswith('current-growth-p3-'):
-            if file.name.endswith('20261107-01-01.json'):
-             print('P3_SAVED_KEYS',list(payload));print('P3_PIN',json.dumps({k:v for k,v in payload.items() if any(x in k for x in ['PIN','TRUE_AI','RACER_HISTORY'])},ensure_ascii=False)[:16000])
-           def reasons(obj,path=''):
-            if isinstance(obj,dict):
-             for k,value in obj.items():
-              if any(x in k.upper() for x in ['ERROR','FAILURE','QUARANTINE']) and value:
-               print('SAVED_DIAGNOSTIC',file.name,path+'/'+k,json.dumps(value,ensure_ascii=False)[:12000])
-              elif isinstance(value,(dict,list)): reasons(value,path+'/'+k)
-            elif isinstance(obj,list):
-             for i,value in enumerate(obj): reasons(value,path+'/'+str(i))
-           if not file.name.startswith('current-growth-p3-'): reasons(payload)
-          print('READ_ONLY_AUDIT_COMPLETE')
+          daily.verify_locks(root,day,'MORNING',exact=True)
+          before={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (store/'snapshots/morning').glob('*.json')}
+          sys.path.insert(0,'scripts')
+          from rescue_night_result_parser_v1 import official_input_compatibility
+          from g11.canonical import official_pipeline as official
+          saved=official.OfficialArtifactStore(store).load_verified_snapshot('morning','official-day-input')
+          missing=['20261107-02-03','20261107-02-07','20261107-10-01','20261107-10-07','20261107-11-03','20261107-11-07','20261107-23-01','20261107-23-04','20261107-23-08','20261107-23-09']
+          with official_input_compatibility():
+           for key in missing:
+            try:
+             invocation=official.FORMAL_ADAPTER.prepare_canonical_official_morning_invocation(saved,key)
+             official.FORMAL_ENGINE.run_canonical_morning_prediction(invocation,saved['SNAPSHOT_SHA256'],key)
+             print('ISOLATED_PRODUCER_DIAGNOSIS',key,'PASS')
+            except Exception as exc:
+             print('ISOLATED_PRODUCER_DIAGNOSIS',key,type(exc).__name__,str(exc))
+          after={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (store/'snapshots/morning').glob('*.json')}
+          assert before==after
+          print('SAVED_LOCKS_UNCHANGED',len(after),'PUBLICATION',False)
           PY
   saved-rescue-publication-audit:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov6-saved-rescue-publication'
@@ -444,7 +436,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
-          ref: fed87b253eb6a1be57bede495a988339985da9aa
+          ref: f8c02e1d1068efec21b575f424026ffec73e6cfc
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-thirty-budget
           persist-credentials: false
@@ -452,5 +444,4 @@ jobs:
       - name: Verify retained history and all three current research cohorts
         working-directory: .g11-thirty-budget/g11/canonical
         run: python3 -m unittest -v test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget test_deme_discovery_yotsuba test_deme_discovery_standard_preview test_deme_discovery_v5 test_deme_discovery_adoptions
-
 
