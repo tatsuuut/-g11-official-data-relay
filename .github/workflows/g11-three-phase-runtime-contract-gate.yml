@@ -25,6 +25,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  saved-rescue-publication-audit:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov6-saved-rescue-publication'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-06-42135754958
+          fail-on-cache-miss: true
+      - name: Prepare an isolated saved-feed copy
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/g11-saved-publication.tgz" .relay-cache/state.tgz.gpg
+          python3 - <<'PY'
+          import os,pathlib,tarfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-saved-publication'
+          root.mkdir()
+          with tarfile.open(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-saved-publication.tgz','r:gz') as archive:
+              assert all(not pathlib.PurePosixPath(m.name).is_absolute() and '..' not in pathlib.PurePosixPath(m.name).parts
+                  and not m.issym() and not m.islnk() for m in archive.getmembers())
+              archive.extractall(root,filter='data')
+          PY
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: 40dd169569bd0bea8049d92e1b61d05da4d38839
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-frozen
+          persist-credentials: false
+      - name: Install pinned test dependencies
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1' 'catboost==1.2.8'
+      - name: Verify byte-identical replay and projected summary without publication
+        working-directory: .g11-frozen
+        env:
+          PYTHONPATH: .:../scripts
+        run: |
+          python3 ../scripts/audit_saved_rescue_publication_v1.py \
+            --state "${RUNNER_TEMP}/g11-saved-publication" \
+            --output "${RUNNER_TEMP}/g11-saved-publication-output.json"
   saved-receipt-audit:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov6-saved-receipt-audit'
     runs-on: ubuntu-24.04
@@ -217,6 +262,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_predeadline_watchdog_v1.py -q
           python3 -m unittest discover -s scripts -p test_daily_runtime_delivery_v1.py -q
           python3 -m unittest discover -s scripts -p test_critical_saved_publication_v1.py -q
+          python3 -m unittest discover -s scripts -p test_saved_rescue_publication_v1.py -v
 
       - name: Checkout pinned rescue settlement source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

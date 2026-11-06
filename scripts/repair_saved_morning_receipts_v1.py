@@ -55,6 +55,66 @@ def inspect_attempts(state, day, source, now):
     return evidence
 
 
+def emit_saved_repair(args, recovery, now):
+    """Retry delivery from saved bytes, without consuming another repair."""
+    require(args.date == DAY == now.date().isoformat(), 'CURRENT_DAY_ONLY')
+    require(args.source_sha == SOURCE, 'FROZEN_SOURCE')
+    root = args.state / 'rescue'
+    certificate = recovery.verify_boundary(root, args.date)
+    require(certificate['runtime_source_sha'] == args.source_sha, 'BOUNDARY_SOURCE')
+    require(recovery.inventory(args.state / 'store/snapshots') ==
+            certificate['preserved_canonical_lock_files'], 'CANONICAL_LOCKS_CHANGED')
+    paths = [root / 'feed.json', root / 'generation-evidence.json',
+        args.state / 'recovery-repairs' / DAY / 'receipt-scope-v1.json',
+        args.state / 'recovery-repairs' / DAY / 'receipt-scope-v1.result.json']
+    require(all(p.is_file() and not p.is_symlink() for p in paths), 'SAVED_FILES')
+    data = paths[0].read_bytes()
+    feed, evidence, marker, result = [json.loads(p.read_bytes()) for p in paths]
+    require(result.get('status') == 'SAVED' and result.get('run_id') == marker.get('run_id')
+            and marker.get('source_sha') == SOURCE and marker.get('input_sha256') == SAVED_INPUT_SHA256
+            and marker.get('network_allowed') is False
+            and marker.get('canonical_morning_promoted') is False, 'SUCCESSFUL_SAVED_REPAIR')
+    failures = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in (args.state / 'recovery-failures' / DAY).glob('*.json')}
+    require(set(failures) == ATTEMPTS and failures == marker['preserved_failures'], 'FAILURES_CHANGED')
+    boundary = feed['same_day_rescue']
+    require(feed.get('operational_date_jst') == DAY and feed.get('stage') == 'MORNING'
+            and feed.get('SNAPSHOT_CLASS') == 'SAME_DAY_RESCUE_BOUNDARY'
+            and boundary['authority_sha256'] == certificate['authority_sha256']
+            and boundary['official_input_sha256'] == SAVED_INPUT_SHA256
+            and boundary.get('canonical_morning_promoted') is False
+            and boundary.get('same_day_results_used') is False
+            and boundary.get('research_eligible') is False
+            and feed['counts']['formal'] == feed['counts']['research_samples'] == 0
+            and evidence.get('same_day_results_used') is False
+            and evidence.get('normal_locks_written') == 0, 'SAVED_FEED_BINDING')
+    from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
+    from g11.growth_p3.v1_1 import current_runtime_v1 as p3
+    store = OfficialArtifactStore(root / 'store')
+    verify_saved_provenance(store.load_verified_snapshot('morning', 'official-day-input'))
+    rows = [r for r in feed['races'] if r.get('same_day_rescue_lock')]
+    require(len(rows) == len({r['key'] for r in rows}) == boundary['rescued_race_count'], 'SAVED_RACE_COUNT')
+    for row in rows:
+        proof = row['same_day_rescue_lock']
+        require(row['key'] in evidence['generated'] and row.get('result_trifecta') is None
+                and max(datetime.fromisoformat(proof[k]) for k in ('p3_locked_at_jst','v4_locked_at_jst'))
+                    < datetime.fromisoformat(row['deadline_jst']), 'SAVED_RACE_TIME')
+        for name, field in ((p3.snapshot_name(row['key']), 'p3_snapshot_sha256'),
+                            (CanonicalRunner._abeken_v53_morning_name(row['key']), 'v4_snapshot_sha256')):
+            verified = store.load_verified_snapshot('morning', name)
+            require(verified['SNAPSHOT_SHA256'] == proof[field], 'SAVED_LOCK_HASH')
+    # Only the disposable output changes. The immutable feed, LOCKs, failed
+    # attempts and consumed repair marker are retained byte for byte.
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_bytes(data)
+    print(json.dumps({'STATUS':'SAVED_RECOVERY_TRANSPORT_ONLY','PHASE':'SAME_DAY_RESCUE',
+        'OPERATIONAL_DATE_JST':DAY,'NORMAL_MORNING_LOCKS':0,
+        'DELAYED_RECOVERY_LOCKS':len(rows),'STATE_CHANGED':False,'FEED_EMITTED':True,
+        'RESULTS_USED':False,'PREDICTION_RECALCULATION':0,
+        'SAVED_FEED_SHA256':hashlib.sha256(data).hexdigest()},sort_keys=True))
+    return True
+
+
 def run_if_reviewed(argv):
     if os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch':
         return False
@@ -71,6 +131,8 @@ def run_if_reviewed(argv):
     from g11.relay import delayed_morning_recovery_v1 as recovery
     from g11.canonical import official_pipeline as official
     now = recovery.clock()
+    if (args.state / 'rescue/feed.json').exists():
+        return emit_saved_repair(args, recovery, now)
     evidence = inspect_attempts(args.state, args.date, args.source_sha, now)
     certificate = recovery.verify_boundary(args.state / 'rescue', args.date)
     require(certificate['runtime_source_sha'] == args.source_sha, 'BOUNDARY_SOURCE')
