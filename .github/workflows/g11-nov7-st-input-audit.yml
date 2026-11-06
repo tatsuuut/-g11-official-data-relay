@@ -1,0 +1,89 @@
+name: Nov7 saved ST input audit
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g11-three-phase-runtime-contract-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nov7-saved-morning-audit:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov7-st-input-audit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-07-42298623458
+          fail-on-cache-miss: true
+      - name: Extract a read-only audit copy of saved morning evidence
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/morning-audit.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - <<'PY'
+          import os,pathlib,tarfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'morning-audit'
+          root.mkdir()
+          with tarfile.open(pathlib.Path(os.environ['RUNNER_TEMP'])/'morning-audit.tgz','r:gz') as a:
+              assert all(not pathlib.PurePosixPath(m.name).is_absolute() and '..' not in pathlib.PurePosixPath(m.name).parts and not m.issym() and not m.islnk() for m in a.getmembers())
+              a.extractall(root,filter='data')
+          PY
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: 7433740d794afc7e221bf0c75be9e3240c3c33a9
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-private
+          persist-credentials: false
+      - name: Verify frozen models, daily history and saved rejection reasons
+        env:
+          PYTHONPATH: .g11-private
+        run: |
+          python3 - "${RUNNER_TEMP}/morning-audit" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]);store=root/'store';day='2026-11-07'
+          from g11.relay import daily_runtime_authority_v1 as daily
+          daily.verify_runtime(root,day,pathlib.Path('.g11-private').resolve())
+          daily.verify_locks(root,day,'MORNING',exact=True)
+          before={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (store/'snapshots/morning').glob('*.json')}
+          sys.path.insert(0,'scripts')
+          from rescue_night_result_parser_v1 import official_input_compatibility
+          from g11.canonical import official_pipeline as official
+          saved=official.OfficialArtifactStore(store).load_verified_snapshot('morning','official-day-input')
+          keys=['20261107-02-03','20261107-02-07','20261107-10-01','20261107-10-07','20261107-11-03','20261107-11-07','20261107-23-01','20261107-23-04','20261107-23-08','20261107-23-09']
+          with official_input_compatibility():
+           for key in keys:
+            inv=official.FORMAL_ADAPTER.prepare_canonical_official_morning_invocation(saved,key)
+            rows=inv['PERMIT']['PAYLOAD']['AUTHORIZED_ROWS']
+            fields=official.FORMAL_ENGINE.RAW_HEADER
+            print('ST_INPUT',key,json.dumps([{k:v for k,v in zip(fields,row) if k in ('艇番','登録番号','平均ST')} for row in rows],ensure_ascii=False))
+          print('SAVED_INPUT_TOP_KEYS',list(saved))
+          after={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (store/'snapshots/morning').glob('*.json')}
+          assert before==after
+          print('SAVED_LOCKS_UNCHANGED',len(after),'PREDICTIONS_EXECUTED',0,'PUBLICATION',False)
+          PY
