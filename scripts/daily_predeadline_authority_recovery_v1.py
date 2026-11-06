@@ -942,7 +942,7 @@ def saved_p3_abstain(row, live=False):
     if not isinstance(c, dict): return False
     policy = c.get('selection_policy')
     weather_policy = 'P3_MORNING_LIVE_JOINT_MASS_0_15_V1'
-    first_day = {'TRUE_MORNING_JOINT_MASS_VARIABLE_0_15_V1': '20261105', weather_policy: '20261107'}.get(policy)
+    first_day = {'TRUE_MORNING_JOINT_MASS_VARIABLE_0_15_V1': '20261105', weather_policy: '20261107', 'P3_TRUE_ONLY_MORNING_LIVE_0_15_V2': '20261107'}.get(policy)
     if (source.get('practical_bets') != [] or type(source.get('production_points')) is not int
             or source['production_points'] != 0
             or row.get('special_case_id') or row.get('special_strength')
@@ -962,7 +962,7 @@ def saved_p3_abstain(row, live=False):
             return False
     except (TypeError, ValueError, KeyError): return False
     morning_saved = saved_p3_abstain(row) if live else False
-    if live and policy == weather_policy and not morning_saved:
+    if live and policy in (weather_policy, 'P3_TRUE_ONLY_MORNING_LIVE_0_15_V2') and not morning_saved:
         # LIVE may decline an originally positive saved MORNING selection.
         # Verify the original receipt instead of requiring MORNING to be zero.
         m = row.get('trifecta_confidence') or {}
