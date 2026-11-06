@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from g11.canonical import official_pipeline as official
 from g11.canonical import test_official_pipeline as fixtures
-from morning_race_isolation_v1 import isolated_results, valid_quarantine
+from morning_race_isolation_v1 import isolated_results, valid_quarantine, results_for_saved_morning
 from rescue_night_result_parser_v1 import official_input_compatibility
 
 
@@ -126,6 +126,34 @@ class MorningIsolationTests(unittest.TestCase):
             _,eligible,_=runner._formal_prediction_scope(verified,failure_prefix='TEST')
             self.assertEqual(len(eligible),23)
             official._night_sg_race_keys_from_saved_b(store,DAY,set(eligible),fixtures.IdentityArchiveExtractor())
+
+    def test_night_keeps_saved_scope_and_records_preexisting_exclusions(self):
+        with official_input_compatibility():
+            store,runner,_=self.run_morning(bad_b=True)
+        before=store.load_verified_snapshot('morning','official-day-input')
+        payload=before['SNAPSHOT']['PAYLOAD']
+        for damage,status in ((None,'PARSED_BUT_EXCLUDED'),('row','QUARANTINED')):
+            with self.subTest(damage=damage):
+                results,held=results_for_saved_morning(prior_k(DAY,damage),DAY,payload,official,official.parse_result_text)
+                self.assertEqual(23,len(results))
+                self.assertNotIn('20260827-19-01',{r.race_key for r in results})
+                self.assertEqual(held[0]['RACE_KEY'],'20260827-19-01')
+                self.assertEqual(held[0]['RESULT_STATUS'],status)
+        self.assertEqual(before,store.load_verified_snapshot('morning','official-day-input'))
+
+    def test_night_new_bad_missing_extra_or_wrong_day_results_remain_closed(self):
+        with official_input_compatibility():
+            store,runner,_=self.run_morning(bad_b=True)
+        payload=store.load_verified_snapshot('morning','official-day-input')['SNAPSHOT']['PAYLOAD']
+        source=prior_k(DAY)
+        cases=[source.replace('6.06 6 0.06 1.50.0','BROKEN 6 0.06 1.50.0'),
+               fixtures.full_result_text(),
+               source+'\n'+fixtures.full_result_text().replace('19KBGN','18KBGN').replace('下関','徳山'),
+               source.replace('2026/ 8/27','2026/ 8/26')]
+        for value in cases:
+            with self.subTest(value=value[:30]):
+                with self.assertRaises(official.PipelineError):
+                    results_for_saved_morning(value,DAY,payload,official,official.parse_result_text)
 
     def test_fifteen_recovery_races_keep_own_receipts_and_complete_saved_scope(self):
         missing={4000+race*10+1 for race in range(1,13)} | {5000+race*10+1 for race in range(1,4)}
