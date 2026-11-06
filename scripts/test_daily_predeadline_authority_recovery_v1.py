@@ -13,6 +13,50 @@ import daily_predeadline_authority_recovery_v1 as recovery
 
 
 class SelectedSourceBootstrapTests(unittest.TestCase):
+    def test_actual_fixed_bundle_freezes_through_cli_when_private_checkout_is_available(self):
+        source = Path(__file__).resolve().parents[1] / ".g11-private"
+        release = source / "g11/true_ai/v1/models/racer-20261106/release.json"
+        if not release.is_file():
+            self.skipTest("Full private source is exercised by contract CI")
+        wrapper = '''
+import hashlib,json,pathlib,sys
+from datetime import datetime
+sys.path.insert(0,sys.argv[1])
+import daily_runtime_bootstrap_v1 as bootstrap
+source,state=map(pathlib.Path,sys.argv[2:4])
+loader=bootstrap.module
+def fixed_test_clock(path):
+    implementation=loader(path)
+    create=implementation.create
+    def synthetic_create(*args,**kwargs):
+        kwargs['now']=datetime.fromisoformat('2026-11-07T06:00:00+09:00')
+        return create(*args,**kwargs)
+    implementation.create=synthetic_create
+    return implementation
+bootstrap.module=fixed_test_clock
+sys.argv=['daily_runtime_bootstrap_v1.py','freeze','--state-root',str(state),
+    '--source-root',str(source),'--source-sha','a'*40,
+    '--operational-date','2026-11-07','--phase','morning']
+bootstrap.main()
+authority=state/'daily-runtime/2026-11-07/authority.json'
+original=authority.read_bytes()
+bootstrap.main()
+assert authority.read_bytes()==original
+a=json.loads(original)
+approved=json.loads((source/'g11/true_ai/v1/models/racer-20261106/release.json').read_bytes())
+model_hashes=set(a['model_files'].values())
+assert set(approved['MODELS'].values()) <= model_hashes
+assert approved['RACER_HISTORY_SEED_SHA256'] in model_hashes
+assert not (state/'store/snapshots').exists()
+print('ACTUAL_FIXED_BUNDLE_BOOTSTRAP_PASS')
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            result = subprocess.run([sys.executable, "-c", wrapper,
+                str(Path(__file__).resolve().parent), str(source), temporary],
+                cwd=temporary, capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ACTUAL_FIXED_BUNDLE_BOOTSTRAP_PASS", result.stdout)
+
     def run_freeze(self, *, missing_dependency=False, phase="morning"):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -20,8 +64,15 @@ class SelectedSourceBootstrapTests(unittest.TestCase):
             relay = source / "g11/relay"
             relay.mkdir(parents=True)
             (source / "g11/__init__.py").write_text("")
+            (relay / "__init__.py").write_text(
+                "import sys\n"
+                "if '--state-root' in sys.argv:\n"
+                "    raise SystemExit('AUTHORITY_CREATION_MISREAD_AS_RELAY_EXECUTION')\n")
+            (relay / "library_fixture.py").write_text("READY = True\n")
             if not missing_dependency:
-                (source / "g11/fixed_model_fixture.py").write_text("PIN = 'selected-fixed-release'\n")
+                (source / "g11/fixed_model_fixture.py").write_text(
+                    "from g11.relay.library_fixture import READY\n"
+                    "PIN = 'selected-fixed-release'\n")
             (relay / "daily_runtime_authority_v1.py").write_text(
                 "def create(state, day, source, sha):\n"
                 "    from g11.fixed_model_fixture import PIN\n"
@@ -60,6 +111,19 @@ class SelectedSourceBootstrapTests(unittest.TestCase):
         result = self.run_freeze(phase="night")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("EXISTING_AUTHORITY_REQUIRED", result.stderr)
+
+    def test_library_scope_restores_cli_arguments_and_import_paths_on_failure(self):
+        import daily_runtime_bootstrap_v1 as bootstrap
+        from unittest.mock import patch
+        original_argv, original_path = sys.argv, sys.path[:]
+        with patch.object(bootstrap, "module", return_value=object()):
+            with self.assertRaisesRegex(RuntimeError, "fixture failure"):
+                with bootstrap.source_module(Path("selected")):
+                    self.assertEqual(sys.argv, [original_argv[0]])
+                    self.assertEqual(sys.path[0], str(Path("selected").resolve()))
+                    raise RuntimeError("fixture failure")
+        self.assertIs(sys.argv, original_argv)
+        self.assertEqual(sys.path, original_path)
 
 
 class RecoveryTests(unittest.TestCase):
