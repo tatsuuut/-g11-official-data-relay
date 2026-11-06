@@ -1147,7 +1147,7 @@ def run_delayed_night(state, day, output, origin):
         sys.argv=[sys.argv[0]]
         from g11.relay import daily_runtime_authority_v1 as daily
         from g11.relay import delayed_morning_recovery_v1 as recovery
-        from g11.canonical.official_pipeline import CanonicalRunner,OfficialArtifactStore,result_url,parse_result_text,decode_cp932,_serializable
+        from g11.canonical.official_pipeline import CanonicalRunner,OfficialArtifactStore,PipelineError,result_url,parse_result_text,decode_cp932,_serializable
     finally:sys.argv=original_argv
     import hot_delta_transport_v1 as hot
     recovery.verify_boundary(state/'rescue',day)
@@ -1190,7 +1190,29 @@ def run_delayed_night(state, day, output, origin):
         require(len(results)==len(expected) and {r.race_key for r in results}==expected,'NIGHT_OFFICIAL_INCOMPLETE')
         excluded_results[:]=exclusions
         return results
-    receipt,results=runner.client.fetch_validated_once(f'result-k-{target:%Y%m%d}',url,parse)
+    acquisition_before=inventory(root/'store')
+    try:
+        receipt,results=runner.client.fetch_validated_once(f'result-k-{target:%Y%m%d}',url,parse)
+    except PipelineError as exc:
+        # Match normal NIGHT availability handling so the workflow checkpoints
+        # rejected bytes/request pacing and schedules its bounded continuation.
+        # Identity, payout and saved-scope errors must still fail closed.
+        reason=getattr(exc,'reason',str(exc))
+        if reason not in {'K_DATE_MISSING','NIGHT_RESULTS_PENDING',
+            'HTTP_STATUS_UNSUPPORTED:404','SOURCE_CONTENT_PAUSED','SERIAL_PACING','HOST_PAUSED'}:
+            raise
+        require(before==[inventory(p) for p in protected_roots]
+            and boundary_bytes==(root/'boundary.json').read_bytes()
+            and baseline_bytes==(root/'feed.json').read_bytes(),'NIGHT_PROTECTED_MUTATION')
+        certificate(state,day,allow_night_rollover=True)
+        recovery.verify_boundary(root,day)
+        print(json.dumps({'STATUS':'NIGHT_WAITING_OFFICIAL_RESULTS','PHASE':'NIGHT',
+            'OPERATIONAL_DATE_JST':day,'REASON':reason,
+            'STATE_CHANGED':acquisition_before!=inventory(root/'store'),
+            'FEED_EMITTED':False,'FAIL_CLOSED':True,'RETRY_SCHEDULED':True,
+            'PREDICTION_RECALCULATION':0,'CANONICAL_MORNING_PROMOTED':False,
+            'PROTECTED_UNCHANGED':True},sort_keys=True))
+        return
     store.commit_snapshot('night','official-day-results',{'STATUS':'NIGHT_RESULTS_COMPLETE','OPERATIONAL_DATE_JST':day,
       'EXPECTED_RESULT_COUNT':len(expected),'PENDING_RESULT_COUNT':0,'PENDING_RACE_KEYS':[],
       'RESULTS':[_serializable(r) for r in results],

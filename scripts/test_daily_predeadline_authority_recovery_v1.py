@@ -552,6 +552,160 @@ class FuturePinnedRescueTests(unittest.TestCase):
 
 
 
+class RescueNightAvailabilityTests(unittest.TestCase):
+    """Exercise the actual collector, rejected-byte ledger and NIGHT route."""
+    def setUp(self):
+        from g11.canonical import official_pipeline as official
+        from g11.canonical import test_official_pipeline as fixtures
+        from g11.relay import daily_runtime_authority_v1 as daily
+        from unittest.mock import Mock
+        self.official=official
+        fixture=FuturePinnedRescueTests();fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        self.state=fixture.state;self.day=fixture.day
+        self.now=datetime.fromisoformat(self.day+'T22:00:00+09:00')
+        archive=b'fixed test source archive'
+        fixture.parent.update(model_set_sha256=live.sha(live.canonical(fixture.parent['model_files'])),
+            source_archive='source-'+live.sha(archive)+'.tgz',source_archive_sha256=live.sha(archive))
+        (self.state/'daily-runtime'/self.day/fixture.parent['source_archive']).write_bytes(archive)
+        fixture.write();self.cert=fixture.cert
+        self.store=official.OfficialArtifactStore.initialize(self.state/'rescue/store',self.day,12,self.now.isoformat())
+        self.morning={'OPERATIONAL_DATE_JST':self.day,'RACES':[
+            {'operational_date':self.day,'venue_code':'19','race_no':r} for r in range(1,13)]}
+        self.feed={'operational_date_jst':self.day,'SNAPSHOT_CLASS':'SAME_DAY_RESCUE_BOUNDARY',
+            'same_day_rescue':self.cert,'stage':'MORNING','status':'PASS',
+            'generated_at_jst':self.day+'T09:00:00+09:00',
+            'counts':{'races':12,'formal':0,'excluded':12,'results':0,'pending':12},
+            'races':[{'key':self.day.replace('-','')+f'-19-{r:02d}','venue_code':'19','race':r,
+                'deadline_jst':self.day+'T20:00:00+09:00','practical_bets':['1-2-3'],
+                'result_trifecta':None,'payout':None,'result_meta':{}} for r in range(1,13)]}
+        (self.state/'rescue/feed.json').write_bytes(live.canonical(self.feed))
+        for name in ('store/protected.json','rescue/store/snapshots/morning/protected.json',
+                     'rescue/store/snapshots/predeadline/protected.json'):
+            p=self.state/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('{"fixed":true}')
+        self.output=self.state/'output/feed.json';self.requests=0
+        self.valid_text=fixtures.full_result_text().replace('2026/ 8/27','2026/10/22')
+        self.response=self.valid_text.replace('2026/10/22','not yet dated').encode('cp932')
+        self.opener=Mock(side_effect=self.open_response)
+        runner_type=official.CanonicalRunner
+        self.make_runner=lambda store:runner_type(store,
+            client=official.OfficialHttpClient(store,opener=self.opener,clock=lambda:self.now),
+            extractor=fixtures.IdentityArchiveExtractor())
+        original_load=official.OfficialArtifactStore.load_verified_snapshot
+        def load_snapshot(store,stage,name):
+            if stage=='morning' and name=='official-day-input':
+                return {'SNAPSHOT':{'PAYLOAD':self.morning}}
+            return original_load(store,stage,name)
+        import hot_delta_transport_v1 as hot
+        for item in (patch.object(daily,'source_inventory',return_value=self.cert['source_files']),
+            patch.object(daily,'model_inventory',return_value=self.cert['model_files']),
+            patch.object(official.OfficialArtifactStore,'load_verified_snapshot',load_snapshot),
+            patch.object(official,'CanonicalRunner',side_effect=self.make_runner),
+            patch.object(hot,'fetch_stored_rescue',side_effect=lambda *_:(deepcopy(self.feed),{},live.canonical(self.feed))),
+            patch.object(live,'clock',side_effect=lambda:self.now)):
+            item.start();self.addCleanup(item.stop)
+        previous=Path.cwd();os.chdir(self.state);self.addCleanup(os.chdir,previous)
+
+    def open_response(self,request,**_kwargs):
+        import io
+        self.requests+=1
+        response=io.BytesIO(self.response)
+        response.status=200;response.headers={'Content-Type':'application/x-lzh-compressed'}
+        response.geturl=lambda:request.full_url
+        return response
+
+    def run_night(self):
+        import contextlib,io
+        stdout=io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            live.run_delayed_night(self.state,self.day,self.output,'https://example.invalid')
+        return json.loads(stdout.getvalue().splitlines()[-1])
+
+    def protected(self):
+        return [live.inventory(self.state/p) for p in ('store','daily-runtime',
+            'rescue/store/snapshots/morning','rescue/store/snapshots/predeadline')]+[
+            (self.state/'rescue/boundary.json').read_bytes(),(self.state/'rescue/feed.json').read_bytes()]
+
+    def assert_no_settlement(self):
+        for p in (self.output,self.state/'rescue/night-feed.json',self.state/'rescue/night-audit.json',
+                  self.state/'rescue/store/snapshots/night/official-day-results.json'):
+            self.assertFalse(p.exists(),str(p))
+
+    def test_missing_date_keeps_evidence_then_completes_from_fresh_bytes(self):
+        from datetime import timedelta
+        before=self.protected()
+        result=self.run_night()
+        self.assertEqual(result['STATUS'],'NIGHT_WAITING_OFFICIAL_RESULTS')
+        self.assertEqual(result['REASON'],'K_DATE_MISSING')
+        self.assertTrue(result['RETRY_SCHEDULED']);self.assertTrue(result['STATE_CHANGED'])
+        self.assertFalse(result['FEED_EMITTED']);self.assert_no_settlement()
+        source='result-k-'+self.day.replace('-','')
+        self.assertIsNone(self.store.response_receipt(source))
+        self.assertTrue(any((self.state/'rescue/store/rejected-responses').rglob('*.json')))
+        self.assertEqual(self.protected(),before)
+        # The existing workflow starts a new bounded invocation after three minutes.
+        self.now+=timedelta(minutes=3);self.response=self.valid_text.encode('cp932')
+        result=self.run_night()
+        self.assertEqual(result['STATUS'],'SAME_DAY_RESCUE_NIGHT_RESULTS_COMPLETE')
+        self.assertEqual((result['RESULTS'],result['PENDING'],result['PREDICTION_RECALCULATION']),(12,0,0))
+        self.assertEqual(self.requests,2);self.assertEqual(self.protected(),before)
+        out=json.loads(self.output.read_bytes())
+        self.assertTrue(all(r['practical_bets']==['1-2-3'] and r['result_trifecta']=='1-2-3' for r in out['races']))
+        self.assertEqual(self.store.load_verified_snapshot('night','official-day-results')['SNAPSHOT']['PAYLOAD']['PENDING_RESULT_COUNT'],0)
+        saved=self.output.read_bytes();self.run_night()
+        self.assertEqual(self.requests,2);self.assertEqual(self.output.read_bytes(),saved)
+
+    def test_official_404_waits_without_result_publication(self):
+        from urllib.error import HTTPError
+        self.opener.side_effect=HTTPError('https://www1.mbrace.or.jp/od2/K/202610/k261022.lzh',404,'not ready',{},None)
+        result=self.run_night()
+        self.assertEqual(result['REASON'],'HTTP_STATUS_UNSUPPORTED:404')
+        self.assertTrue(result['RETRY_SCHEDULED']);self.assert_no_settlement()
+
+    def test_pacing_waits_without_touching_forecasts(self):
+        before=self.protected()
+        for reason in ('SOURCE_CONTENT_PAUSED','SERIAL_PACING','HOST_PAUSED','NIGHT_RESULTS_PENDING'):
+            with self.subTest(reason=reason),patch.object(self.official.OfficialHttpClient,'fetch_validated_once',
+                    side_effect=self.official.AcquisitionDeferred(self.now,reason)):
+                result=self.run_night()
+                self.assertEqual(result['REASON'],reason);self.assertTrue(result['RETRY_SCHEDULED'])
+                self.assertFalse(result['STATE_CHANGED']);self.assert_no_settlement()
+                self.assertEqual(self.protected(),before)
+        self.opener.assert_not_called()
+
+    def test_wrong_date_and_invalid_payout_still_fail(self):
+        for invalid,reason in ((self.valid_text.replace('2026/10/22','2026/10/21'),'K_DATE_MISMATCH'),
+                              (self.valid_text.replace('1,230','BROKEN'),'NIGHT_OFFICIAL_INCOMPLETE')):
+            with self.subTest(reason=reason):
+                from datetime import timedelta
+                self.now+=timedelta(minutes=3);self.response=invalid.encode('cp932')
+                with self.assertRaisesRegex(self.official.PipelineError,reason):self.run_night()
+                self.assert_no_settlement()
+
+    def test_unexpected_failure_does_not_become_an_availability_wait(self):
+        for error in (RuntimeError('K_DATE_MISSING'),self.official.PipelineError('NIGHT_INPUT_SCOPE')):
+            with patch.object(self.official.OfficialHttpClient,'fetch_validated_once',side_effect=error):
+                with self.assertRaises(type(error)):self.run_night()
+                self.assert_no_settlement()
+
+    def test_wait_detects_protected_mutation(self):
+        def corrupt(*_):
+            (self.state/'rescue/store/snapshots/predeadline/protected.json').write_text('changed')
+            raise self.official.AcquisitionRejected(self.now,'K_DATE_MISSING',{})
+        with patch.object(self.official.OfficialHttpClient,'fetch_validated_once',side_effect=corrupt):
+            with self.assertRaisesRegex(RuntimeError,'NIGHT_PROTECTED_MUTATION'):self.run_night()
+        self.assert_no_settlement()
+
+    def test_wait_cannot_continue_past_rollover_cutoff(self):
+        self.now=datetime.fromisoformat('2026-10-23T01:59:59+09:00')
+        def too_late(*_):
+            self.now=datetime.fromisoformat('2026-10-23T02:00:00+09:00')
+            raise self.official.AcquisitionDeferred(self.now,'HOST_PAUSED')
+        with patch.object(self.official.OfficialHttpClient,'fetch_validated_once',side_effect=too_late):
+            with self.assertRaisesRegex(RuntimeError,'CURRENT_DAY_ONLY'):self.run_night()
+        self.assert_no_settlement()
+
+
 class RescueDeliveryRoutingTests(unittest.TestCase):
     def route(self, day, stage, audit, target):
         import daily_runtime_delivery_v1 as delivery
