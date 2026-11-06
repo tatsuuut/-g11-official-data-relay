@@ -35,6 +35,15 @@ def module(path):
     return value
 
 
+def source_module(source_root):
+    # File-based loading alone does not expose the selected checkout to lazy
+    # package imports made by create() when hydrating the fixed P3 models.
+    # This CLI exits after one action; retain the path for those later imports.
+    source_root = source_root.resolve()
+    sys.path.insert(0, str(source_root))
+    return module(source_root / MODULE_PATH)
+
+
 def retained_module(state, day):
     root = state / "daily-runtime" / day
     path = root / "authority.json"
@@ -191,7 +200,7 @@ def main():
         elif args.operational_date < EFFECTIVE_FROM or args.phase == "dry-run":
             value = {"status": "PRE_ACTIVATION_UNCHANGED"}
         else:
-            implementation = module(args.source_root / MODULE_PATH)
+            implementation = source_module(args.source_root)
             authority = (implementation.create(args.state_root, args.operational_date,
                          args.source_root, args.source_sha) if args.phase == "morning"
                          else implementation.load(args.state_root, args.operational_date))
@@ -200,7 +209,7 @@ def main():
                      "authority_sha256": authority["authority_sha256"]}
     elif args.action == "candidate-dry-run":
         subprocess.run([sys.executable, "-m", "unittest", "g11.relay.test_delayed_morning_recovery_v1"], check=True)
-        implementation = module(args.source_root / MODULE_PATH)
+        implementation = source_module(args.source_root)
         candidate_day = (date.fromisoformat(args.operational_date) + timedelta(days=1)).isoformat()
         with tempfile.TemporaryDirectory(prefix="g11-next-morning-") as directory:
             state = Path(directory) / "state"
@@ -252,5 +261,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
