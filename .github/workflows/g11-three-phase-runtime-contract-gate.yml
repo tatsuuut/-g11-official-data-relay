@@ -50,6 +50,7 @@ jobs:
           import hashlib,inspect,json,pathlib,sys,tarfile
           sys.path.insert(0,'scripts')
           from morning_source_receipt_limit_v1 import receipt_limit
+          from repair_saved_morning_receipts_v1 import verify_saved_provenance
           with tarfile.open(sys.argv[1],'r:gz') as archive:
               matches=[m for m in archive.getmembers() if m.name.removeprefix('./') == 'rescue/store/snapshots/morning/official-day-input.json']
               assert len(matches)==1 and matches[0].isfile()
@@ -64,10 +65,49 @@ jobs:
           sys.settrace(trace)
           limit=receipt_limit({'SNAPSHOT':snapshot})
           sys.settrace(None)
+          verify_saved_provenance({'SNAPSHOT':snapshot,'SNAPSHOT_SHA256':hashlib.sha256(raw).hexdigest()})
           print(json.dumps({'saved_official_input_sha256':hashlib.sha256(raw).hexdigest(),
               'receipt_count':len(snapshot['SOURCE_RECEIPTS']),'scope':snapshot['PAYLOAD']['SCOPE'],
               'race_count':len(snapshot['PAYLOAD']['RACES']),'admission':reasons,
               'receipts':[{k:r.get(k) for k in ('SOURCE_ID','URL','FINAL_URL')} for r in snapshot['SOURCE_RECEIPTS']]},sort_keys=True))
+          PY
+      - name: Checkout the frozen source for an offline disposable-copy test
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: 40dd169569bd0bea8049d92e1b61d05da4d38839
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-frozen
+          persist-credentials: false
+      - name: Install pinned test dependencies
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1' 'catboost==1.2.8'
+      - name: Verify saved-input recovery on a disposable copy without publication
+        working-directory: .g11-frozen
+        env:
+          PYTHONPATH: .:../scripts
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,sys,tarfile
+          from unittest.mock import patch
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-receipt-audit-copy'
+          root.mkdir()
+          with tarfile.open(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-receipt-audit.tgz','r:gz') as archive:
+              members=archive.getmembers()
+              assert all(not pathlib.PurePosixPath(m.name).is_absolute() and '..' not in pathlib.PurePosixPath(m.name).parts
+                  and not m.issym() and not m.islnk() for m in members)
+              archive.extractall(root,filter='data')
+          from repair_saved_morning_receipts_v1 import SOURCE
+          import rescue_night_result_parser_v1 as entry
+          output=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-receipt-audit-feed.json'
+          sys.argv=['test','--delayed-recovery','--date','2026-11-06','--state',str(root),
+              '--source-sha',SOURCE,'--output',str(output),'--run-id',os.environ['GITHUB_RUN_ID']]
+          with patch.dict(os.environ,{'GITHUB_EVENT_NAME':'workflow_dispatch'}):
+              entry.run_relay()
+          feed=json.loads(output.read_bytes())
+          assert feed['SNAPSHOT_CLASS']=='SAME_DAY_RESCUE_BOUNDARY'
+          assert feed['counts']['formal']==0 and feed['same_day_rescue']['research_eligible'] is False
+          print(json.dumps({'OFFLINE_SAVED_INPUT_RECOVERY':'PASS',
+              'saved':feed['same_day_rescue']['rescued_race_count'],'formal':0,'published':False},sort_keys=True))
           PY
   contract-gate:
     name: contract

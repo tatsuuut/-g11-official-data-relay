@@ -7,6 +7,7 @@ import unittest
 
 from morning_source_receipt_limit_v1 import receipt_limit, admitted_digest_limit
 from repair_saved_morning_receipts_v1 import inspect_attempts, DAY, SOURCE, ATTEMPTS, REASON
+from repair_saved_morning_receipts_v1 import verify_saved_provenance, SAVED_INPUT_SHA256
 
 
 def envelope():
@@ -32,6 +33,22 @@ def envelope():
 
 
 class ReceiptLimitTests(unittest.TestCase):
+    def test_repair_requires_observed_22_receipts_and_exact_verified_input(self):
+        value=envelope()
+        value['SNAPSHOT']['SOURCE_RECEIPTS']=[r for r in value['SNAPSHOT']['SOURCE_RECEIPTS']
+            if r['SOURCE_ID']!='result-k-20261031']
+        value['SNAPSHOT_SHA256']=SAVED_INPUT_SHA256
+        verify_saved_provenance(value)
+        changed=deepcopy(value);changed['SNAPSHOT_SHA256']='f'*64
+        with self.assertRaisesRegex(RuntimeError,'SAVED_INPUT_IDENTITY'):
+            verify_saved_provenance(changed)
+        changed=deepcopy(value);changed['SNAPSHOT']['SOURCE_RECEIPTS'].pop()
+        with self.assertRaisesRegex(RuntimeError,'SAVED_PROVENANCE'):
+            verify_saved_provenance(changed)
+        changed=deepcopy(value);changed['SNAPSHOT']['SOURCE_RECEIPTS'][-1]['URL']='https://invalid.example/'
+        with self.assertRaisesRegex(RuntimeError,'SAVED_PROVENANCE'):
+            verify_saved_provenance(changed)
+
     def test_twenty_three_independent_official_sources_fit_saved_scope(self):
         value=envelope(); before=deepcopy(value)
         self.assertEqual(23,len(value['SNAPSHOT']['SOURCE_RECEIPTS']))

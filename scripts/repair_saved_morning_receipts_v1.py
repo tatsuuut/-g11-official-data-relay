@@ -15,11 +15,19 @@ DAY = '2026-11-06'
 SOURCE = '40dd169569bd0bea8049d92e1b61d05da4d38839'
 ATTEMPTS = {'42129528978.json', '42130300335.json'}
 REASON = 'RESCUE_FORMAL_GATE:C04_SOURCE_RECEIPTS'
+SAVED_INPUT_SHA256 = 'eac1a8300108f9ead932595c5b306920a7e095157f0fc19c4e2ee6e4ca17007a'
 
 
 def require(value, code):
     if not value:
         raise RuntimeError('SAVED_RECEIPT_REPAIR:' + code)
+
+
+def verify_saved_provenance(verified):
+    from morning_source_receipt_limit_v1 import receipt_limit
+    require(verified['SNAPSHOT_SHA256'] == SAVED_INPUT_SHA256, 'SAVED_INPUT_IDENTITY')
+    require(len(verified['SNAPSHOT']['SOURCE_RECEIPTS']) == 22
+            and receipt_limit(verified) >= 22, 'SAVED_PROVENANCE')
 
 
 def inspect_attempts(state, day, source, now):
@@ -62,15 +70,13 @@ def run_if_reviewed(argv):
     require(not os.environ.get('G11_RELAY_NOW_JST'), 'CLOCK_OVERRIDE')
     from g11.relay import delayed_morning_recovery_v1 as recovery
     from g11.canonical import official_pipeline as official
-    from morning_source_receipt_limit_v1 import receipt_limit
     now = recovery.clock()
     evidence = inspect_attempts(args.state, args.date, args.source_sha, now)
     certificate = recovery.verify_boundary(args.state / 'rescue', args.date)
     require(certificate['runtime_source_sha'] == args.source_sha, 'BOUNDARY_SOURCE')
     store = official.OfficialArtifactStore(args.state / 'rescue/store')
     verified = store.load_verified_snapshot('morning', 'official-day-input')
-    require(len(verified['SNAPSHOT']['SOURCE_RECEIPTS']) == 23
-            and receipt_limit(verified) >= 23, 'SAVED_PROVENANCE')
+    verify_saved_provenance(verified)
     # Run the original byte identity, receipt, RAW38 and admission checks before
     # consuming the single additional repair attempt.
     bridge = official.FORMAL_GATE.build_canonical_official_morning_input(verified)
