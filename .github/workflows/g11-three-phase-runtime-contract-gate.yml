@@ -372,12 +372,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
-          ref: 4c9c8f790e16a2e9125da3c8066d88680b4a20ae
+          ref: fed87b253eb6a1be57bede495a988339985da9aa
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-thirty-budget
           persist-credentials: false
 
       - name: Verify retained history and all three current research cohorts
         working-directory: .g11-thirty-budget/g11/canonical
-        run: python3 -m unittest -v test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget
+        run: python3 -m unittest -v test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget test_deme_discovery_yotsuba test_deme_discovery_standard_preview test_deme_discovery_v5 test_deme_discovery_adoptions
 
