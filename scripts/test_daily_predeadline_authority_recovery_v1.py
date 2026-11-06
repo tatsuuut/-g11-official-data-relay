@@ -309,6 +309,50 @@ class Boundaries(unittest.TestCase):
 if __name__ == '__main__': unittest.main()
 
 class Oct18ContinuationScopeTests(unittest.TestCase):
+    def zero_fixture(self):
+        from types import SimpleNamespace
+        day='2026-11-07'; key='20261107-04-01'; deadline=day+'T12:00:00+09:00'
+        c={'schema':'G11_P3_TRIFECTA_CONFIDENCE_V2',
+          'selection_policy':'TRUE_MORNING_JOINT_MASS_VARIABLE_0_15_V1',
+          'race_id':key, 'race_deadline_at':deadline, 'morning_or_live':'MORNING',
+          'production_bet_count':0, 'production_bet_order':[], 'bet_artifact_sha':'a'*64,
+          'snapshot_id':'b'*64, 'p3_engine_fingerprint':'c'*64,
+          'prediction_locked_at':day+'T08:00:00+09:00', 'confidence_captured_at':day+'T08:00:01+09:00'}
+        row={'key':key,'deadline_jst':deadline, 'practical_bets':[], 'production_points':0,
+          'p3_logic_id':'CURRENT_GROWTH_P3', 'p3_status':'PASS', 'trifecta_confidence':c,
+          'same_day_rescue_lock':{'p3_locked_at_jst':day+'T08:00:02+09:00'},
+          'pre_race_v2':{'final':{'locked_at_jst':day+'T11:54:02+09:00'}},
+          'predeadline':{'practical_bets':[], 'production_points':0, 'status':'READY', 'morning_lock_mutated':False,
+            'trifecta_confidence':{**c,'morning_or_live':'LIVE','prediction_locked_at':day+'T11:54:00+09:00',
+              'confidence_captured_at':day+'T11:54:01+09:00'}}}
+        official=SimpleNamespace(race_key=key,trifecta_combination='1-2-3',trifecta_payout=1230,
+          refund_boats=[],trifecta_settlements=[SimpleNamespace(combination='1-2-3',payout=1230)])
+        return {'races':[row]}, [official]
+
+    def test_saved_zero_is_abstain_not_missing_or_losing_prediction(self):
+        feed,results=self.zero_fixture(); before=deepcopy(feed)
+        entries=live.night_scores(feed,results)[feed['races'][0]['key']]['engines']
+        for engine in ('p3_rescue','p3_live'):
+            self.assertEqual('ABSTAIN',entries[engine]['status'])
+            self.assertEqual([],entries[engine]['bets'])
+            self.assertEqual(0,entries[engine]['virtual_investment'])
+            self.assertEqual(0,entries[engine]['virtual_payout'])
+        self.assertEqual('NO_FIXED_PREDICTION',entries['abeken_rescue']['status'])
+        self.assertEqual(before,feed)
+
+    def test_unproven_or_late_zero_cannot_be_abstain(self):
+        for change in ('missing_confidence','old_policy','wrong_race','future_confidence','late_lock','live_generation'):
+            feed,results=self.zero_fixture(); row=feed['races'][0]; c=row['trifecta_confidence']
+            if change=='missing_confidence': row.pop('trifecta_confidence')
+            if change=='old_policy': c['selection_policy']='WAVE_V2'
+            if change=='wrong_race': c['race_id']='20261107-04-02'
+            if change=='future_confidence': c['confidence_captured_at']='2026-11-07T12:01:00+09:00'
+            if change=='late_lock': row['same_day_rescue_lock']['p3_locked_at_jst']='2026-11-07T12:01:00+09:00'
+            if change=='live_generation': row['predeadline']['trifecta_confidence']['p3_engine_fingerprint']='d'*64
+            entries=live.night_scores(feed,results)[row['key']]['engines']
+            with self.subTest(change=change):
+                self.assertNotEqual('ABSTAIN',entries['p3_live' if change=='live_generation' else 'p3_rescue']['status'])
+
     def test_one_invalid_night_lock_keeps_other_engine_and_race(self):
         from types import SimpleNamespace
         day='2026-10-21'
