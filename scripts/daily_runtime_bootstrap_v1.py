@@ -4,6 +4,7 @@ The public repository has no prediction code. It verifies the retained bundle
 before loading the private authority implementation, without fetching main.
 """
 from __future__ import annotations
+from contextlib import contextmanager
 import argparse
 import hashlib
 import importlib.util
@@ -35,13 +36,19 @@ def module(path):
     return value
 
 
+@contextmanager
 def source_module(source_root):
-    # File-based loading alone does not expose the selected checkout to lazy
-    # package imports made by create() when hydrating the fixed P3 models.
-    # This CLI exits after one action; retain the path for those later imports.
-    source_root = source_root.resolve()
-    sys.path.insert(0, str(source_root))
-    return module(source_root / MODULE_PATH)
+    # This is an explicit authority-library call, not the prediction CLI.
+    # Lazy imports must resolve in the selected checkout without interpreting
+    # this adapter's already-parsed flags as a request to run the relay.
+    old_path, old_argv = sys.path[:], sys.argv
+    sys.path.insert(0, str(source_root.resolve()))
+    sys.argv = [old_argv[0]]
+    try:
+        yield module(source_root.resolve() / MODULE_PATH)
+    finally:
+        sys.argv = old_argv
+        sys.path[:] = old_path
 
 
 def retained_module(state, day):
@@ -200,54 +207,54 @@ def main():
         elif args.operational_date < EFFECTIVE_FROM or args.phase == "dry-run":
             value = {"status": "PRE_ACTIVATION_UNCHANGED"}
         else:
-            implementation = source_module(args.source_root)
-            authority = (implementation.create(args.state_root, args.operational_date,
-                         args.source_root, args.source_sha) if args.phase == "morning"
-                         else implementation.load(args.state_root, args.operational_date))
-            implementation.verify_runtime(args.state_root, args.operational_date, args.source_root)
-            value = {"status": "PASS", "source_sha": authority["runtime_source_sha"],
-                     "authority_sha256": authority["authority_sha256"]}
+            with source_module(args.source_root) as implementation:
+                authority = (implementation.create(args.state_root, args.operational_date,
+                             args.source_root, args.source_sha) if args.phase == "morning"
+                             else implementation.load(args.state_root, args.operational_date))
+                implementation.verify_runtime(args.state_root, args.operational_date, args.source_root)
+                value = {"status": "PASS", "source_sha": authority["runtime_source_sha"],
+                         "authority_sha256": authority["authority_sha256"]}
     elif args.action == "candidate-dry-run":
         subprocess.run([sys.executable, "-m", "unittest", "g11.relay.test_delayed_morning_recovery_v1"], check=True)
-        implementation = source_module(args.source_root)
-        candidate_day = (date.fromisoformat(args.operational_date) + timedelta(days=1)).isoformat()
-        with tempfile.TemporaryDirectory(prefix="g11-next-morning-") as directory:
-            state = Path(directory) / "state"
-            for name in implementation.MODEL_ROOTS:
-                source = args.state_root / "store" / name
-                if source.is_dir():
-                    shutil.copytree(source, state / "store" / name)
-            authority = implementation.create(state, candidate_day, args.source_root, args.source_sha,
-                now=datetime.fromisoformat(candidate_day + "T02:15:00+09:00"))
-            frozen = Path(directory) / "frozen"
-            implementation.restore_source(state, candidate_day, frozen)
-            implementation.verify_runtime(state, candidate_day, frozen)
-            value = {"status": "PASS", "test": "NEXT_OPERATIONAL_DAY_AUTHORITY_DRY_RUN",
-                     "operational_date_jst": candidate_day,
-                     "authority_sha256": authority["authority_sha256"],
-                     "runtime_source_sha": authority["runtime_source_sha"],
-                     "p3_version": authority["p3"]["version"],
-                     "abeken_v53_version": authority["abeken_v53"]["version"],
-                     "source_file_count": len(authority["source_files"]), "model_file_count": len(authority["model_files"]),
-                     "production_state_mutated": False, "prediction_executed": False, "site_write": False}
-        if (args.state_root / "rescue/feed.json").exists():
-            subprocess.run([sys.executable, "-m", "g11.relay.delayed_morning_recovery_v1", "--audit-only",
-                "--state", str(args.state_root.resolve()), "--date", args.operational_date,
-                "--source-sha", args.source_sha, "--output", str(args.state_root.resolve() / "unused-audit-output"),
-                "--run-id", "0"], check=True)
-            if args.operational_date == "2026-10-16":
-                from hot_delta_transport_v1 import fetch
-                Path(".relay-output").mkdir(parents=True, exist_ok=True)
-                prior, _, _ = fetch("https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-15")
-                expected = "8232632c377913f1ee674e4b0f441d75e8807b4baa8ca2d79a20a3aae3fcb5c2"
-                if not (prior["stage"] == "NIGHT" and prior["counts"]["results"] == prior["counts"]["races"] == 156
-                        and prior["transport"]["canonical_feed_sha256"] == expected):
-                    raise RuntimeError("PREVIOUS_NIGHT_READBACK_CHANGED")
-                print(json.dumps({"PREVIOUS_NIGHT_READBACK":"PASS", "date":"2026-10-15", "races":156,
-                    "canonical_feed_sha256":expected, "site_write":False}, sort_keys=True))
-        if args.output:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_bytes(canonical(value) + b"\n")
+        with source_module(args.source_root) as implementation:
+            candidate_day = (date.fromisoformat(args.operational_date) + timedelta(days=1)).isoformat()
+            with tempfile.TemporaryDirectory(prefix="g11-next-morning-") as directory:
+                state = Path(directory) / "state"
+                for name in implementation.MODEL_ROOTS:
+                    source = args.state_root / "store" / name
+                    if source.is_dir():
+                        shutil.copytree(source, state / "store" / name)
+                authority = implementation.create(state, candidate_day, args.source_root, args.source_sha,
+                    now=datetime.fromisoformat(candidate_day + "T02:15:00+09:00"))
+                frozen = Path(directory) / "frozen"
+                implementation.restore_source(state, candidate_day, frozen)
+                implementation.verify_runtime(state, candidate_day, frozen)
+                value = {"status": "PASS", "test": "NEXT_OPERATIONAL_DAY_AUTHORITY_DRY_RUN",
+                         "operational_date_jst": candidate_day,
+                         "authority_sha256": authority["authority_sha256"],
+                         "runtime_source_sha": authority["runtime_source_sha"],
+                         "p3_version": authority["p3"]["version"],
+                         "abeken_v53_version": authority["abeken_v53"]["version"],
+                         "source_file_count": len(authority["source_files"]), "model_file_count": len(authority["model_files"]),
+                         "production_state_mutated": False, "prediction_executed": False, "site_write": False}
+            if (args.state_root / "rescue/feed.json").exists():
+                subprocess.run([sys.executable, "-m", "g11.relay.delayed_morning_recovery_v1", "--audit-only",
+                    "--state", str(args.state_root.resolve()), "--date", args.operational_date,
+                    "--source-sha", args.source_sha, "--output", str(args.state_root.resolve() / "unused-audit-output"),
+                    "--run-id", "0"], check=True)
+                if args.operational_date == "2026-10-16":
+                    from hot_delta_transport_v1 import fetch
+                    Path(".relay-output").mkdir(parents=True, exist_ok=True)
+                    prior, _, _ = fetch("https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date=2026-10-15")
+                    expected = "8232632c377913f1ee674e4b0f441d75e8807b4baa8ca2d79a20a3aae3fcb5c2"
+                    if not (prior["stage"] == "NIGHT" and prior["counts"]["results"] == prior["counts"]["races"] == 156
+                            and prior["transport"]["canonical_feed_sha256"] == expected):
+                        raise RuntimeError("PREVIOUS_NIGHT_READBACK_CHANGED")
+                    print(json.dumps({"PREVIOUS_NIGHT_READBACK":"PASS", "date":"2026-10-15", "races":156,
+                        "canonical_feed_sha256":expected, "site_write":False}, sort_keys=True))
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_bytes(canonical(value) + b"\n")
     else:
         implementation = retained_module(args.state_root, args.operational_date)
         value = implementation.emit_checkpoint(args.state_root, args.operational_date, args.output)
