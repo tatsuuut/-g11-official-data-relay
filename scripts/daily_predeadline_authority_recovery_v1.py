@@ -882,6 +882,10 @@ def deliver(state, feed_path, origin):
         "not_published_after_deadline": added["expired"], "site_payload_sha256": sha(data),
         "verified_p3_live_count": sum(bool(r.get("predeadline")) for r in actual.values()),
         "verified_v4_live_count": sum(bool(((r.get("abeken_shadow") or {}).get("v53") or {}).get("live")) for r in actual.values())}
+    from critical_saved_publication_v1 import publication_timing
+    receipt['publication_timing'] = publication_timing(out, {
+        'PREDICTION_LOCKED_BEFORE_DEADLINE': added['p3'],
+        'V53_LOCKED_BEFORE_DEADLINE': added['v4']}, clock())
     atomic(state / "rescue/predeadline-delivery.json", canonical(receipt) + b"\n")
     print(json.dumps(receipt, sort_keys=True))
     # The accepted immutable rescue feed is the only source. This metadata-only

@@ -133,8 +133,34 @@ def publish_persisted_live(state, feed_path, *, opener=None, publisher=optional_
     feed = json.loads(Path(feed_path).read_bytes())
     if (os.environ.get('RESEARCH_CHECKPOINT_VERIFIED') != 'true'
             or os.environ.get('G11_APP_ORIGIN') != ORIGIN
-            or feed.get('stage') != 'PREDEADLINE' or feed.get('status') != 'PASS'
-            or feed.get('same_day_rescue') or feed.get('SNAPSHOT_CLASS')):
+            or feed.get('status') != 'PASS'):
+        raise ValueError('RESEARCH_LIVE_PERSISTENCE_REQUIRED')
+    if feed.get('same_day_rescue') or feed.get('SNAPSHOT_CLASS'):
+        # Reuse the existing rescue certificate and successful delivery receipt.
+        # This only relocates optional research publication after predictions;
+        # it does not promote rescue forecasts into the normal cohort.
+        if (feed.get('stage') != 'MORNING'
+                or feed.get('SNAPSHOT_CLASS') != 'SAME_DAY_RESCUE_BOUNDARY'
+                or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(feed.get('operational_date_jst', '')))
+                or not isinstance(feed.get('races'), list) or not feed['races']):
+            raise ValueError('RESEARCH_RESCUE_PERSISTENCE_REQUIRED')
+        from daily_predeadline_authority_recovery_v1 import certificate
+        day = feed['operational_date_jst']
+        cert = certificate(Path(state), day)
+        receipt = json.loads((Path(state)/'rescue/predeadline-delivery.json').read_bytes())
+        authority = cert['authority_sha256']
+        if (feed.get('stage') != 'MORNING'
+                or feed.get('SNAPSHOT_CLASS') != 'SAME_DAY_RESCUE_BOUNDARY'
+                or (feed.get('same_day_rescue') or {}).get('authority_sha256') != authority
+                or feed.get('counts', {}).get('formal') != 0
+                or any(r.get('research_eligible') is not False or r.get('formal_status') != 'EXCLUDED'
+                       for r in feed.get('races', []))
+                or receipt.get('schema') != 'G11_DELAYED_RESCUE_PREDEADLINE_DELIVERY_V1'
+                or receipt.get('status') != 'PASS' or receipt.get('site_get_readback') != 'PASS'
+                or receipt.get('operational_date_jst') != day
+                or receipt.get('authority_sha256') != authority):
+            raise ValueError('RESEARCH_RESCUE_PERSISTENCE_REQUIRED')
+    elif feed.get('stage') != 'PREDEADLINE':
         raise ValueError('RESEARCH_LIVE_PERSISTENCE_REQUIRED')
     request = Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' +
         os.environ['G11_OIDC_AUDIENCE'], headers={

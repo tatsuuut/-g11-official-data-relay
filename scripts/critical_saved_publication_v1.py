@@ -158,10 +158,17 @@ def main():
     parser.add_argument('--day', required=True)
     parser.add_argument('--select-restore', action='store_true')
     parser.add_argument('--continuation-delay', action='store_true')
+    parser.add_argument('--rescue-continuation-delay', action='store_true')
     args = parser.parse_args()
     if args.select_restore:
         return select_restore(args.day)
     root = Path.cwd()
+    if args.rescue_continuation_delay:
+        result = json.loads((root / '.relay-output/result.json').read_bytes())
+        feed = json.loads((root / '.relay-output/feed.json').read_bytes())
+        print(rescue_continuation_delay(result, feed, args.day,
+                                       os.environ['GITHUB_RUN_ID'], datetime.now(JST)))
+        return
     if args.continuation_delay:
         result = json.loads((root / '.relay-output/result.json').read_bytes())
         print(continuation_delay(result, args.day, os.environ['GITHUB_RUN_ID'], datetime.now(JST)))
@@ -239,6 +246,24 @@ def continuation_delay(result, day, run_id, now):
     require(at.utcoffset() == timedelta(hours=9) and at.date() == now.date()
             and at <= now, 'CONTINUATION_SPACING_CLOCK')
     return max(0, round(45 - (now - at).total_seconds(), 3))
+
+
+def rescue_continuation_delay(result, feed, day, run_id, now):
+    """Credit time already spent saving/publishing this run's rescue capture."""
+    require(result.get('STATUS') == 'SAME_DAY_RESCUE_COMPLETE'
+            and result.get('PHASE') == 'PREDEADLINE_RESCUE'
+            and result.get('OPERATIONAL_DATE_JST') == day
+            and result.get('FEED_EMITTED') is True
+            and result.get('MORNING_IMMUTABLE') is True
+            and feed.get('operational_date_jst') == day
+            and feed.get('stage') == 'MORNING' and feed.get('status') == 'PASS'
+            and feed.get('SNAPSHOT_CLASS') == 'SAME_DAY_RESCUE_BOUNDARY'
+            and str(feed.get('source', {}).get('run_id')) == str(run_id),
+            'RESCUE_CONTINUATION_BINDING')
+    return continuation_delay({'CRITICAL': {
+        'OPERATIONAL_DATE': day, 'CRITICAL_CHECKPOINT_STATUS': 'PASS',
+        'LAST_CRITICAL_RUN_ID': str(run_id),
+        'CRITICAL_CAPTURE_AT': feed['generated_at_jst']}}, day, run_id, now)
 
 
 if __name__ == '__main__':

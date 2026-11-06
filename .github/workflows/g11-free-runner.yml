@@ -923,8 +923,8 @@ jobs:
       - name: P3 research update
         if: >-
           steps.deme-source.outcome=='success' &&
-          (steps.due.outputs.phase!='predeadline' || steps.authority.outputs.frozen!='true' ||
-          steps.critical.outputs.rescue=='true' || steps.authority.outputs.rescue_bootstrap=='true')
+          (steps.due.outputs.phase!='predeadline' || (steps.authority.outputs.frozen!='true' &&
+          steps.critical.outputs.rescue!='true' && steps.authority.outputs.rescue_bootstrap!='true'))
         continue-on-error: true
         env:
           G11_PRIVATE_REPO_TOKEN: ""
@@ -1786,8 +1786,8 @@ jobs:
       - name: P3 research update after LIVE publication
         if: >-
           always() && !cancelled() && steps.deme-source.outcome=='success' &&
-          steps.due.outputs.phase=='predeadline' && steps.authority.outputs.frozen=='true' &&
-          steps.critical.outputs.rescue!='true' && steps.authority.outputs.rescue_bootstrap!='true'
+          steps.due.outputs.phase=='predeadline' && (steps.authority.outputs.frozen=='true' ||
+          steps.critical.outputs.rescue=='true' || steps.authority.outputs.rescue_bootstrap=='true')
         id: deme-live
         continue-on-error: true
         env:
@@ -2094,10 +2094,17 @@ jobs:
         env:
           GH_TOKEN: ${{github.token}}
         run: |
-          sleep 45; d="${{steps.due.outputs.operational_date}}"
+          set -euo pipefail
+          d="${{steps.due.outputs.operational_date}}"
+          test "$(python3 scripts/dynamic_last_race_heartbeat.py --result .relay-output/result.json --operational-date "$d")" = CONTINUE || exit 0
+          if [ '${{steps.due.outputs.phase}}' = predeadline ]; then
+            sleep "$(python3 scripts/critical_saved_publication_v1.py --day "$d" --rescue-continuation-delay)"
+          else
+            sleep 45
+          fi
           test "$(python3 scripts/dynamic_last_race_heartbeat.py --result .relay-output/result.json --operational-date "$d")" = CONTINUE || exit 0
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/g11-free-runner.yml/runs" -q '[.workflow_runs[]|select(.status|test("^(queued|in_progress)$"))|select(.event!="push" or (.head_commit.message//""|contains("[daily-runtime-freeze]")|not))]|length')" -le 1 || exit 0
-          gh workflow run g11-free-runner.yml -f phase=predeadline -f operational_date="$d"
+          python3 scripts/predeadline_dispatch_v1.py --day "$d" --mode continuation
       - name: WILD4 shadow
         if: always()&&!cancelled()&&steps.runtime.outcome=='success'&&steps.publication-state-verified.outputs.ready=='true'&&((steps.publish.outcome!='success'&&steps.wild4-followup.outputs.needed!='false'&&steps.wild4-followup.outputs.sent!='true'&&(steps.wild4-early.outputs.sent!='true'||steps.wild4-followup.outputs.needed=='true')&&steps.due.outputs.phase=='predeadline')||(steps.due.outputs.phase=='night'&&steps.night-ready.outputs.allowed=='true'&&(steps.readback.outcome=='success'||steps.immutable-readback.outcome=='success')))
         continue-on-error: true
