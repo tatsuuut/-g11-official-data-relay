@@ -1834,6 +1834,7 @@ jobs:
         uses: ./.github/actions/g11-publication-checkpoint
         with:
           cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
+      # Before the first due race, a verified idle LIVE run keeps its MORNING feed.
       - name: Publish persisted LIVE research after predictions
         if: steps.deme-live.outcome=='success'&&steps.publish.outcome=='success'&&steps.delivery-checkpoint.outputs.ready=='true'
         continue-on-error: true
