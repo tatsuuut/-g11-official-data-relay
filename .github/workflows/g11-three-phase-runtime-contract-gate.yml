@@ -25,6 +25,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  saved-receipt-audit:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov6-saved-receipt-audit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-06-42130300335
+          fail-on-cache-miss: true
+      - name: Read only the saved official input provenance
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/g11-receipt-audit.tgz"
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${archive}" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - "${archive}" <<'PY'
+          import hashlib,inspect,json,pathlib,sys,tarfile
+          sys.path.insert(0,'scripts')
+          from morning_source_receipt_limit_v1 import receipt_limit
+          with tarfile.open(sys.argv[1],'r:gz') as archive:
+              matches=[m for m in archive.getmembers() if m.name.removeprefix('./') == 'rescue/store/snapshots/morning/official-day-input.json']
+              assert len(matches)==1 and matches[0].isfile()
+              raw=archive.extractfile(matches[0]).read()
+          snapshot=json.loads(raw)
+          assert snapshot['PAYLOAD']['OPERATIONAL_DATE_JST']=='2026-11-06'
+          reasons=[]
+          def trace(frame,event,arg):
+              if frame.f_code is receipt_limit.__code__ and event=='return':
+                  reasons.append({'limit':arg,'line':frame.f_lineno,'source':frame.f_locals.get('source')})
+              return trace
+          sys.settrace(trace)
+          limit=receipt_limit({'SNAPSHOT':snapshot})
+          sys.settrace(None)
+          print(json.dumps({'saved_official_input_sha256':hashlib.sha256(raw).hexdigest(),
+              'receipt_count':len(snapshot['SOURCE_RECEIPTS']),'scope':snapshot['PAYLOAD']['SCOPE'],
+              'race_count':len(snapshot['PAYLOAD']['RACES']),'admission':reasons,
+              'receipts':[{k:r.get(k) for k in ('SOURCE_ID','URL','FINAL_URL')} for r in snapshot['SOURCE_RECEIPTS']]},sort_keys=True))
+          PY
   contract-gate:
     name: contract
     runs-on: ubuntu-24.04
