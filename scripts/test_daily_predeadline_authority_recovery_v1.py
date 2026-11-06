@@ -340,6 +340,36 @@ class Oct18ContinuationScopeTests(unittest.TestCase):
         self.assertEqual('NO_FIXED_PREDICTION',entries['abeken_rescue']['status'])
         self.assertEqual(before,feed)
 
+    def test_weather_live_zero_overrides_positive_rescue_without_changing_other_engines(self):
+        feed, results = self.zero_fixture(); row = feed['races'][0]
+        policy = 'P3_MORNING_LIVE_JOINT_MASS_0_15_V1'
+        row['trifecta_confidence']['selection_policy'] = policy
+        row['predeadline']['trifecta_confidence']['selection_policy'] = policy
+        row.update(practical_bets=['1-2-3'], production_points=1, p3_snapshot_sha256='d'*64)
+        row['same_day_rescue_lock']['p3_snapshot_sha256'] = 'd'*64
+        row['trifecta_confidence'].update(production_bet_count=1, production_bet_order=['1-2-3'])
+        before = deepcopy(feed)
+        entries = live.night_scores(feed, results)[row['key']]['engines']
+        self.assertEqual('SETTLED', entries['p3_rescue']['status'])
+        self.assertEqual('ABSTAIN', entries['p3_live']['status'])
+        self.assertEqual(0, entries['p3_live']['virtual_investment'])
+        self.assertEqual(before, feed)
+        for field in ('p3_snapshot_sha256','p3_engine_fingerprint'):
+            bad = deepcopy(feed)
+            target = bad['races'][0] if field == 'p3_snapshot_sha256' else bad['races'][0]['trifecta_confidence']
+            target[field] = 'f'*64
+            got = live.night_scores(bad, results)[row['key']]['engines']
+            self.assertEqual('NO_FIXED_PREDICTION', got['p3_live']['status'])
+            for engine in ('abeken_rescue','abeken_live','goripan'):
+                self.assertEqual(entries[engine], got[engine])
+
+    def test_weather_abstention_is_date_gated(self):
+        feed, results = self.zero_fixture(); row = feed['races'][0]
+        row['trifecta_confidence']['selection_policy'] = 'P3_MORNING_LIVE_JOINT_MASS_0_15_V1'
+        row['key'] = '20261106-04-01'
+        row['trifecta_confidence']['race_id'] = row['key']
+        self.assertFalse(live.saved_p3_abstain(row))
+
     def test_unproven_or_late_zero_cannot_be_abstain(self):
         for change in ('missing_confidence','old_policy','wrong_race','future_confidence','late_lock','live_generation'):
             feed,results=self.zero_fixture(); row=feed['races'][0]; c=row['trifecta_confidence']
