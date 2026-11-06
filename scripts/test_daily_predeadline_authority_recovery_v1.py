@@ -13,6 +13,8 @@ import daily_predeadline_authority_recovery_v1 as recovery
 
 
 class SelectedSourceBootstrapTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("G11_PRIVATE_INTEGRATION_TESTS") == "true",
+                         "Full-source model integration belongs to contract CI")
     def test_actual_fixed_bundle_freezes_through_cli_when_private_checkout_is_available(self):
         source = Path(__file__).resolve().parents[1] / ".g11-private"
         release = source / "g11/true_ai/v1/models/racer-20261106/release.json"
@@ -668,6 +670,8 @@ class FuturePinnedRescueTests(unittest.TestCase):
 
 
 
+@unittest.skipUnless(os.environ.get("G11_PRIVATE_INTEGRATION_TESTS") == "true",
+                     "Official collector integration belongs to contract CI")
 class RescueNightAvailabilityTests(unittest.TestCase):
     """Exercise the actual collector, rejected-byte ledger and NIGHT route."""
     def setUp(self):
