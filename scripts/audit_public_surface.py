@@ -9,6 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    ".github/workflows/g11-p3-weather-audit.yml",
     "scripts/audit_saved_rescue_publication_v1.py",
     "scripts/test_saved_rescue_publication_v1.py",
     "scripts/morning_source_receipt_limit_v1.py",

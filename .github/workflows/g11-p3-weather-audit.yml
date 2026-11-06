@@ -14,7 +14,7 @@ jobs:
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: p3-weather-readonly-20261106-a86cb814
+          key: p3-weather-readonly-20261106-cf25e39c
           restore-keys: |
             g11-state-v4-published-2026-11-06-
       - name: Restore isolated saved state
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{secrets.PRIVATE_SOURCE_REPO}}
-          ref: a86cb814aaa03c005a8f14da6647607a9b0c0d12
+          ref: cf25e39c42754eca4fc4e381c0049c55533b7bc0
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
@@ -47,3 +47,4 @@ jobs:
         env:
           PYTHONPATH: .
         run: python3 tools/audit_p3_live_weather_v1.py --state "${RUNNER_TEMP}/p3-weather" --day 2026-11-06
+
