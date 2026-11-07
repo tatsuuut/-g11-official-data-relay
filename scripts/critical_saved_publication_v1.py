@@ -119,7 +119,10 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
             and critical.get('CRITICAL_CHECKPOINT_STATUS') == 'PASS'
             and critical.get('LAST_CRITICAL_RUN_ID') == str(run_id),
             'EARLY_PUBLICATION_CHECKPOINT_BINDING')
-    if not (critical.get('LAST_TIMELY_P3_LIVE_COUNT', 0)
+    # A successful capture is not proof of successful transport. From the
+    # short-cycle rollout onward, retry the verified saved projection even if
+    # this invocation produced no new LOCKs. No prediction is regenerated.
+    if day < '2026-11-08' and not (critical.get('LAST_TIMELY_P3_LIVE_COUNT', 0)
             or critical.get('LAST_TIMELY_V53_COUNT', 0)):
         return False
     if authority_module is None:
@@ -141,6 +144,15 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
     feed = relay.build_feed(store, run_id=int(run_id),
         github_sha=authority['runtime_source_sha'], current_p3_publication=publication,
         relay_phase='predeadline')
+    if (day >= '2026-11-08' and feed.get('operational_date_jst') == day
+            and feed.get('status') == 'PASS' and feed.get('stage') == 'MORNING'
+            and not critical.get('LAST_TIMELY_P3_LIVE_COUNT', 0)
+            and not critical.get('LAST_TIMELY_V53_COUNT', 0)):
+        # Before the first LIVE lock, the accepted MORNING feed is already the
+        # correct display. Do not create an empty LIVE publication or an error.
+        for phase in ('MORNING', 'PREDEADLINE'):
+            authority_module.verify_locks(state, day, phase, exact=True)
+        return False
     require(feed.get('stage') == 'PREDEADLINE' and feed.get('status') == 'PASS'
             and feed.get('operational_date_jst') == day, 'EARLY_PUBLICATION_FEED_BINDING')
     feed['daily_runtime'] = authority_module.feed_binding(authority, 'PREDEADLINE')
@@ -275,3 +287,4 @@ if __name__ == '__main__':
         print('G11_EARLY_PUBLICATION=HELD REASON=' +
               (code if code.isupper() and len(code) < 160 else type(exc).__name__), file=sys.stderr)
         raise SystemExit(1) from None
+

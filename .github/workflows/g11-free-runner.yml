@@ -329,6 +329,9 @@ jobs:
           python3 -m py_compile scripts/daily_predeadline_authority_recovery_v1.py
           python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py -q
           python3 -m unittest discover -s scripts -p test_predeadline_race_isolation_v1.py -q
+      - name: Select short LIVE cycle from November 8
+        id: fast-lane
+        run: python3 scripts/predeadline_fast_lane_v1.py select --day '${{steps.due.outputs.operational_date}}' --phase '${{steps.due.outputs.phase}}' --frozen '${{steps.authority.outputs.frozen}}' --rescue '${{steps.authority.outputs.rescue_bootstrap}}'
       - name: Capture and lock dependency-free PREDEADLINE critical lane
         if: steps.due.outputs.phase=='predeadline'
         id: critical
@@ -387,6 +390,7 @@ jobs:
           echo 'sent=true' >> "${GITHUB_OUTPUT}"
           echo 'WILD4_EARLY_HANDOFF=DISPATCH_ACCEPTED'
       - name: Publish persisted critical LOCKs
+        id: critical-publish
         if: steps.critical-save.outputs.ready=='true'&&steps.authority.outputs.frozen=='true'
         continue-on-error: true
         env:
@@ -727,8 +731,17 @@ jobs:
           do
             python3 -m unittest "${module}"
           done
+      - name: Retain saved-input research without another official capture
+        id: fast-sidecars
+        if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'
+        continue-on-error: true
+        working-directory: .g11-private
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: python3 ../scripts/predeadline_fast_lane_v1.py sidecars --day '${{steps.due.outputs.operational_date}}' --state-root '${{github.workspace}}/.relay-state'
       - name: Run the private fail-closed relay
         id: runtime
+        if: steps.fast-lane.outputs.enabled!='true'
         continue-on-error: true
         working-directory: .g11-private
         env:
@@ -967,7 +980,7 @@ jobs:
           key: g11-state-v3-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       - name: Gate NIGHT publication on fully settled research
         id: night-ready
-        if: steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!=''
+        if: (steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&steps.fast-sidecars.outcome=='success')
         env:
           FEED: .relay-output/feed.json
           OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
@@ -1037,11 +1050,17 @@ jobs:
           cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint
       - name: Handoff additional timely odds after verified state save
         id: wild4-followup
-        if: steps.due.outputs.phase=='predeadline'&&steps.runtime.outcome=='success'&&steps.publication-state-verified.outputs.ready=='true'&&steps.critical.outputs.rescue!='true'&&steps.authority.outputs.rescue_bootstrap!='true'
+        if: steps.due.outputs.phase=='predeadline'&&(steps.runtime.outcome=='success'||steps.fast-lane.outputs.enabled=='true')&&steps.publication-state-verified.outputs.ready=='true'&&steps.critical.outputs.rescue!='true'&&steps.authority.outputs.rescue_bootstrap!='true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{github.token}}
         run: python3 scripts/predeadline_race_isolation_v1.py handoff --state-root .relay-state --operational-date '${{steps.due.outputs.operational_date}}' --early-sent '${{steps.wild4-early.outputs.sent}}'
+      - name: Retry saved publication after an early delivery failure
+        id: critical-retry
+        if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-publish.outcome=='failure'&&steps.publication-state-verified.outputs.ready=='true'
+        env:
+          CRITICAL_CHECKPOINT_VERIFIED: ${{steps.publication-state-verified.outputs.ready}}
+        run: python3 -S scripts/critical_saved_publication_v1.py --day '${{steps.due.outputs.operational_date}}'
       - name: Publish a newly verified feed through OIDC
         if: steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!=''&&steps.night-ready.outputs.allowed=='true'&&(env.G11_NIGHT_TRANSPORT_ONLY=='true'||steps.publication-state-verified.outputs.ready=='true')
         id: publish
@@ -2046,6 +2065,16 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" -d "${payload}"
           echo "G11_NIGHT_HANDOFF=DISPATCHED day=${OPERATIONAL_DATE}"
+      - name: Report short LIVE delivery failures after continuation
+        if: always()&&!cancelled()&&steps.fast-lane.outputs.enabled=='true'
+        env:
+          EARLY_PUBLICATION: ${{steps.critical-publish.outcome}}
+          RETRY_PUBLICATION: ${{steps.critical-retry.outcome}}
+          RESEARCH_SIDECARS: ${{steps.fast-sidecars.outcome}}
+        run: |
+          echo "G11_SHORT_CYCLE_DELIVERY=${EARLY_PUBLICATION} RETRY=${RETRY_PUBLICATION} RESEARCH=${RESEARCH_SIDECARS}"
+          test "${EARLY_PUBLICATION}" = success || test "${RETRY_PUBLICATION}" = success
+          test "${RESEARCH_SIDECARS}" = success
       - name: Bootstrap PREDEADLINE after a verified public MORNING
         if: >-
           always() && !cancelled() &&
@@ -2228,4 +2257,5 @@ jobs:
           set -euo pipefail
           test -n "${REQUESTED_DATE}"
           python3 scripts/predeadline_dispatch_v1.py --day "${REQUESTED_DATE}" --mode rerun
+
 

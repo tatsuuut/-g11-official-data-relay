@@ -275,6 +275,9 @@ jobs:
           G11_REQUIRE_ENCRYPTION_TESTS: "1"
         run: python3 -m unittest discover -s scripts -p test_predeadline_latency_v1.py -v
 
+      - name: Verify November 8 short LIVE cycle and saved-only retries
+        run: python3 -m unittest discover -s scripts -p test_predeadline_fast_lane_v1.py -v
+
       - name: Audit three runtime phases
         run: python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-private
 
@@ -444,4 +447,5 @@ jobs:
       - name: Verify retained history and all three current research cohorts
         working-directory: .g11-thirty-budget/g11/canonical
         run: python3 -m unittest -v test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget test_deme_discovery_yotsuba test_deme_discovery_standard_preview test_deme_discovery_v5 test_deme_discovery_adoptions
+
 
