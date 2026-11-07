@@ -85,7 +85,7 @@ jobs:
           artifact=official.OfficialArtifactStore(store)
           from racer_period_source_v1 import status_parser_for
           from datetime import date
-          parser=status_parser_for(date.fromisoformat(day))
+          parser=status_parser_for(official,date.fromisoformat(day))
           expected=[5487,5487,5473,5473,5481,5481,5493,5496,5493,5496]
           for key,racer in zip(keys,expected):
               source_id='racelist-recovery-'+key.lower()
