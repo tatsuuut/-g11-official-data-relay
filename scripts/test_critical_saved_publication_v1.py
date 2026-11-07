@@ -221,6 +221,30 @@ class ExcludedNoBodyTransportTests(unittest.TestCase):
                             and r['changed_fields'] == ['wild_pack'] for r in held))
         self.assertEqual((self.incoming, self.accepted), before)
 
+    def test_independent_saved_abeken_lock_uses_base_cas_without_creating_p3(self):
+        incoming = copy.deepcopy(self.accepted)
+        incoming.update(source=self.incoming['source'],
+                        generated_at_jst=self.incoming['generated_at_jst'])
+        saved = {'snapshot_sha256': 'b' * 64,
+                 'locked_at_jst': '2026-11-01T10:42:00+09:00',
+                 'captured_at_jst': '2026-11-01T10:42:00+09:00',
+                 'practical_bets': ['2-1-3']}
+        incoming['races'][2]['abeken_shadow'] = {'v53': {'live': saved}}
+        before = copy.deepcopy((incoming, self.accepted))
+        delta, output = self.delta(incoming)
+        self.assertEqual(len(delta['RACES']), 1)
+        change = delta['RACES'][0]
+        self.assertEqual(change['RACE_KEY'], '20261101-22-01')
+        self.assertEqual(change['EXPECTED_RACE_VERSION'], 'a' * 64)
+        self.assertEqual(change['CHANGED_FIELDS'], {'abeken_shadow': {'v53': {'live': saved}}})
+        self.assertNotIn('G11_HOT_DELTA_HELD_RACE=', output)
+        self.assertEqual((incoming, self.accepted), before)
+        self.assertIsNone(incoming['races'][2]['predeadline'])
+        incoming['races'][2]['wild_pack']['changed'] = True
+        held, output = self.delta(incoming)
+        self.assertEqual(held['RACES'], [])
+        self.assertIn('G11_HOT_DELTA_HELD_RACE=', output)
+
     def test_guard_requires_explicit_matching_exclusion_and_absence_on_both_sides(self):
         cases = [('formal_status', 'FORMAL'), ('formal_status', 'UNKNOWN'),
                  ('formal_status', None), ('exclusion_reason', None),
