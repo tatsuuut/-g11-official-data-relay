@@ -388,7 +388,14 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
                 fields[output_field] = delta
         if not fields:
             continue
+        # An independent saved Abeken LOCK does not acquire a P3 version.
+        # Bind this narrow update to the exact accepted feed instead; the
+        # receiver repeats the identity/scope check and all LOCK validation.
+        independent_version = (night_no_body_base_version(prior, row, day, base_sha)
+            if incoming["stage"] == "PREDEADLINE" and set(fields) == {"abeken_shadow"}
+            else None)
         if (incoming["stage"] == "PREDEADLINE"
+                and independent_version is None
                 and unversioned_no_body_exclusion(row)
                 and unversioned_no_body_exclusion(prior)
                 and row.get("date_jst") == prior.get("date_jst") == day
@@ -413,7 +420,8 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
             deadline = datetime.fromisoformat(row["deadline_jst"])
             if captured >= deadline or len(str(live.get("snapshot_sha256", ""))) != 64:
                 raise RuntimeError("HOT_POST_DEADLINE_FORECAST")
-        version = (prior.get("predeadline") or {}).get("snapshot_sha256") or prior.get("p3_snapshot_sha256")
+        version = ((prior.get("predeadline") or {}).get("snapshot_sha256")
+                   or prior.get("p3_snapshot_sha256") or independent_version)
         if incoming["stage"] == "NIGHT":
             if version is None:
                 version = night_no_body_base_version(prior, row, day, base_sha)
