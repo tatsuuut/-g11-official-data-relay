@@ -1056,6 +1056,7 @@ jobs:
           GH_TOKEN: ${{github.token}}
         run: python3 scripts/predeadline_race_isolation_v1.py handoff --state-root .relay-state --operational-date '${{steps.due.outputs.operational_date}}' --early-sent '${{steps.wild4-early.outputs.sent}}'
       - name: Retry saved publication after an early delivery failure
+        id: critical-retry
         if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-publish.outcome=='failure'&&steps.publication-state-verified.outputs.ready=='true'
         env:
           CRITICAL_CHECKPOINT_VERIFIED: ${{steps.publication-state-verified.outputs.ready}}
@@ -2064,6 +2065,16 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/g11-free-runner.yml/dispatches" -d "${payload}"
           echo "G11_NIGHT_HANDOFF=DISPATCHED day=${OPERATIONAL_DATE}"
+      - name: Report short LIVE delivery failures after continuation
+        if: always()&&!cancelled()&&steps.fast-lane.outputs.enabled=='true'
+        env:
+          EARLY_PUBLICATION: ${{steps.critical-publish.outcome}}
+          RETRY_PUBLICATION: ${{steps.critical-retry.outcome}}
+          RESEARCH_SIDECARS: ${{steps.fast-sidecars.outcome}}
+        run: |
+          echo "G11_SHORT_CYCLE_DELIVERY=${EARLY_PUBLICATION} RETRY=${RETRY_PUBLICATION} RESEARCH=${RESEARCH_SIDECARS}"
+          test "${EARLY_PUBLICATION}" = success || test "${RETRY_PUBLICATION}" = success
+          test "${RESEARCH_SIDECARS}" = success
       - name: Bootstrap PREDEADLINE after a verified public MORNING
         if: >-
           always() && !cancelled() &&

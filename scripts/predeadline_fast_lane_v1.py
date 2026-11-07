@@ -42,6 +42,11 @@ def saved_sidecars(state, day, source, *, authority=None, wild=None,
         raise RuntimeError('FAST_LANE_AUTHORITY_BINDING')
     for phase in ('MORNING', 'PREDEADLINE'):
         authority.verify_locks(state, day, phase, exact=True)
+    last_deadline = datetime.fromisoformat(c['LAST_RACE_DEADLINE_JST'])
+    if last_deadline.utcoffset() != timedelta(hours=9) or last_deadline.date().isoformat() != day:
+        raise RuntimeError('FAST_LANE_LAST_DEADLINE_BINDING')
+    if now >= last_deadline:
+        return {'p3_status': 'NIGHT_HANDOFF', 'wild_changed': False}
     if wild is None:
         from g11.wild_pack.v1 import runtime_orchestrator_v1 as wild
         from g11.growth_p3.v1_1 import relay_publish_v1 as publisher

@@ -34,6 +34,7 @@ class FastCycleTests(TestCase):
             'CRITICAL': {'OPERATIONAL_DATE': DAY, 'CRITICAL_CHECKPOINT_STATUS': 'PASS',
                 'LAST_CRITICAL_RUN_ID': '42', 'AUTHORITY_SHA256': 'a'*64,
                 'RUNTIME_SOURCE_SHA': 'b'*40, 'LAST_TIMELY_P3_LIVE_COUNT': 0,
+                'LAST_RACE_DEADLINE_JST': DAY+'T20:30:00+09:00',
                 'LAST_TIMELY_V53_COUNT': 0}}
         (self.root/'relay-state.json').write_text(json.dumps(self.metadata))
         self.auth = SimpleNamespace(verify_runtime=Mock(return_value={
@@ -101,6 +102,17 @@ class FastCycleTests(TestCase):
         self.assertNotIn('run_predeadline_cycle(', source)
         self.assertNotIn('run_due_predeadline(', source)
         self.assertNotIn('prepare_prediction_models(', source)
+
+    def test_idle_morning_and_night_handoff_do_not_invent_live_predictions(self):
+        self.feed['stage'] = 'MORNING'
+        self.assertFalse(publication.project_saved(self.root, DAY, '42', self.root/'source',
+            self.root/'feed.json', authority_module=self.auth, relay=self.relay,
+            publisher=self.publisher, now=NOW))
+        self.metadata['CRITICAL']['LAST_RACE_DEADLINE_JST'] = NOW.isoformat()
+        (self.root/'relay-state.json').write_text(json.dumps(self.metadata))
+        self.assertEqual('NIGHT_HANDOFF', self.sidecars()['p3_status'])
+        self.publisher.publish_future.assert_not_called()
+        self.wild.run_predeadline.assert_not_called()
 
 
 if __name__ == '__main__': main()
