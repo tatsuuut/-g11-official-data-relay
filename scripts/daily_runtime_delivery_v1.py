@@ -535,7 +535,12 @@ def send_morning(feed_path, feed, authority, origin, token):
             "--data-binary", "@" + str(projected), "--output", str(response), "--write-out", "%{http_code}"],
             capture_output=True, text=True, check=True)
         ack = json.loads(response.read_bytes())
-        require(200 <= int(result.stdout) < 300 and ack.get("status") == "PASS", "DAILY_MORNING_HTTP_REJECTED")
+        if not (200 <= int(result.stdout) < 300 and ack.get("status") == "PASS"):
+            # Expose only a bounded machine code, never response bodies, tokens
+            # or curl arguments. Retries must retain the real rejection cause.
+            code = ack.get("error")
+            code = code if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_:.-]{0,159}", code) else "UNCLASSIFIED"
+            raise RuntimeError(f"DAILY_MORNING_HTTP_REJECTED:HTTP_{int(result.stdout)}:{code}")
         readback, headers, raw = hot.fetch(origin + "/api/g11-feed?date=" + feed["operational_date_jst"])
         identity(readback, authority, "MORNING")
         require(headers.get("x-g11-source-feed-sha256") == hot.hash_bytes(data) == ack.get("payload_sha256"), "DAILY_MORNING_READBACK_SHA")

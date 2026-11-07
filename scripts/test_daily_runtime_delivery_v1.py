@@ -79,6 +79,23 @@ class StagedSite:
         return {"status": "PASS"}
 
 
+class MorningRejectionTests(unittest.TestCase):
+    def test_saved_morning_rejection_reports_only_safe_code_and_keeps_bytes(self):
+        for server_error, expected in [("FEED_DATE", "FEED_DATE"),
+                                       ("Bearer sensitive-response", "UNCLASSIFIED")]:
+            with self.subTest(error=expected), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory) / "feed.json"
+                original = b'{"operational_date_jst":"2026-11-08"}'
+                source.write_bytes(original)
+                def rejected(command, **kwargs):
+                    Path(command[command.index("--output") + 1]).write_text(json.dumps({"error":server_error}))
+                    return subprocess.CompletedProcess([], 0, stdout="400")
+                with patch.object(delivery.hot, "project_morning_base"), patch.object(delivery, "optional_deme_projection", return_value=None), patch.object(delivery.subprocess, "run", side_effect=rejected):
+                    with self.assertRaisesRegex(RuntimeError, "^DAILY_MORNING_HTTP_REJECTED:HTTP_400:"+expected+"$"):
+                        delivery.send_morning(source, json.loads(original), {}, delivery.ORIGIN, "test-token")
+                self.assertEqual(source.read_bytes(), original)
+
+
 class DailyDeliveryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
