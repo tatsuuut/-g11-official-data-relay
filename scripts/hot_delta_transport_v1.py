@@ -65,6 +65,7 @@ PRE_KEYS = {
     "scoring_policy", "purchase_executed", "production_mean_ev",
     "value_alert", "value_alert_type", "trifecta_confidence",
     "special_case_id", "special_strength", "strong_mark", "pre_race_impact",
+    "p3_live_conditions",
 }
 VERIFICATION_KEYS = {
     "SCHEMA", "RACE_ID", "MASHIRO_DEFINITION", "MASHIRO_EVALUATION_STATUS",

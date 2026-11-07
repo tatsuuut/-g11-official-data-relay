@@ -10,6 +10,40 @@ import hot_delta_transport_v1 as hot
 import daily_runtime_delivery_v1 as delivery
 
 
+class LiveConditionsTransportTests(unittest.TestCase):
+    def test_saved_weather_binding_survives_delta_projection_and_retry(self):
+        day = '2026-11-07'
+        row = {'key': '20261107-01-01', 'deadline_jst': day + 'T11:00:00+09:00',
+               'p3_snapshot_sha256': 'a' * 64, 'top_boat': 1}
+        accepted = {'operational_date_jst': day, 'stage': 'MORNING', 'races': [row]}
+        incoming = copy.deepcopy(accepted)
+        incoming.update(stage='PREDEADLINE', source={'run_id': 1},
+                        generated_at_jst=day + 'T10:54:00+09:00')
+        binding = {'applied': True, 'policy': 'P3_TRUE_ONLY_MORNING_LIVE_0_15_V2',
+                   'morning_head': 1, 'live_head': 2, 'head_changed': True,
+                   'prediction_at': day + 'T10:53:00+09:00',
+                   'wind_wave_applied': True, 'local_record_applied': True,
+                   'tide_current_applied': False, 'swell_observed': False,
+                   'venue_profile': {'VERSION': 'P3_OFFICIAL_VENUE_PROFILE_V1',
+                                     'SHA256': 'b' * 64, 'VENUE_CODE': '01'}}
+        live = {'snapshot_sha256': 'c' * 64, 'captured_at_jst': day + 'T10:53:00+09:00',
+                'top_boat': 2, 'p3_live_conditions': binding,
+                'private_debug_payload': {'must_not_publish': True}}
+        incoming['races'][0]['predeadline'] = live
+        before = copy.deepcopy(incoming)
+        delta = hot.create_delta(incoming, accepted, 'd' * 64)
+        published = delta['RACES'][0]['CHANGED_FIELDS']['predeadline']
+        self.assertEqual(published['p3_live_conditions'], binding)
+        self.assertNotIn('private_debug_payload', published)
+        self.assertEqual(published['snapshot_sha256'], live['snapshot_sha256'])
+        self.assertEqual(published['captured_at_jst'], live['captured_at_jst'])
+        self.assertEqual(incoming, before)
+        self.assertEqual(delta, hot.create_delta(incoming, accepted, 'd' * 64))
+        acknowledged = copy.deepcopy(accepted)
+        acknowledged['races'][0]['predeadline'] = published
+        self.assertEqual(hot.create_delta(incoming, acknowledged, 'e' * 64)['RACES'], [])
+
+
 class PublishedLockResultJoinTests(unittest.TestCase):
     def fixture(self):
         key = '20261031-09-03'
