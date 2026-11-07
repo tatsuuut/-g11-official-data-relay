@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/predeadline_fast_lane_v1.py",
+    "scripts/test_predeadline_fast_lane_v1.py",
+    "docs/predeadline-fast-cycle-20261108.md",
     ".github/workflows/g11-p3-weather-audit.yml",
     ".github/workflows/g11-p3-true-only-audit.yml",
     "scripts/audit_saved_rescue_publication_v1.py",
@@ -1021,5 +1024,6 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
+
 
 
