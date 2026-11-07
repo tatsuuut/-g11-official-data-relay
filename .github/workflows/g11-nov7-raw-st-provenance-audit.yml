@@ -104,7 +104,8 @@ jobs:
                   if identity.startswith(str(racer)+' '):
                       tokens.append(official._clean_text(' '.join(cells[3].itertext())))
               assert len(tokens)==1 and tokens[0].split()[-1]=='-', tokens
-              inv=official.FORMAL_ADAPTER.prepare_canonical_official_morning_invocation(saved,key)
+              with official_input_compatibility():
+                  inv=official.FORMAL_ADAPTER.prepare_canonical_official_morning_invocation(saved,key)
               fields=official.FORMAL_ENGINE.RAW_HEADER
               selected=[dict(zip(fields,row)) for row in inv['PERMIT']['PAYLOAD']['AUTHORIZED_ROWS'] if int(dict(zip(fields,row))['登録番号'])==racer]
               assert len(selected)==1 and selected[0]['平均ST'] is None
