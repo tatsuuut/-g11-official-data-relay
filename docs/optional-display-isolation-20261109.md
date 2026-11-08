@@ -44,6 +44,35 @@ or production publication occurs in this test. Fault tests cover incomplete,
 malformed and unreadable research, healthy pass-through, nested scopes, and
 continued rejection of core failures.
 
-Implementation is not live completion. Required next checks: exact-head CI,
-normal MORNING recovery, Site day/stage/count/LOCK readback, and the next normal
-invocation. Then append observed run IDs and remaining research hold here.
+## Observed completion
+
+- PR 164 tested head `cba9b30628fb994a9267aa6f80432db499449cb6`; complete runtime
+  gate `42518176615` passed. The actual-checkpoint audit reproduced the failure,
+  projected 131 formal races with acquisition/inference forbidden, and retained
+  all 36,763 store files plus the original daily authority byte for byte.
+- Merge `190ca52aba143c03c0c1a090d9548c853a3ff853` has the exact tested tree
+  `a6725861dd8b7a0e85b11406f3079987e1649790`. Its post-merge gate also passed
+  (`42518393116`).
+- Production `42518393134`, job `128846321013`, completed successfully. At
+  05:07:49 JST it reported saved MORNING replay with prediction recalculation
+  zero. Publication state readback passed at 05:09:54; Site readback passed at
+  05:10:35. The V53 morning readback passed too.
+- Independent authenticated GETs confirmed latest and `view=v53-final` both
+  show 2026-11-09 / MORNING / PASS, 131 formal races, 131 P3 saved predictions
+  and 131 saved Muki morning projections. App-view body SHA-256:
+  `35bf1358665b3dcacde3517b4d0623572024b75d2b9eea40d2d5182a01328d6b`.
+  Frozen private source is still `5e728bb8ab2cdd608fbd4aeddb62c288dd1efa71`.
+- November 8 canonical NIGHT remains 132 results / 125 formal / zero pending;
+  its independent GET bytes stayed exactly identical (SHA-256
+  `e22db8a52218f8c8d450706ef8213b78f00b3b45a3da165495cd5ec5aaec10e6`).
+- A separate optional Deme timeout (`THIRTY_OPTIONAL_TIMEOUT`) occurred during
+  this production run and stayed research-only; it did not prevent publication.
+
+Remaining: original-display research is correctly TECHNICAL_HOLD, not repaired
+or counted as completed. The single Miyajima 6R input remains quarantined; no
+sixth entry was invented. Goripan's separate app status was
+WAITING_CANONICAL_LOCK, not claimed as delivered by this repair. The next normal
+scheduled MORNING invocation and today's live/night phases remain future checks;
+do not describe the regression gate as their live completion. The next minimal
+check is retained 131 morning LOCKs and continued delivery on the next existing
+normal invocation. Do not rerun research or re-create predictions for this check.
