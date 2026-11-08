@@ -43,30 +43,9 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        if: inputs.lineage_readback_date == ''
-        run: |
-          python3 - <<'PYDEPENDENCY'
-          import importlib.metadata, subprocess, sys, time
-          from datetime import datetime, timezone
-          started=time.monotonic()
-          print('WILD4_DEPENDENCY_PREP_STARTED_AT='+datetime.now(timezone.utc).isoformat(),flush=True)
-          try:
-              installed=importlib.metadata.version('catboost')
-          except importlib.metadata.PackageNotFoundError:
-              installed=None
-          if installed != '1.2.8':
-              subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--no-input','catboost==1.2.8'],check=True,timeout=180)
-              action='INSTALLED_PINNED'
-          else:
-              action='REUSED_PINNED'
-          # Re-enter Python after installation: a newly created user site is
-          # not on the already-running interpreter's sys.path.
-          subprocess.run([sys.executable,'-c',
-              "import importlib.metadata; assert importlib.metadata.version('catboost') == '1.2.8'; from catboost import CatBoostClassifier"],check=True,timeout=30)
-          print('WILD4_DEPENDENCY_PREP_ACTION='+action)
-          print('WILD4_DEPENDENCY_PREP_READY_AT='+datetime.now(timezone.utc).isoformat())
-          print('WILD4_DEPENDENCY_PREP_SECONDS='+format(time.monotonic()-started,'.3f'))
-          PYDEPENDENCY
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@a475d0d95b89edc98064ca9023ca372c07ad0f90
+        with:
+          enabled: ${{ inputs.lineage_readback_date == '' }}
       - name: Checkout isolated research branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -280,10 +259,12 @@ jobs:
           exec 3<&-
           fi
           python3 - <<'PY'
-          import json, os, pathlib, tarfile, hashlib
+          import json, os, pathlib, tarfile, hashlib, sys
+          sys.path.insert(0, os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
+          from extract_runtime_state_v1 import extract_complete_state
           root=pathlib.Path(os.environ['RUNNER_TEMP'])
-          for archive,dest in ((root/'g11-state.tgz',pathlib.Path('.relay-state')),
-                               (root/'candidate.tgz',root)):
+          extract_complete_state(root/'g11-state.tgz', pathlib.Path('.relay-state'))
+          for archive,dest in ((root/'candidate.tgz',root),):
               if not archive.is_file(): continue
               dest.mkdir(exist_ok=True)
               with tarfile.open(archive,'r:gz') as handle:
