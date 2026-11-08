@@ -18,7 +18,9 @@ SCHEMA = 'G11_PUBLIC_PYTHON_RUNTIME_V1'
 
 
 def identity(root, profile):
-    executable = Path(sys.executable).resolve()
+    # EnvBuilder may copy its launcher. Bind to the base interpreter so calling
+    # this helper after PATH activation does not invalidate an identical cache.
+    executable = Path(getattr(sys, '_base_executable', sys.executable)).resolve()
     return {'schema': SCHEMA, 'root': str(Path(root).absolute()), 'profile': profile,
             'requirements': PROFILES[profile], 'python': sys.version,
             'executable': str(executable),
@@ -58,7 +60,7 @@ def prepare(root, profile):
         saved = json.loads(manifest.read_text())
         if saved['identity'] == expected and saved['distributions'] == probe(root, profile):
             reused = True
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         pass
     if not reused:
         if root.exists():

@@ -131,7 +131,7 @@ class PublicRuntimeTests(unittest.TestCase):
         self.assertEqual(str(self.root / 'bin') + '\n', self.pathfile.read_text())
 
     def test_miss_changed_identity_corruption_or_import_failure_rebuilds(self):
-        for condition in ['missing', 'identity', 'corrupt', 'import', 'distribution']:
+        for condition in ['missing', 'identity', 'corrupt', 'wrong_shape', 'import', 'distribution']:
             with self.subTest(condition=condition):
                 self.save()
                 manifest = self.root / 'g11-public-runtime.json'
@@ -140,6 +140,7 @@ class PublicRuntimeTests(unittest.TestCase):
                     value = json.loads(manifest.read_text()); value['identity']['image_version'] = 'wrong'
                     manifest.write_text(json.dumps(value))
                 if condition == 'corrupt': manifest.write_text('bad')
+                if condition == 'wrong_shape': manifest.write_text('[]')
                 results = [self.distributions]
                 if condition == 'import': results = [subprocess.CalledProcessError(1, 'probe'), self.distributions]
                 if condition == 'distribution': results = [[['catboost', 'wrong']], self.distributions]
@@ -168,6 +169,11 @@ class PublicRuntimeTests(unittest.TestCase):
         for field in ['root', 'profile', 'requirements', 'python', 'executable_sha256', 'machine', 'image_version']:
             self.assertNotEqual(runtime.fingerprint(base), runtime.fingerprint({**base, field: 'changed'}))
         self.assertNotEqual(runtime.fingerprint(base), runtime.fingerprint(runtime.identity(self.root, 'parser')))
+
+    def test_activating_the_environment_keeps_the_base_interpreter_identity(self):
+        before = runtime.identity(self.root, 'runtime')
+        with patch.object(runtime.sys, 'executable', str(self.root / 'bin/python3')):
+            self.assertEqual(before, runtime.identity(self.root, 'runtime'))
 
 
 @unittest.skipUnless(os.environ.get('WILD4_WORKFLOW_PATH'), 'tested against the pinned reusable workflow in contract CI')
