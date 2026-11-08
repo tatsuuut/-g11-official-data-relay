@@ -38,7 +38,9 @@ and no feed emitted. Its successful job exit did not mean settlement completed.
   day binding, all LOCK hashes and byte-identical 98-race overlap, and copy the
   34 original files. Validate every donor before atomically replacing the local
   restored ledger. Preserve original manifests and a sealed provenance receipt.
-- The recovery refuses an already-processed NIGHT or a conflicting original.
+- The recovery refuses a completed NIGHT or a conflicting original. The exact
+  incomplete 98-LOCK coverage hold observed during this repair is admitted only
+  with existing settlements and learning retry proof preserved (see below).
   It never calls prediction, official capture, learning, model promotion or
   settlement. Existing normal NIGHT processing remains responsible for results.
 - Existing P3/Muki predictions, all original bets, frozen models, notification
@@ -53,11 +55,9 @@ copy/idempotence, changed overlap/model, a later resave, missing donors, invalid
 hashes and already-started NIGHT. CI must also use the actual pinned private
 model/projection verifier and pass the existing full runtime contract suite.
 
-Next: merge only the checked head, observe the automatically triggered normal
-Goripan run, require 34 restored / 132 LOCKs / zero generations and exact Site
-GET readback, then inspect tonight's NIGHT and Goripan settlements separately.
-No successful deployment or completed settlement is claimed by this document's
-initial implementation checkpoint.
+The initial checkpoint required the checked head to be merged, 34 restored /
+132 LOCKs / zero generations, exact Site GET readback and separate NIGHT and
+Goripan settlement verification. These have now been observed as recorded below.
 
 ## NIGHT advanced during the repair (21:15 JST)
 
@@ -72,3 +72,54 @@ states remain rejected. Existing frozen settlement code is triggered once when
 originals were restored, to append the 34 missing results from already verified
 NIGHT; no official acquisition or prediction is rerun by recovery. The frozen
 settlement body hash remains unchanged; only this bounded trigger is added.
+
+## Deployed and verified (21:29 JST)
+
+- PR #162 merged as `e77ad4adfa43f9ef812d5aaf4e56fdd73c59b469` at
+  21:26 JST. Its tree `fe53b8be807290a8d706ca75263bf52980834941` exactly
+  matches tested head `245f0e0217d8c167e27b1c55d3aec89a7cca529a`.
+- Required final-head CI `42480043920` and post-merge CI `42480270468`
+  passed, including 13 publication-continuity tests using the actual private
+  model/LOCK verifier. Reusable workflow:
+  `1bdabbdcce8b3a3b1b43f88b42ecbdaeabe45d8d`; immutable public helper:
+  `57883a3ba0a77d674f749acfaba0bbc2054a05ee`.
+- The natural push-triggered production run `42480270537`, job `128730475327`,
+  completed SUCCESS. At 21:27:38 it reported 34 restored original LOCKs,
+  132 total and **zero prediction generations by recovery**.
+- At 21:27:56 existing official settlement added exactly 34 records; total
+  **132**, exclusions 0, settlement COMPLETE. No official result acquisition
+  was run by the recovery helper.
+- Encrypted artifact `13616909263` was finalized before publication at 21:28:15,
+  1,419,795 bytes, ZIP SHA256
+  `1b78d7aab31e689c7d47e608eaa950b783ae41d10facbad64aabd85cc2b17507`.
+- At 21:28:31 the normal publisher reported `GORIPAN_SITE_GET_READBACK=PASS`
+  and `GORIPAN_SAVED_LOCKS=132`.
+- An independent authenticated Site read returned 10,415,484 bytes with matching
+  response/header SHA256
+  `6ed2821dc5937186e5efdd6decc74529990332118ee0eff7d5015dec6740a3d3`.
+  It contained all 132 Goripan LOCKs and all 132 settlements. Every prior 98
+  Goripan record, including its settlement, equaled the pre-repair read.
+  The 34 appended records matched their earliest original saved timestamps,
+  deadlines and bet counts; each settlement referenced its delivered LOCK hash.
+  All P3 and Muki saved prediction fields remained equal. Canonical NIGHT had
+  132 official results, 0 pending and 125 formal P3 races (7 pre-existing morning
+  exclusions remain separate). This is server-data verification, not proof of
+  earlier phone/push arrival.
+
+## Remaining separate checkpoint: learning proof
+
+Learning is still `TECHNICAL_HOLD`, now `NIGHT_RETRY_INPUT_CHANGED`, with
+`last_completed_night = null`. The immutable retry cohort was bound while only
+98 originals were available. Restoring the missing originals correctly changes
+that proof set; the existing learning guard refuses to silently rebase it.
+Do not call learning complete, delete the original retry binding, reset a
+model/generation, or regenerate/retrain P3. Delivery and financial settlement
+above are complete independently of this hold.
+
+NEXT_FIRST_GAP: inspect the preserved 98-record retry proof and sealed recovery
+receipt in artifact `13616909263`. Establish an explicit append-only provenance
+path for the 34 recovered originals before proposing a learning-cohort transition.
+Any future learning action must preserve the original proof/history, use the
+existing model-specific authorization, and remain separate from completed
+prediction/settlement/publication. Do not repeat donor downloads or original
+recovery: the receipt makes subsequent normal Nov 8 runs a verified no-op.
