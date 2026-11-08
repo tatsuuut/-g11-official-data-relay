@@ -43,7 +43,7 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@b0bfc43fdca386ba04c2dc4dcfda1c978da4fd60
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@e080ae95bea0a49700cfee057c18342000ecb2ff
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
       - name: Checkout isolated research branch
@@ -461,6 +461,7 @@ jobs:
               for p in files],sort_keys=True))
           PY
       - name: Recover Nov 8 original saved LOCKs omitted by failed publication
+        id: publication-recovery
         if: inputs.lineage_readback_date == '' && steps.decrypted.outputs.canonical_ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.day.outputs.day == '2026-11-08'
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
@@ -1415,7 +1416,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('saved=true\n')
           PYRECHECK
       - name: Encrypt immutable future locks
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true' || steps.publication-recovery.outputs.changed == 'true')
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -1427,7 +1428,7 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks before publication
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true' || steps.publication-recovery.outputs.changed == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
