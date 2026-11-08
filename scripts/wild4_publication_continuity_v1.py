@@ -344,7 +344,12 @@ def main():
         run = json.loads(args.run.read_bytes())
         if not trusted_run(run, conclusion='failure'):
             raise SystemExit(1)
-        jobs = api_json('/actions/runs/' + str(run['id']) + '/jobs?per_page=100')['jobs']
+        try:
+            jobs = api_json('/actions/runs/' + str(run['id']) + '/jobs?per_page=100')['jobs']
+        except Exception:
+            # Unavailable evidence must not fall back to an older ledger and
+            # discard persisted LOCKs. Exit 1 is reserved for proven ineligible.
+            raise SystemExit(2)
         if not persisted_failure(run, jobs):
             raise SystemExit(1)
         print('WILD4_SAVED_FAILURE_ACCEPTED RUN=' + str(run['id'])); return

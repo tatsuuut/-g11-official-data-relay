@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import wild4_publication_continuity_v1 as c
 
@@ -60,6 +61,15 @@ class PersistedFailureTests(unittest.TestCase):
         job = deepcopy(self.job); job['steps'].append({'name': 'unexpected failure', 'conclusion': 'failure'})
         self.assertFalse(c.persisted_failure(self.run, [job]))
         self.assertFalse(c.persisted_failure(self.run, [self.job, self.job]))
+
+    def test_unavailable_evidence_is_fatal_not_permission_to_restore_older_work(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'run.json'; path.write_text(json.dumps(self.run))
+            with mock.patch.dict(os.environ, {'GITHUB_REPOSITORY': c.REPO}), \
+                 mock.patch('sys.argv', ['continuity', 'admit-failure', '--run', str(path)]), \
+                 mock.patch.object(c, 'api_json', side_effect=TimeoutError):
+                with self.assertRaises(SystemExit) as caught: c.main()
+                self.assertEqual(caught.exception.code, 2)
 
 
 class AtomicRecoveryTests(unittest.TestCase):
