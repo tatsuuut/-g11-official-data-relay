@@ -43,7 +43,7 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@fc2ed637a3c266eb453c1dc178f8498e1c3d6551
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@57883a3ba0a77d674f749acfaba0bbc2054a05ee
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
       - name: Checkout isolated research branch
@@ -203,6 +203,12 @@ jobs:
               id="${artifact_id}"
               selected_run="${run_id}"
               break
+            else
+              lookup_status=$?
+              if [ "${lookup_status}" -ne 1 ]; then
+                echo 'WILD4_SAVED_LEDGER_EVIDENCE_UNAVAILABLE' >&2
+                exit "${lookup_status}"
+              fi
             fi
           done <<< "${ledger_candidates}"
           # A rerun of the same GitHub run must not manufacture a replacement
