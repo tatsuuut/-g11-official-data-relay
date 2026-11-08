@@ -43,7 +43,7 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@ef232393e67b6de01407ae1a988f36fcc7ed9b05
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@b0bfc43fdca386ba04c2dc4dcfda1c978da4fd60
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
       - name: Checkout isolated research branch
@@ -196,6 +196,10 @@ jobs:
                 or (.path == ".github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml"
                   and (.event == "workflow_run" or .event == "schedule" or .event == "push" or .event == "workflow_dispatch") and .head_branch == "main")
               )' "${RUNNER_TEMP}/observer-ledger-run.json" >/dev/null; then
+              id="${artifact_id}"
+              selected_run="${run_id}"
+              break
+            elif python3 "${G11_PUBLIC_RUNTIME_HELPERS}/wild4_publication_continuity_v1.py" admit-failure --run "${RUNNER_TEMP}/observer-ledger-run.json"; then
               id="${artifact_id}"
               selected_run="${run_id}"
               break
@@ -456,6 +460,16 @@ jobs:
                'deadline':json.loads(p.read_text())['RACE_DEADLINE_AT']}
               for p in files],sort_keys=True))
           PY
+      - name: Recover Nov 8 original saved LOCKs omitted by failed publication
+        if: inputs.lineage_readback_date == '' && steps.decrypted.outputs.canonical_ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.day.outputs.day == '2026-11-08'
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          GH_TOKEN: ${{ github.token }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="${GITHUB_WORKSPACE}/.g11-private"
+          python3 "${G11_PUBLIC_RUNTIME_HELPERS}/wild4_publication_continuity_v1.py" recover-nov8 --ledger "${RUNNER_TEMP}/g11-wild4-future-locks"
       - name: Restore the authenticated missing original LOCK before NIGHT settlement
         id: ledger-union
         if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && steps.day.outputs.day == '2026-11-01' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
@@ -1333,7 +1347,7 @@ jobs:
               if manifest.get('DATE') != day or manifest.get('NEW_LOCKED_THIS_RUN') != 0:
                   print('SPECIALTY_INITIAL_DEFERRED_NEW_FORMAL_WORK');sys.exit(0)
               live,_,live_raw=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date='+day)
-              life.require(len(live_raw)<=8*1024*1024 and live.get('operational_date_jst')==day, 'SPECIALTY_PRIOR_PUBLICATION_DAY')
+              life.require(len(live_raw)<=16*1024*1024 and live.get('status')=='PASS' and live.get('operational_date_jst')==day, 'SPECIALTY_PRIOR_PUBLICATION_DAY')
               published={g['race_key']:g['lock_sha256'] for r in live.get('races',[])
                          if (g:=r.get('wild_pack',{}).get('wild4',{}).get('goripan'))}
               keys=manifest.get('RACE_KEYS',[])
@@ -1412,7 +1426,7 @@ jobs:
             --symmetric --cipher-algo AES256 \
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
-      - name: Preserve encrypted shadow locks
+      - name: Preserve encrypted shadow locks before publication
         if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true')
         uses: actions/upload-artifact@v4
         with:
@@ -1455,7 +1469,8 @@ jobs:
           pathlib.Path('.relay-output').mkdir(exist_ok=True)
           day=os.environ['OPERATIONAL_DATE']
           feed,_,raw=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date='+day)
-          if len(raw)>(16 if feed.get('stage')=='NIGHT' else 8)*1024*1024 or feed.get('status')!='PASS' or feed.get('operational_date_jst')!=day:
+          print('GORIPAN_PRIOR_PUBLIC_FEED_BYTES='+str(len(raw))+' LIMIT='+str(16*1024*1024)+' STAGE='+str(feed.get('stage')))
+          if len(raw)>16*1024*1024 or feed.get('status')!='PASS' or feed.get('operational_date_jst')!=day:
               raise SystemExit('GORIPAN_PRIOR_PUBLIC_FEED_BINDING')
           (pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-prior-public-feed.json').write_bytes(raw)
           PYPUBLISHEDLOCK
