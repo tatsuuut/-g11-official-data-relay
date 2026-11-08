@@ -9,6 +9,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/wild4_publication_continuity_v1.py",
+    "scripts/test_wild4_publication_continuity_v1.py",
+    "scripts/wild4_publication_recovery_20261108.py",
+    "docs/goripan-publication-recovery-20261108.md",
     '.github/actions/g11-public-python/action.yml',
     'scripts/public_python_runtime_v1.py',
     'scripts/extract_runtime_state_v1.py',
