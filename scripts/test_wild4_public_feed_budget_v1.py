@@ -20,7 +20,7 @@ import hot_delta_transport_v1 as hot
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DAY = '2026-11-01'
+DAY = '2026-11-08'
 LIMIT = 16 * 1024 * 1024
 REAL_FEED = os.environ.get('WILD4_REAL_PUBLIC_FEED_PATH')
 
@@ -116,12 +116,15 @@ class PriorPublicFeedBudgetTests(unittest.TestCase):
         self.assertIsInstance(error, SystemExit)
         self.assertEqual(str(error), 'GORIPAN_PRIOR_PUBLIC_FEED_BINDING')
 
-    def test_predeadline_keeps_the_original_eight_mib_budget(self):
-        self.assertAcceptedUnchanged(self.raw(8 * 1024 * 1024, stage='PREDEADLINE'))
-        saved, _, error = self.exercise(self.raw(8 * 1024 * 1024 + 1, stage='PREDEADLINE'))
-        self.assertIsNone(saved)
-        self.assertIsInstance(error, SystemExit)
-        self.assertEqual(str(error), 'GORIPAN_PRIOR_PUBLIC_FEED_BINDING')
+    def test_all_phases_accept_the_same_bounded_full_display_response(self):
+        for phase in ('MORNING', 'PREDEADLINE', 'NIGHT'):
+            with self.subTest(phase=phase):
+                self.assertAcceptedUnchanged(self.raw(9 * 1024 * 1024, stage=phase))
+                self.assertAcceptedUnchanged(self.raw(LIMIT, stage=phase))
+                saved, _, error = self.exercise(self.raw(LIMIT + 1, stage=phase))
+                self.assertIsNone(saved)
+                self.assertIsInstance(error, SystemExit)
+                self.assertEqual(str(error), 'GORIPAN_PRIOR_PUBLIC_FEED_BINDING')
 
     def test_wrong_day_and_nonpass_status_remain_rejected(self):
         for changes in ({'operational_date_jst': '2026-11-02'},
@@ -144,11 +147,11 @@ class PriorPublicFeedBudgetTests(unittest.TestCase):
         self.assertEqual(str(error), 'HOT_READBACK_SHA')
 
     @unittest.skipUnless(REAL_FEED, 'Set WILD4_REAL_PUBLIC_FEED_PATH for exact incident bytes')
-    def test_exact_incident_night_feed_is_accepted_without_reserialization(self):
+    def test_exact_incident_feed_is_accepted_without_reserialization(self):
         raw = Path(REAL_FEED).read_bytes()
         self.assertGreater(len(raw), 8 * 1024 * 1024)
         self.assertLessEqual(len(raw), LIMIT)
-        self.assertEqual(json.loads(raw)['stage'], 'NIGHT')
+        self.assertIn(json.loads(raw)['stage'], ('PREDEADLINE', 'NIGHT'))
         self.assertAcceptedUnchanged(raw)
 
 

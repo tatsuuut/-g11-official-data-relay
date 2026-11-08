@@ -424,7 +424,7 @@ jobs:
       - name: Checkout reviewed retained LOCK guard
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 94e0de64725df5014addd6724cac7a3e5935480e
+          ref: 1bdabbdcce8b3a3b1b43f88b42ecbdaeabe45d8d
           path: .g11-retained-guard
           persist-credentials: false
 
@@ -458,7 +458,9 @@ jobs:
           WILD4_WORKFLOW_PATH: .g11-retained-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
           G11_REQUIRE_PRIVATE_WILD4_UNION: "1"
           WILD4_SETTLEMENT_SOURCE_PATH: .g11-rescue-settlement/g11/wild_pack/v1/wild4_official_settlement_v1.py
-        run: python3 -m unittest discover -s scripts -p test_wild4_saved_ledger_union_v1.py -v
+        run: |
+          python3 -m unittest discover -s scripts -p test_wild4_saved_ledger_union_v1.py -v
+          python3 -m unittest discover -s scripts -p test_wild4_publication_continuity_v1.py -v
 
       - name: Checkout bounded 30x research projection
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
