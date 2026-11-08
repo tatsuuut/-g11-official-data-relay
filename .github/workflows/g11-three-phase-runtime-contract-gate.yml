@@ -25,6 +25,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  public-runtime-preparation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify complete restoration and public cache failure boundaries
+        run: python3 -m unittest discover -s scripts -p test_runtime_preparation_v1.py -v
+      - name: Prepare public packages on the real runner
+        uses: ./.github/actions/g11-public-python
+      - name: Require a verified second preparation without pip
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/public_python_runtime_v1.py prepare --profile runtime > "${RUNNER_TEMP}/public-python-repeat.txt"
+          cat "${RUNNER_TEMP}/public-python-repeat.txt"
+          grep -q '^G11_PUBLIC_PYTHON_ACTION=REUSED_VERIFIED$' "${RUNNER_TEMP}/public-python-repeat.txt"
+          python3 - <<'PY'
+          import importlib.metadata as m
+          from catboost import CatBoostClassifier
+          from lxml import etree
+          assert m.version('catboost') == '1.2.8' and m.version('lxml') == '6.1.1'
+          assert etree.fromstring(b'<saved/>').tag == 'saved'
+          print('G11_PUBLIC_RUNTIME_IMPORTS=PASS')
+          PY
   nov7-saved-morning-audit:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov7-yotsuba-time'
     runs-on: ubuntu-24.04
@@ -400,13 +424,14 @@ jobs:
       - name: Checkout reviewed retained LOCK guard
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 1184c7f5b80953c1fa6753113e88630618db1b20
+          ref: 94e0de64725df5014addd6724cac7a3e5935480e
           path: .g11-retained-guard
           persist-credentials: false
 
       - name: Verify retained WILD4 locks with advanced rolling input
         run: |
           "$(go env GOPATH)/bin/actionlint" "$WILD4_WORKFLOW_PATH"
+          python3 -m unittest discover -s scripts -p test_runtime_preparation_v1.py -v
           python3 -m unittest discover -s scripts -p test_wild4_retained_lock_v1.py -v
           python3 -m unittest discover -s scripts -p test_wild4_public_feed_budget_v1.py -v
           python3 -m unittest discover -s scripts -p test_wild4_night_recovery_date_v1.py -v

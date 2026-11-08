@@ -308,8 +308,10 @@ class PredeadlineDependencyTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         step = workflow.split("      - name: Install pinned private runtime dependencies\n", 1)[1].split("\n      - name:", 1)[0]
         self.assertIn("if: env.G11_NIGHT_TRANSPORT_ONLY != 'true'", step)
-        self.assertIn("'catboost==1.2.8'", step)
-        self.assertIn("import catboost", step)
+        self.assertIn('uses: ./.github/actions/g11-public-python', step)
+        dependency_source = (Path(__file__).resolve().parent / 'public_python_runtime_v1.py').read_text()
+        self.assertIn("'catboost==1.2.8'", dependency_source)
+        self.assertIn('from catboost import CatBoostClassifier', dependency_source)
 
 
 class PredeadlineQueueIsolationTests(unittest.TestCase):
