@@ -43,7 +43,7 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@e080ae95bea0a49700cfee057c18342000ecb2ff
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@fc2ed637a3c266eb453c1dc178f8498e1c3d6551
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
       - name: Checkout isolated research branch
@@ -1186,7 +1186,7 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Checkout pinned official settlement source
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true')
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -1195,7 +1195,7 @@ jobs:
           path: .g11-settlement
           persist-credentials: false
       - name: Settle only immutable locks from verified final NIGHT
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle'))
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true')
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
