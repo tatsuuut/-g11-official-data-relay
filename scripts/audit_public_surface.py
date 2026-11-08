@@ -9,6 +9,11 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    '.github/actions/g11-public-python/action.yml',
+    'scripts/public_python_runtime_v1.py',
+    'scripts/extract_runtime_state_v1.py',
+    'scripts/test_runtime_preparation_v1.py',
+    'docs/runtime-preparation-latency-20261108.md',
     "scripts/predeadline_fast_lane_v1.py",
     "scripts/test_predeadline_fast_lane_v1.py",
     "docs/predeadline-fast-cycle-20261108.md",

@@ -230,19 +230,12 @@ jobs:
           import pathlib
           import shutil
           import sys
-          import tarfile
+          sys.path.insert(0, 'scripts')
+          from extract_runtime_state_v1 import extract_complete_state
           archive = pathlib.Path(sys.argv[1])
           operational_date = sys.argv[2]
           state_root = pathlib.Path(".relay-state")
-          with tarfile.open(archive, "r:gz") as handle:
-              members = handle.getmembers()
-              if not members:
-                  raise SystemExit("G11_RELAY_EMPTY_STATE_ARCHIVE")
-              for member in members:
-                  path = pathlib.PurePosixPath(member.name)
-                  if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
-                      raise SystemExit("G11_RELAY_UNSAFE_STATE_ARCHIVE")
-              handle.extractall(state_root, filter="data")
+          extract_complete_state(archive, state_root)
           metadata_path = state_root / "relay-state.json"
           if metadata_path.is_file():
               metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -609,18 +602,9 @@ jobs:
           PYREAD
       - name: Install pinned private runtime dependencies
         if: env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true'
-        run: |
-          set -euo pipefail
-          python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
-          if [ "${{steps.due.outputs.phase}}" != "dry-run" ]; then
-            if ! python3 -c 'import catboost' >/dev/null 2>&1; then
-              python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8'
-            fi
-            python3 - <<'PY'
-          import catboost
-          print("G11_CATBOOST_RUNTIME_PASS", catboost.__version__)
-          PY
-          fi
+        uses: ./.github/actions/g11-public-python
+        with:
+          profile: ${{ steps.due.outputs.phase == 'dry-run' && 'parser' || 'runtime' }}
       - name: Read back verified WILD BET bootstrap evidence
         working-directory: .g11-private
         env:
