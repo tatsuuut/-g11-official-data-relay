@@ -26,7 +26,7 @@ def audit(state, output):
             for row in projection['LOCK49_ROWS']}
     try:
         relay._display_research(store, keys)
-    except ValueError as error:
+    except relay.RelayError as error:
         assert str(error) == 'DISPLAY_RACE_PARTITION', str(error)
     else:
         raise AssertionError('INCIDENT_NOT_REPRODUCED')
