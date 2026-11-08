@@ -19,6 +19,9 @@ class RecoveryPersistenceTests(unittest.TestCase):
             self.assertIn("steps.publication-recovery.outputs.changed == 'true'", block)
         helper = Path(c.__file__).read_text()
         self.assertIn("output.write('changed=' + ('true' if result['restored'] else 'false')", helper)
+        for name in ('Checkout pinned official settlement source', 'Settle only immutable locks from verified final NIGHT'):
+            block = source.split('      - name: ' + name + '\n')[1].split('      - name:', 1)[0]
+            self.assertIn("steps.publication-recovery.outputs.changed == 'true'", block.splitlines()[0])
 
 
 class PersistedFailureTests(unittest.TestCase):
@@ -131,6 +134,25 @@ class AtomicRecoveryTests(unittest.TestCase):
         self.reject_unchanged('NIGHT_ALREADY_PROCESSED'); file.unlink()
         (self.base/'lifecycle.json').write_bytes(c.canonical({'last_attempt': {'date': c.DAY}}))
         self.reject_unchanged('NIGHT_ALREADY_PROCESSED')
+
+    def test_exact_partial_night_hold_retains_settlement_and_retry_bytes(self):
+        (self.base/'settlements').mkdir()
+        lock = c.read_sealed(self.base/(self.common+'.json'))
+        self.write(self.base/'settlements'/(self.common+'.json'), {
+            'SCHEMA': 'G11_WILD_BET_FUTURE_OOS_SHADOW_RESULT_V1', 'STANDARD_RACE_KEY': self.common,
+            'SHADOW_LOCK_SHA256': lock['CONTENT_SHA256'], 'ACTUAL_PURCHASE': False,
+            'PRODUCTION_PROMOTION_ELIGIBLE': False})
+        state = {'last_attempt': {'date': c.DAY, 'state': 'TECHNICAL_HOLD',
+            'reason': 'OFFICIAL_DAY_PREDICTION_COVERAGE', 'coverage': {'official_races': 2,
+                'settled_current_locks': 1, 'missing_current_keys': [self.new]}},
+            'night_coverage_retry': {'binding': {'date': c.DAY, 'cohort_sha256': 'f'*64}}}
+        (self.base/'lifecycle.json').write_bytes(c.canonical(state))
+        before = c.inventory(self.base)
+        self.assertEqual(self.call()['restored'], 1)
+        after = c.inventory(self.base)
+        self.assertEqual(before['lifecycle.json'], after['lifecycle.json'])
+        self.assertEqual(before['settlements/'+self.common+'.json'], after['settlements/'+self.common+'.json'])
+        self.assertEqual(c.read_sealed(self.base/c.RECEIPT)['prior_settlements_preserved'], 1)
 
     def test_damaged_recovery_receipt_cannot_skip_verification(self):
         self.call(); path = self.base/c.RECEIPT; value = json.loads(path.read_bytes())

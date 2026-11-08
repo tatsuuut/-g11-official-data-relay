@@ -58,3 +58,17 @@ Goripan run, require 34 restored / 132 LOCKs / zero generations and exact Site
 GET readback, then inspect tonight's NIGHT and Goripan settlements separately.
 No successful deployment or completed settlement is claimed by this document's
 initial implementation checkpoint.
+
+## NIGHT advanced during the repair (21:15 JST)
+
+Normal run 42479252623/job 128727382154 has now settled the existing 98 LOCKs
+and published them. The remaining 34 originals are still absent. Learning is
+TECHNICAL_HOLD/OFFICIAL_DAY_PREDICTION_COVERAGE; `last_completed_night` is null.
+Recovery therefore admits exactly this incomplete-coverage hold after checking
+its missing-key set and every saved settlement's sealed LOCK binding. It retains
+all existing settlement, lifecycle and retry-proof bytes. It does not reset the
+immutable learning cohort or claim learning completed. Other processed NIGHT
+states remain rejected. Existing frozen settlement code is triggered once when
+originals were restored, to append the 34 missing results from already verified
+NIGHT; no official acquisition or prediction is rerun by recovery. The frozen
+settlement body hash remains unchanged; only this bounded trigger is added.

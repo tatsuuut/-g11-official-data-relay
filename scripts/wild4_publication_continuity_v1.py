@@ -217,6 +217,37 @@ def verify_ledger(root, day):
     return keys, pin, state
 
 
+def verify_prior_night_boundary(base, spec, base_keys, state):
+    settlements = list((base / 'settlements').glob('*'))
+    attempt = state.get('last_attempt') or {}
+    retry = state.get('night_coverage_retry') or {}
+    started = bool(settlements or attempt.get('date') == DAY
+                   or retry.get('binding', {}).get('date') == DAY)
+    require(state.get('last_completed_night') != DAY, 'NIGHT_ALREADY_PROCESSED')
+    if not started:
+        return 0
+    # During investigation normal NIGHT settled the already-published 98.
+    # Permit only that exact incomplete-coverage hold, retaining every byte of
+    # its settlements, lifecycle and immutable retry proof. Never reset it.
+    coverage = attempt.get('coverage', {})
+    missing = {l['race_key'] for d in spec['donors'] for l in d['locks']}
+    require(attempt.get('date') == DAY and attempt.get('state') == 'TECHNICAL_HOLD'
+            and attempt.get('reason') == 'OFFICIAL_DAY_PREDICTION_COVERAGE'
+            and coverage.get('official_races') == spec['expected_locks']
+            and coverage.get('settled_current_locks') == len(base_keys)
+            and set(coverage.get('missing_current_keys', [])) == missing
+            and {p.stem for p in settlements} == base_keys, 'NIGHT_ALREADY_PROCESSED')
+    for path in settlements:
+        require(path.is_file() and not path.is_symlink() and path.suffix == '.json', 'PRIOR_SETTLEMENT_FILE')
+        result = read_sealed(path); lock = read_sealed(base / path.name)
+        require(result.get('SCHEMA') in ('G11_WILD_BET_FUTURE_OOS_SHADOW_RESULT_V1', 'G11_WILD4_FUTURE_OOS_EXCLUSION_V1')
+                and result.get('STANDARD_RACE_KEY') == path.stem
+                and result.get('SHADOW_LOCK_SHA256') == lock['CONTENT_SHA256']
+                and result.get('ACTUAL_PURCHASE') is False
+                and result.get('PRODUCTION_PROMOTION_ELIGIBLE') is False, 'PRIOR_SETTLEMENT_BINDING')
+    return len(settlements)
+
+
 def recover_originals(base, spec, donors, *, verify=verify_ledger):
     """Validate ALL originals before an atomic directory swap; copy bytes only."""
     require(spec['day'] == DAY, 'RECOVERY_DAY')
@@ -231,11 +262,7 @@ def recover_originals(base, spec, donors, *, verify=verify_ledger):
         require(inventory(base) == before, 'NOOP_MUTATION')
         return {'restored': 0, 'locks': len(base_keys), 'generation_count': 0}
     require(len(base_keys) == spec['baseline_locks'], 'BASELINE_COVERAGE')
-    require(not any(p.startswith('settlements/') for p in before)
-            and state.get('last_completed_night') != DAY
-            and (state.get('last_attempt') or {}).get('date') != DAY
-            and (state.get('night_coverage_retry') or {}).get('binding', {}).get('date') != DAY,
-            'NIGHT_ALREADY_PROCESSED')
+    preserved_settlements = verify_prior_night_boundary(base, spec, base_keys, state)
     require(len(donors) == len(spec['donors'])
             and {d['artifact_id'] for d, _ in donors} == {d['artifact_id'] for d in spec['donors']}, 'DONOR_COVERAGE')
     additions = {}; provenance = []
@@ -287,6 +314,8 @@ def recover_originals(base, spec, donors, *, verify=verify_ledger):
         receipt = sealed({'schema': 'G11_WILD4_PUBLICATION_RECOVERY_V1', 'date': DAY,
             'inventory_spec_sha256': digest(canonical(spec)), 'generation_count': 0,
             'settlement_generated': False, 'base_locks': len(base_keys), 'locks': len(after_keys),
+            'prior_settlements_preserved': preserved_settlements,
+            'prior_lifecycle_and_retry_proof_preserved': True,
             'restored_file_sha256': {k: digest(v) for k, v in additions.items()},
             'original_artifacts': [d for d, _ in provenance], 'inventory_before': before,
             'derived_manifest_sha256': merged['CONTENT_SHA256']})
