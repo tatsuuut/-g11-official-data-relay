@@ -141,9 +141,11 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
     store = state / 'store'
     publication = publisher.load_locked_publication(store, relay._morning_projection(store), now)
     require(publication.get('READ_ONLY') is True, 'EARLY_PUBLICATION_READ_ONLY_REQUIRED')
-    feed = relay.build_feed(store, run_id=int(run_id),
-        github_sha=authority['runtime_source_sha'], current_p3_publication=publication,
-        relay_phase='predeadline')
+    from optional_display_isolation_v1 import isolate_optional_display
+    with isolate_optional_display(relay):
+        feed = relay.build_feed(store, run_id=int(run_id),
+            github_sha=authority['runtime_source_sha'], current_p3_publication=publication,
+            relay_phase='predeadline')
     if (day >= '2026-11-08' and feed.get('operational_date_jst') == day
             and feed.get('status') == 'PASS' and feed.get('stage') == 'MORNING'
             and not critical.get('LAST_TIMELY_P3_LIVE_COUNT', 0)

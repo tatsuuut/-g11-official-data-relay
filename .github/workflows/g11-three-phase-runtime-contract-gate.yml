@@ -25,6 +25,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  saved-morning-nov9:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov9-optional-display-isolation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-09-42507069817
+          fail-on-cache-miss: true
+      - name: Restore a disposable authenticated copy of the failed morning
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/saved-morning.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - <<'PY'
+          import os,pathlib,sys
+          sys.path.insert(0,'scripts')
+          from extract_runtime_state_v1 import extract_complete_state
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          extract_complete_state(root/'saved-morning.tgz',root/'saved-morning')
+          PY
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: 5e728bb8ab2cdd608fbd4aeddb62c288dd1efa71
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-morning-frozen
+          persist-credentials: false
+      - uses: ./.github/actions/g11-public-python
+      - name: Reproduce the incident and verify saved-only replay without publication
+        env:
+          PYTHONPATH: .g11-morning-frozen:scripts
+        run: |
+          python3 scripts/audit_saved_morning_20261109.py \
+            --state "${RUNNER_TEMP}/saved-morning" --output "${RUNNER_TEMP}/morning-feed.json"
   public-runtime-preparation:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
@@ -311,6 +354,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p test_morning_source_receipt_limit_v1.py -v
           python3 -m unittest discover -s scripts -p test_morning_race_isolation_v1.py -v
+          python3 -m unittest discover -s scripts -p test_optional_display_isolation_v1.py -v
 
       - name: Verify official application period without changing retained authority
         env:

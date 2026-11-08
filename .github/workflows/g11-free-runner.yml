@@ -1,4 +1,4 @@
-name: runtime sync # official period and explicit unavailable ST
+name: runtime sync # optional display research cannot gate saved prediction delivery
 run-name: ${{github.event_name == 'workflow_dispatch' && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
