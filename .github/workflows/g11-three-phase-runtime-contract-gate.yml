@@ -424,13 +424,14 @@ jobs:
       - name: Checkout reviewed retained LOCK guard
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 1184c7f5b80953c1fa6753113e88630618db1b20
+          ref: 4676b5bf04029237c7895bbbb6479e2169986e32
           path: .g11-retained-guard
           persist-credentials: false
 
       - name: Verify retained WILD4 locks with advanced rolling input
         run: |
           "$(go env GOPATH)/bin/actionlint" "$WILD4_WORKFLOW_PATH"
+          python3 -m unittest discover -s scripts -p test_runtime_preparation_v1.py -v
           python3 -m unittest discover -s scripts -p test_wild4_retained_lock_v1.py -v
           python3 -m unittest discover -s scripts -p test_wild4_public_feed_budget_v1.py -v
           python3 -m unittest discover -s scripts -p test_wild4_night_recovery_date_v1.py -v

@@ -1,5 +1,6 @@
 """Complete byte-preserving restore and public dependency cache boundaries."""
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -167,6 +168,26 @@ class PublicRuntimeTests(unittest.TestCase):
         for field in ['root', 'profile', 'requirements', 'python', 'executable_sha256', 'machine', 'image_version']:
             self.assertNotEqual(runtime.fingerprint(base), runtime.fingerprint({**base, field: 'changed'}))
         self.assertNotEqual(runtime.fingerprint(base), runtime.fingerprint(runtime.identity(self.root, 'parser')))
+
+
+@unittest.skipUnless(os.environ.get('WILD4_WORKFLOW_PATH'), 'tested against the pinned reusable workflow in contract CI')
+class CurrentInferenceBoundaryTests(unittest.TestCase):
+    def test_current_deployed_model_odds_inference_learning_and_settlement_stay_unchanged(self):
+        # Baseline: the actually deployed 1184c7f5 workflow, not the older
+        # research branch or the earlier handoff fixture kept by its own tests.
+        source = Path(os.environ['WILD4_WORKFLOW_PATH']).read_text()
+        protected = {
+            'Carry previous-day model registry without copying previous predictions': 'cdfe9943acc632fc699ed539c4becc85db7d140997c9ce1b356fc412e6969ab5',
+            'Bind one model for the operational day': '988e96549a566fa5bcbdfce254381445386d56a5e17a02da61743b62ffb49db6',
+            'Verify frozen WILD4 inference runtime': '4495877bd12adea8c5d209ed488a85122892ef0858bf8161cda0d4340c6d0202',
+            'Check for a matching unexpired official odds packet': '455bd16a042ba59030bff53f69ad844e74b1e57a43352a55eb9c5e2ff117ed7a',
+            'Lock future races before deadline without any production write': '4c4fa5c0dec49e4fb47d4322bee731ab7ad8c503d659ee778db5abd13bffb4a6',
+            'Settle only immutable locks from verified final NIGHT': '03695c52becd2dcbd700f7dcf8d763442b280356d1ef17fd619aa574923801a3',
+            'Continue existing BET learning after completed NIGHT': '797e01d03c64314e9b7a7ba313323e424ed85ffd033e623cb9fefe829534e095'}
+        for name, expected in protected.items():
+            block = source.split('      - name: ' + name + '\n', 1)[1].split('      - name:', 1)[0]
+            with self.subTest(name=name):
+                self.assertEqual(expected, hashlib.sha256(block.encode()).hexdigest())
 
 
 if __name__ == '__main__':
