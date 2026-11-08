@@ -109,7 +109,9 @@ def official_input_compatibility():
             ],{'_admitted_limit':lambda payload,extra:admitted_digest_limit(payload,admitted,extra)})
         official.CanonicalRunner.run_morning=adapted_period_morning(official,adapted_morning(official,parser))
         official._night_sg_race_keys_from_saved_b=adapted_night_binding(official,parser)
-        yield
+        from optional_display_isolation_v1 import isolate_optional_display
+        with isolate_optional_display():
+            yield
     finally:
         official.parse_result_text=parser
         gate.build_canonical_official_morning_input=bridge
@@ -146,6 +148,13 @@ def run_relay():
                 from repair_saved_morning_receipts_v1 import run_if_reviewed
                 if run_if_reviewed(original_argv[2:]):
                     return
+            if original_argv[1] == '--relay':
+                from saved_morning_publication_20261109 import run_if_saved
+                if run_if_saved(original_argv[2:]):
+                    return
+                # Use the same imported module that owns the isolated reader.
+                from g11.relay import v1 as relay
+                return relay.main(original_argv[2:])
             runpy.run_module(target, run_name='__main__')
     finally:
         sys.argv = original_argv
