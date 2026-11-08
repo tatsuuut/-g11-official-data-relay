@@ -1,10 +1,24 @@
 from copy import deepcopy
 import json
 from pathlib import Path
+import os
 import tempfile
 import unittest
 
 import wild4_publication_continuity_v1 as c
+
+
+@unittest.skipUnless(os.environ.get('WILD4_WORKFLOW_PATH'), 'Pinned workflow required')
+class RecoveryPersistenceTests(unittest.TestCase):
+    def test_recovery_is_persisted_even_without_future_odds_or_completed_night(self):
+        source = Path(os.environ['WILD4_WORKFLOW_PATH']).read_text()
+        recovery = source.split('      - name: Recover Nov 8 original saved LOCKs omitted by failed publication\n')[1].split('      - name:', 1)[0]
+        self.assertIn('id: publication-recovery', recovery)
+        for name in ('Encrypt immutable future locks', c.PERSISTED_STEP):
+            block = source.split('      - name: ' + name + '\n')[1].split('      - name:', 1)[0]
+            self.assertIn("steps.publication-recovery.outputs.changed == 'true'", block)
+        helper = Path(c.__file__).read_text()
+        self.assertIn("output.write('changed=' + ('true' if result['restored'] else 'false')", helper)
 
 
 class PersistedFailureTests(unittest.TestCase):

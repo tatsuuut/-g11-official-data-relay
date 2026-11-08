@@ -330,6 +330,9 @@ def main():
                 donors = list(executor.map(lambda d: download_donor(spec, d, Path(folder)), spec['donors']))
             result = recover_originals(args.ledger, spec, donors)
     print('WILD4_PUBLICATION_RECOVERY=' + json.dumps(result, sort_keys=True))
+    if os.environ.get('GITHUB_OUTPUT'):
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+            output.write('changed=' + ('true' if result['restored'] else 'false') + '\n')
 
 
 if __name__ == '__main__':
