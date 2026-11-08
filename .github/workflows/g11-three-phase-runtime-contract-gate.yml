@@ -424,7 +424,7 @@ jobs:
       - name: Checkout reviewed retained LOCK guard
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 4676b5bf04029237c7895bbbb6479e2169986e32
+          ref: 94e0de64725df5014addd6724cac7a3e5935480e
           path: .g11-retained-guard
           persist-credentials: false
 
