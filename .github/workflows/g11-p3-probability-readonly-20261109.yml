@@ -26,17 +26,20 @@ jobs:
           GH_TOKEN: ${{github.token}}
           GH_REPOSITORY: ${{github.repository}}
           REQUESTED_KEY: ${{matrix.key}}
+          TARGET_DAY: ${{matrix.day}}
         run: |
           python3 - <<'PY'
           import json,os,urllib.request
-          base='https://api.github.com/repos/'+os.environ['GH_REPOSITORY']+'/actions/caches?ref=refs%2Fheads%2Fmain&key=g11-state-v4-published-&sort=created_at&direction=desc&per_page=100'
+          base='https://api.github.com/repos/'+os.environ['GH_REPOSITORY']+'/actions/caches?ref=refs%2Fheads%2Fmain&key=g11-state-v4-&sort=created_at&direction=desc&per_page=100'
           request=urllib.request.Request(base,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'})
           with urllib.request.urlopen(request,timeout=60) as response: data=json.load(response)
-          caches=[c for c in data['actions_caches'] if c['ref']=='refs/heads/main' and c['key'].startswith('g11-state-v4-published-')]
+          caches=[c for c in data['actions_caches'] if c['ref']=='refs/heads/main' and c['key'].startswith('g11-state-v4-')]
           if not caches: raise RuntimeError('No retained published main-branch cache')
           exact=[c for c in caches if c['key']==os.environ['REQUESTED_KEY']]
-          selected=exact[0] if exact else caches[0]
-          print(json.dumps({'requested_key':os.environ['REQUESTED_KEY'],'exact_retained':bool(exact),'retained_count':data['total_count'],'selected':{k:selected[k] for k in ['id','ref','key','version','created_at','size_in_bytes']}}))
+          same_day=[c for c in caches if os.environ['TARGET_DAY'] in c['key']]
+          published=[c for c in caches if c['key'].startswith('g11-state-v4-published-')]
+          selected=(exact or same_day or published)[0]
+          print(json.dumps({'requested_key':os.environ['REQUESTED_KEY'],'exact_retained':bool(exact),'retained_count':data['total_count'],'retained_keys':[c['key'] for c in caches],'selected':{k:selected[k] for k in ['id','ref','key','version','created_at','size_in_bytes']}}))
           with open(os.environ['GITHUB_OUTPUT'],'a') as f: print('key='+selected['key'],file=f)
           PY
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -86,30 +89,36 @@ jobs:
               if day not in ('2026-11-07','2026-11-08'):raise ValueError('DAY_OUT_OF_SCOPE')
               before=digest_file(archive)
               pattern=re.compile(r'(?:^|/)snapshots/(morning|predeadline)/(current-growth-p3(?:-live)?-'+day.replace('-','')+r'-[0-9]{2}-[0-9]{2})\.json$')
-              records=[];seen=set();total=0
+              support=re.compile(r'(?:^|/)(?:g11/p3-true-only-v2/'+day+r'/(?:manifest|morning-positions)\.json|daily-runtime/'+day+r'/(?:authority\.json|night-checkpoint\.json|bindings/(?:MORNING|PREDEADLINE)/[0-9a-f]{64}\.json))$')
+              records=[];support_records=[];inventory=[];seen=set();total=0
               with tarfile.open(archive,mode='r|gz') as tar:
                   for member in tar:
                       m=pattern.search(member.name)
-                      if m is None:continue
+                      if member.isfile() and (day in member.name or day.replace('-','') in member.name):
+                          inventory.append({'path':member.name,'size':member.size})
+                      if m is None and support.search(member.name) is None:continue
                       if not member.isfile() or PurePosixPath(member.name).is_absolute() or '..' in PurePosixPath(member.name).parts:raise ValueError('UNSAFE_SNAPSHOT_MEMBER')
                       if member.name in seen:raise ValueError('DUPLICATE_MEMBER')
                       seen.add(member.name)
-                      if member.size>8*1024*1024:raise ValueError('SNAPSHOT_TOO_LARGE')
+                      if member.size>32*1024*1024:raise ValueError('SAVED_RECORD_TOO_LARGE')
                       total+=member.size
                       if total>128*1024*1024:raise ValueError('EXPORT_TOO_LARGE')
                       data=tar.extractfile(member).read()
                       if len(data)!=member.size:raise ValueError('TRUNCATED_MEMBER')
                       value=json.loads(data)
-                      if value.get('SCHEMA')!='G11_CANONICAL_PARSED_SNAPSHOT' or value.get('STAGE')!=m[1].upper() or value.get('NAME')!=m[2]:raise ValueError('SNAPSHOT_ENVELOPE')
-                      if not isinstance(value.get('PAYLOAD'),dict):raise ValueError('NO_PAYLOAD')
-                      records.append({'path':member.name,'sha256':hashlib.sha256(data).hexdigest(),'size':len(data),'content_utf8':data.decode('utf-8')})
+                      if m is not None:
+                          if value.get('SCHEMA')!='G11_CANONICAL_PARSED_SNAPSHOT' or value.get('STAGE')!=m[1].upper() or value.get('NAME')!=m[2]:raise ValueError('SNAPSHOT_ENVELOPE')
+                          if not isinstance(value.get('PAYLOAD'),dict):raise ValueError('NO_PAYLOAD')
+                      target=records if m is not None else support_records
+                      target.append({'path':member.name,'sha256':hashlib.sha256(data).hexdigest(),'size':len(data),'content_utf8':data.decode('utf-8')})
               if before!=digest_file(archive):raise ValueError('ARCHIVE_CHANGED')
-              if not records:raise ValueError('NO_SAVED_SNAPSHOTS')
+              if not records and not support_records:raise ValueError('NO_SAVED_SNAPSHOTS_OR_SUPPORT')
               document={'schema':'G11_P3_EXISTING_SNAPSHOT_EXPORT_V1','day':day,'archive_sha256':before,
-                        'prediction_inference_executed':False,'state_writeback':False,'snapshot_count':len(records),'records':records}
+                        'prediction_inference_executed':False,'state_writeback':False,'snapshot_count':len(records),'records':records,
+                        'support_records':support_records,'target_day_inventory':inventory}
               encoded=json.dumps(document,ensure_ascii=False,separators=(',',':')).encode()
               output.write_bytes(gzip.compress(encoded,mtime=0))
-              return {'day':day,'snapshot_count':len(records),'export_sha256':digest_file(output),'source_unchanged':True}
+              return {'day':day,'snapshot_count':len(records),'support_count':len(support_records),'export_sha256':digest_file(output),'source_unchanged':True}
           
           if __name__=='__main__':
               p=argparse.ArgumentParser();p.add_argument('--archive',type=Path,required=True);p.add_argument('--day',required=True);p.add_argument('--output',type=Path,required=True)
