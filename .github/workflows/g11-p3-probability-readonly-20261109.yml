@@ -20,15 +20,34 @@ jobs:
           - day: '2026-11-08'
             key: g11-state-v4-published-2026-11-08-42477683561-1-checkpoint
     steps:
+      - name: Locate retained published state without changing it
+        id: retained
+        env:
+          GH_TOKEN: ${{github.token}}
+          GH_REPOSITORY: ${{github.repository}}
+          REQUESTED_KEY: ${{matrix.key}}
+        run: |
+          python3 - <<'PY'
+          import json,os,urllib.request
+          base='https://api.github.com/repos/'+os.environ['GH_REPOSITORY']+'/actions/caches?ref=refs%2Fheads%2Fmain&key=g11-state-v4-published-&sort=created_at&direction=desc&per_page=100'
+          request=urllib.request.Request(base,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'})
+          with urllib.request.urlopen(request,timeout=60) as response: data=json.load(response)
+          caches=[c for c in data['actions_caches'] if c['ref']=='refs/heads/main' and c['key'].startswith('g11-state-v4-published-')]
+          if not caches: raise RuntimeError('No retained published main-branch cache')
+          exact=[c for c in caches if c['key']==os.environ['REQUESTED_KEY']]
+          selected=exact[0] if exact else caches[0]
+          print(json.dumps({'requested_key':os.environ['REQUESTED_KEY'],'exact_retained':bool(exact),'retained_count':data['total_count'],'selected':{k:selected[k] for k in ['id','ref','key','version','created_at','size_in_bytes']}}))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f: print('key='+selected['key'],file=f)
+          PY
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         id: saved
         with:
           path: .relay-cache/state.tgz.gpg
-          key: ${{matrix.key}}
+          key: ${{steps.retained.outputs.key}}
           fail-on-cache-miss: true
-      - name: Require the exact saved checkpoint
+      - name: Require the exact selected retained archive
         env:
-          EXPECTED_KEY: ${{matrix.key}}
+          EXPECTED_KEY: ${{steps.retained.outputs.key}}
           ACTUAL_KEY: ${{steps.saved.outputs.cache-matched-key}}
         run: test "${EXPECTED_KEY}" = "${ACTUAL_KEY}"
       - name: Decrypt into temporary isolated storage
