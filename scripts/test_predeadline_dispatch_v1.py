@@ -43,6 +43,44 @@ class FakeClient:
 
 
 class DispatchTests(unittest.TestCase):
+    def test_moving_run_index_is_reread_before_a_single_dispatch(self):
+        class MovingIndex(FakeClient):
+            def __init__(self):
+                super().__init__(); self.inconsistent = 2
+            def request(self, method, path, body=None):
+                result = super().request(method,path,body)
+                if method == 'GET' and self.inconsistent:
+                    self.inconsistent -= 1
+                    return {'total_count':1,'workflow_runs':[]}
+                return result
+        c=MovingIndex(); delays=[]
+        result=dispatch(c,DAY,100,100,'continuation',sleep=delays.append)
+        self.assertEqual(result['status'],'DISPATCH_ACCEPTED')
+        self.assertEqual(c.post_count,1)
+        self.assertEqual(delays,[1,2])
+
+    def test_successor_that_appears_during_list_recheck_prevents_duplicate_dispatch(self):
+        class MovingIndex(FakeClient):
+            def __init__(self):
+                super().__init__(before=[row()]); self.first=True
+            def request(self, method, path, body=None):
+                result=super().request(method,path,body)
+                if method=='GET' and self.first:
+                    self.first=False
+                    return {'total_count':1,'workflow_runs':[]}
+                return result
+        c=MovingIndex()
+        self.assertEqual(self.run_dispatch(c)['status'],'EXISTING_ACTIVE')
+        self.assertEqual(c.post_count,0)
+
+    def test_persistently_incomplete_index_is_bounded_and_never_dispatches(self):
+        c=FakeClient();c.invalid={'total_count':1,'workflow_runs':[]};delays=[]
+        with self.assertRaisesRegex(DispatchError,'RUN_LIST_INCOMPLETE'):
+            dispatch(c,DAY,100,100,'continuation',sleep=delays.append)
+        self.assertEqual(c.post_count,0)
+        self.assertEqual(len(c.calls),3)
+        self.assertEqual(delays,[1,2])
+
     def run_dispatch(self, client, mode='continuation'):
         return dispatch(client, DAY, 100, 100, mode, sleep=lambda seconds: None)
 
@@ -142,3 +180,4 @@ class DispatchTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+
