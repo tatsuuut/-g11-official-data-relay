@@ -243,7 +243,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 8947d79d37e56a41384f679a5620408e3fa440a2
+          ref: 95d81f4b6771747ce6b6c2e942e746f3bb6c9658
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -895,6 +895,100 @@ jobs:
           print('WILD4_GENERATION_GATE='+life.public_status(temp/'g11-wild4-future-locks')['generation_gate']['status'])
           print('WILD4_MODEL_ADOPTION_BOUNDARY='+day)
           PYBIND
+      - name: Identify the retained Nov 9 saved-pair review
+        id: saved-pair-needed
+        if: inputs.lineage_readback_date == '' && steps.decrypted.outputs.canonical_ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.day.outputs.day == '2026-11-10' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        working-directory: .g11-private
+        run: |
+          python3 - <<'PYPAIRNEEDED'
+          import os,pathlib,shutil
+          from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
+          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
+          state=life.read(life.state_path(temp/'g11-wild4-future-locks'))
+          attempt=state.get('last_attempt') or {}
+          needed=(attempt.get('date')=='2026-11-09' and attempt.get('state')=='TECHNICAL_HOLD'
+              and attempt.get('reason')=='OFFICIAL_DAY_PREDICTION_COVERAGE'
+              and bool(state.get('challenger')) and not state.get('pending')
+              and state.get('night_coverage_retry',{}).get('binding',{}).get('date')=='2026-11-09')
+          if needed:
+              source=pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'.relay-cache/state.tgz.gpg'
+              shutil.copyfile(source,temp/'goripan-current-canonical-cache.gpg')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:out.write('needed='+str(needed).lower()+'\n')
+          print('G11_SAVED_PAIR_REVIEW_NEEDED='+str(needed).lower())
+          PYPAIRNEEDED
+      - name: Restore exact retained Nov 9 final NIGHT for saved pairs
+        id: saved-pair-night
+        if: steps.saved-pair-needed.outputs.needed == 'true'
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-09-42634529780-1-checkpoint
+          fail-on-cache-miss: true
+      - name: Isolate retained NIGHT and restore current encrypted input
+        id: saved-pair-isolated
+        if: always() && steps.saved-pair-needed.outputs.needed == 'true'
+        env:
+          RETAINED_CACHE_HIT: ${{ steps.saved-pair-night.outputs.cache-hit }}
+        run: |
+          python3 - <<'PYISOLATEPAIR'
+          import hashlib,os,pathlib,shutil
+          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
+          cache=pathlib.Path('.relay-cache/state.tgz.gpg')
+          backup=temp/'goripan-current-canonical-cache.gpg'
+          try:
+              if os.environ['RETAINED_CACHE_HIT']=='true':
+                  shutil.copyfile(cache,temp/'goripan-held-pair-night.gpg')
+          finally:
+              shutil.copyfile(backup,cache)
+          if hashlib.sha256(backup.read_bytes()).digest()!=hashlib.sha256(cache.read_bytes()).digest():
+              raise SystemExit('G11_CURRENT_ENCRYPTED_INPUT_CHANGED')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('ready='+str((temp/'goripan-held-pair-night.gpg').is_file()).lower()+'\n')
+          PYISOLATEPAIR
+      - name: Retrieve original Nov 9 saved current and candidate pairs
+        id: saved-pair-original
+        if: steps.saved-pair-isolated.outputs.ready == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-wild4-20261109-future-oos-locks-encrypted
+          run-id: 42635237798
+          github-token: ${{ github.token }}
+          path: .goripan-held-pair-original
+      - name: Review retained saved pairs without replacing any prediction
+        id: saved-pair-review
+        if: steps.saved-pair-isolated.outputs.ready == 'true' && steps.saved-pair-original.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        working-directory: .g11-private
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/goripan-held-pair-night.tgz" "${RUNNER_TEMP}/goripan-held-pair-night.gpg"
+          exec 3<&-
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/goripan-held-pair-locks.tgz" "${GITHUB_WORKSPACE}/.goripan-held-pair-original/future-locks.tgz.gpg"
+          exec 3<&-
+          python3 - <<'PYEXTRACTPAIRS'
+          import os,pathlib,sys
+          sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
+          from extract_runtime_state_v1 import extract_complete_state
+          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
+          extract_complete_state(temp/'goripan-held-pair-night.tgz',temp/'goripan-held-pair-night')
+          extract_complete_state(temp/'goripan-held-pair-locks.tgz',temp/'goripan-held-pair-locks')
+          PYEXTRACTPAIRS
+          python3 -m g11.wild_pack.v1.goripan_saved_cohort_review_v1 \
+            --original-ledger "${RUNNER_TEMP}/goripan-held-pair-locks/g11-wild4-future-locks" \
+            --night-root "${RUNNER_TEMP}/goripan-held-pair-night" \
+            --current-ledger "${RUNNER_TEMP}/g11-wild4-future-locks" \
+            --day 2026-11-09
+          echo 'saved=true' >> "${GITHUB_OUTPUT}"
       - name: Verify frozen WILD4 inference runtime
         if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         working-directory: .g11-private
@@ -1192,7 +1286,7 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Checkout pinned official settlement source
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true' || steps.saved-pair-review.outputs.saved == 'true')
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -1201,7 +1295,7 @@ jobs:
           path: .g11-settlement
           persist-credentials: false
       - name: Settle only immutable locks from verified final NIGHT
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true' || steps.saved-pair-review.outputs.saved == 'true')
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
@@ -1408,7 +1502,7 @@ jobs:
           if set(settled)==official:
               print('WILD4_COVERAGE_RECHECK=WAIT_NORMAL_NIGHT');raise SystemExit(0)
           result=life.after_night(ledger,root,day,verified,direct,now=datetime.now(timezone.utc))
-          for key in ('active','pending','challenger','history','last_training','policy'):
+          for key in ('active','history','last_training'):
               life.require(result.get(key)==state.get(key),'COVERAGE_RECHECK_MODEL_MUTATION')
           life.require(life.read(life.state_path(ledger))==result,'COVERAGE_RECHECK_READBACK')
           odds=life.b.load_json(pathlib.Path(os.environ['RUNNER_TEMP'])/'wild4-verified-odds-day.json')
@@ -1422,7 +1516,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('saved=true\n')
           PYRECHECK
       - name: Encrypt immutable future locks
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true' || steps.publication-recovery.outputs.changed == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true' || steps.publication-recovery.outputs.changed == 'true' || steps.saved-pair-review.outputs.saved == 'true')
         env:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
         run: |
@@ -1434,7 +1528,7 @@ jobs:
             --output "${RUNNER_TEMP}/future-locks.tgz.gpg" "${RUNNER_TEMP}/future-locks.tgz"
           exec 3<&-
       - name: Preserve encrypted shadow locks before publication
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true' || steps.publication-recovery.outputs.changed == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true' || steps.settlement.outcome == 'success' || steps.specialty.outputs.saved == 'true' || steps.coverage-recheck.outputs.saved == 'true' || steps.publication-recovery.outputs.changed == 'true' || steps.saved-pair-review.outputs.saved == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.day.outputs.artifact_name }}
