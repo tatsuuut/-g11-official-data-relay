@@ -46,8 +46,10 @@ def sha(value):
 
 def load_functions(relative, names, namespace):
     override = os.environ.get('G11_ISOLATION_SOURCE_DIR')
-    path = (Path(override) / Path(relative).name if override else
+    path = (Path(override) / relative if override else
             Path(__file__).resolve().parents[1] / '.g11-private' / relative)
+    if override and not path.is_file():
+        path = Path(override) / Path(relative).name
     source = path.read_text()
     tree = ast.parse(source, filename=str(path))
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)
@@ -106,6 +108,7 @@ class IsolationTest(unittest.TestCase):
             '_verified_pre_race_source': self.verified,
             '_json': lambda p: json.loads(p.read_text()), '_file_sha': lambda p: hashlib.sha256(p.read_bytes()).hexdigest(),
             '_canonical_sha': sha, 'pre_position': types.SimpleNamespace(predict_live=self.predict),
+            'predeadline_availability': types.SimpleNamespace(load_verified=lambda *_: None),
             'prospective': types.SimpleNamespace(_write_json_atomic=self.write),
             'PRE_RACE_PACKET_SCHEMA': 'G11_WILD_PRE_RACE_COLLECTION_PACKET_V1',
             'PRE_RACE_WILD_IDS': IDS, 'STATUS_FILE': 'status.json',
@@ -114,7 +117,7 @@ class IsolationTest(unittest.TestCase):
         self.ns = load_functions('g11/wild_pack/v1/runtime_orchestrator_v1.py',
             {'_collect_pre_race_packets', 'run_predeadline'}, ns)
         self.original = self.ns['_collect_pre_race_packets']
-        self.collect = adapter._compile(self.original, adapter.COLLECT_SHA,
+        self.collect = adapter._compile(self.original, adapter.COLLECT_SHAS,
             adapter._collect_source, {'_isolated_input_errors': (InputError, GateError),
                 '_isolation_report': lambda *args: self.reports.append(args)})
 
@@ -166,6 +169,23 @@ class IsolationTest(unittest.TestCase):
         self.collect(self.root, BASE.date())
         self.assertEqual(raw, self.packet(GOOD).read_bytes())
         self.assertNotIn(GOOD, [key for key, _ in self.calls])
+        self.assertNotIn(self.packet(GOOD).name, self.writes)
+
+    def test_withdrawal_guard_survives_isolation_and_preserves_saved_packets(self):
+        if 'predeadline_availability' not in self.original.__code__.co_names:
+            self.skipTest('legacy frozen collector has no withdrawal boundary')
+        self.bad.clear()
+        evidence = self.collect.__globals__['predeadline_availability']
+        evidence.load_verified = lambda _store, key: {'SNAPSHOT_SHA256': 'd'*64} if key == BAD else None
+        self.collect(self.root, BASE.date())
+        self.assertEqual([GOOD], [key for key, _ in self.calls])
+        self.assertFalse(self.packet(BAD).exists())
+        original = self.packet(GOOD).read_bytes()
+        self.calls.clear(); self.writes.clear()
+        evidence.load_verified = lambda *_: {'SNAPSHOT_SHA256': 'd'*64}
+        self.collect(self.root, BASE.date())
+        self.assertEqual([], self.calls)
+        self.assertEqual(original, self.packet(GOOD).read_bytes())
         self.assertNotIn(self.packet(GOOD).name, self.writes)
 
     def test_completion_at_deadline_cannot_create_a_lock(self):
@@ -221,7 +241,7 @@ class IsolationTest(unittest.TestCase):
         manifest = self.root/'g11/wild-pack-oos/morning/2026-10-24/bet-upstream.manifest.json'
         manifest.write_text('{}')
         events = []
-        fn = adapter._compile(self.ns['run_predeadline'], adapter.BET_HANDOFF_SHA,
+        fn = adapter._compile(self.ns['run_predeadline'], adapter.BET_HANDOFF_SHAS,
             adapter._handoff_source, {
                 '_load_manifest_artifact': lambda _: ({}, {'RECORDS': []}),
                 '_write_statuses': lambda _: events.append('status'),
@@ -234,8 +254,39 @@ class IsolationTest(unittest.TestCase):
         self.assertEqual(['odds_saved', 'status'], events)
 
     def test_unreviewed_source_rejected(self):
-        with self.assertRaisesRegex(RuntimeError, 'UNREVIEWED_SOURCE'):
-            adapter._compile(self.original, '0'*64, adapter._collect_source)
+        for expected in ('0'*64, frozenset({'0'*64})):
+            with self.assertRaisesRegex(RuntimeError, 'UNREVIEWED_SOURCE'):
+                adapter._compile(self.original, expected, adapter._collect_source)
+
+    def test_reviewed_hash_sets_retain_frozen_and_current_source_bindings(self):
+        self.assertIn(adapter.COLLECT_SHA, adapter.COLLECT_SHAS)
+        self.assertIn(adapter.BET_HANDOFF_SHA, adapter.BET_HANDOFF_SHAS)
+        import inspect
+        for function, hashes in ((self.original, adapter.COLLECT_SHAS),
+                                 (self.ns['run_predeadline'], adapter.BET_HANDOFF_SHAS)):
+            self.assertIn(hashlib.sha256(inspect.getsource(function).encode()).hexdigest(), hashes)
+
+    def test_withdrawal_guard_excludes_terminal_race_from_odds_handoff(self):
+        if 'predeadline_availability' not in self.ns['run_predeadline'].__code__.co_names:
+            self.skipTest('legacy frozen handoff has no withdrawal boundary')
+        manifest = self.root/'g11/wild-pack-oos/morning/2026-10-24/bet-upstream.manifest.json'
+        manifest.write_text('{}')
+        records = [{'PAYLOAD': {'STANDARD_RACE_KEY': key}} for key in (BAD, GOOD)]
+        delivered = []
+        fn = adapter._compile(self.ns['run_predeadline'], adapter.BET_HANDOFF_SHAS,
+            adapter._handoff_source, {
+                '_load_manifest_artifact': lambda _: ({}, {'RECORDS': records}),
+                '_write_statuses': lambda _: None, '_file_sha': lambda _: 'e'*64,
+                'bet': types.SimpleNamespace(
+                    attach_prediction_time_odds=lambda _upstream, snapshots: delivered.append(snapshots) or {},
+                    persist=lambda *_: None),
+                '_collect_pre_race_packets': lambda *_: False,
+                'predeadline_availability': types.SimpleNamespace(load_verified=lambda _store, key:
+                    {'SNAPSHOT_SHA256': 'd'*64} if key == BAD else None),
+            })
+        fn(self.root, BASE.date())
+        self.assertEqual([{GOOD}], [set(snapshots) for snapshots in delivered])
+        self.assertEqual('{}', manifest.read_text())
 
     def test_display_validation_failure_is_recorded_and_next_race_continues(self):
         root = self.root/'display'; (root/'morning').mkdir(parents=True)

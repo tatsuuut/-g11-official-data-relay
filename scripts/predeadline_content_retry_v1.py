@@ -11,10 +11,16 @@ from functools import wraps
 import hashlib
 import inspect
 import json
+import re
 import textwrap
 import types
 
 COLLECTOR_SHA = '6eef8e082ae3d6c874d83844bbb2fcae04fd0ceab3d829db5a511d29da6a9017'
+# Keep the frozen collector and the reviewed November 11 withdrawal boundary.
+COLLECTOR_SHAS = frozenset({
+    COLLECTOR_SHA,
+    'a40b3bdfb83e88fac0b12485add0536a1a60555ac32b15ba1af1687ddb2f8649',
+})
 MAX_WAIT_SECONDS = 30
 MIN_REMAINING_SECONDS = 180
 RETRY_START_WINDOW_SECONDS = 60
@@ -69,7 +75,7 @@ def select_retry(first, plan, now):
 def _restricted_collector(original, selected, stop_at):
     collector = inspect.unwrap(original)
     source = inspect.getsource(collector)
-    if hashlib.sha256(source.encode()).hexdigest() != COLLECTOR_SHA:
+    if hashlib.sha256(source.encode()).hexdigest() not in COLLECTOR_SHAS:
         raise ValueError('CONTENT_RETRY_UNREVIEWED_COLLECTOR')
     anchor = '            task = plan[task_index]\n'
     if source.count(anchor) != 1:
@@ -110,12 +116,27 @@ def merge_attempts(first, second):
     """Keep the normal return contract; resolved rejection evidence stays on disk."""
     result = dict(first)
     acquired = set(second['ACQUIRED'])
+    unavailable_races = {
+        row['RACE_KEY'] for row in second['UNAVAILABLE']
+        if row.get('REASON') == 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE'
+        and isinstance(row.get('RACE_KEY'), str)
+        and re.fullmatch(r'\d{8}-(?:0[1-9]|1[0-9]|2[0-4])-(?:0[1-9]|1[0-2])', row['RACE_KEY'])
+        and row['RACE_KEY'][:8] >= '20261111'
+        and row.get('SOURCE_ID') in {
+            'beforeinfo-' + row['RACE_KEY'], 'odds3t-' + row['RACE_KEY']}
+        and isinstance(row.get('AVAILABILITY_SNAPSHOT_SHA256'), str)
+        and re.fullmatch(r'[a-f0-9]{64}', row['AVAILABILITY_SNAPSHOT_SHA256'])
+    }
     for key in ('ACQUIRED', 'MISSED'):
         result[key] = list(dict.fromkeys(first[key] + second[key]))
     for key in ('SKIPPED', 'REJECTED', 'TASK_DEFERRED', 'RETRYABLE_FAILURES', 'UNAVAILABLE'):
         merged = {row['SOURCE_ID']: row for row in first[key] + second[key]}
         result[key] = [row for sid, row in merged.items()
-                       if key == 'SKIPPED' or sid not in acquired]
+                       if (key == 'SKIPPED' or sid not in acquired)
+                       and not (key in ('REJECTED', 'TASK_DEFERRED')
+                           and row.get('RACE_KEY') in unavailable_races
+                           and sid in {'beforeinfo-' + row['RACE_KEY'],
+                                       'odds3t-' + row['RACE_KEY']})]
     result['DEFERRED'] = second['DEFERRED'] or first['DEFERRED']
     if result['MISSED']:
         result['STATUS'] = 'PARTIAL_MISSED_NOT_PROMOTED'
@@ -165,7 +186,7 @@ def bounded_content_retry():
     from g11.canonical.official_pipeline import CanonicalRunner
     original = CanonicalRunner.run_due_predeadline
     source = inspect.getsource(original)
-    if hashlib.sha256(source.encode()).hexdigest() != COLLECTOR_SHA:
+    if hashlib.sha256(source.encode()).hexdigest() not in COLLECTOR_SHAS:
         _report('UNREVIEWED_SOURCE_UNCHANGED')
         yield
         return

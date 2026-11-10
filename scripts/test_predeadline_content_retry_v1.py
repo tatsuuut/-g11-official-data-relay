@@ -1,5 +1,6 @@
 """Replay the actual reviewed collector, without network or prediction models."""
 import ast
+import copy
 import contextlib
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -59,7 +60,11 @@ def load_collector():
           'AcquisitionRejected': Rejected, 'AcquisitionDeferred': Deferred,
           'PREDEADLINE_EARLY_WAIT_SECONDS': 300, 'DEGRADED_INTERVAL_SECONDS': 20,
           '_morning_distance_by_key': lambda day: {row['RACE_KEY']: 1800 for row in day['PREDEADLINE_PLAN']},
-          'parse_beforeinfo_html': parse, 'parse_odds3t_html': parse}
+          'parse_beforeinfo_html': parse, 'parse_odds3t_html': parse,
+          'PREDEADLINE_AVAILABILITY': types.SimpleNamespace(
+              load_verified=lambda *_: None,
+              parse_odds_source=lambda data, _key: {'ODDS_ROWS': parse(data)},
+              REASON='OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE')}
     exec(compile(tree, str(path), 'exec'), ns)
     return ns['Runner']
 
@@ -247,6 +252,44 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(len(result['UNAVAILABLE']), 2)
         self.assertEqual(self.writes, [])
 
+    def test_reviewed_retry_retains_terminal_evidence_without_acquiring_forecast_inputs(self):
+        if 'PREDEADLINE_AVAILABILITY' not in self.original.__code__.co_names:
+            self.skipTest('legacy frozen collector has no withdrawal boundary')
+        key = '20261111-01-01'
+        self.now = datetime(2026, 11, 11, 12, 4, tzinfo=JST)
+        self.plan = [self.task(kind, key) for kind in ('BEFOREINFO', 'ODDS3T')]
+        for task in self.plan:
+            task.update(DUE_AT_JST=(self.now-timedelta(minutes=2)).isoformat(),
+                        MUST_FINISH_BEFORE_JST=(self.now+timedelta(minutes=5)).isoformat())
+        self.responses['beforeinfo-'+key] = ['reject']
+        helper = self.original.__globals__['PREDEADLINE_AVAILABILITY']
+        normal_parse = helper.parse_odds_source
+        helper.parse_odds_source = lambda data, race: (
+            {'AVAILABILITY': {'WITHDRAWN_BOATS': [3], 'ACTIVE_BOATS': [1, 2, 4, 5, 6]}}
+            if self.counts.get('odds3t-'+race, 0) >= 2 else normal_parse(data, race))
+        evidence_path = self.root/'snapshots/predeadline'/('availability-'+key+'.json')
+        def saved_evidence(_store, _task, _receipt, _withdrawal, _now):
+            verified = {'SNAPSHOT_SHA256': 'd'*64}
+            evidence_path.write_text(json.dumps(verified))
+            return verified
+        helper.save = saved_evidence
+        helper.load_verified = lambda *_: json.loads(evidence_path.read_text()) if evidence_path.exists() else None
+        helper.unavailable_item = lambda task, proof: {
+            'SOURCE_ID': task['SOURCE_ID'], 'RACE_KEY': task['RACE_KEY'], 'REASON': helper.REASON,
+            'AVAILABILITY_SNAPSHOT_SHA256': proof['SNAPSHOT_SHA256']}
+        result = self.run_capture()
+        self.assertEqual([], result['ACQUIRED'])
+        self.assertEqual([], result['REJECTED'])
+        self.assertEqual([], result['TASK_DEFERRED'])
+        self.assertEqual(1, len(result['UNAVAILABLE']))
+        self.assertEqual([], self.writes)
+        self.assertEqual(4, len(self.attempts))
+        evidence = evidence_path.read_bytes()
+        repeated = self.run_capture()
+        self.assertEqual(2, len(repeated['UNAVAILABLE']))
+        self.assertEqual(4, len(self.attempts))
+        self.assertEqual(evidence, evidence_path.read_bytes())
+
     def test_close_to_deadline_is_not_retried(self):
         self.now = BASE + timedelta(minutes=3)
         self.run_capture()
@@ -278,12 +321,23 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(self.attempts, [])
 
     def test_actual_source_identity_matches_reviewed_hash(self):
-        self.assertEqual(hashlib.sha256(inspect.getsource(self.original).encode()).hexdigest(), retry.COLLECTOR_SHA)
+        self.assertIn(hashlib.sha256(inspect.getsource(self.original).encode()).hexdigest(), retry.COLLECTOR_SHAS)
+        self.assertIn(retry.COLLECTOR_SHA, retry.COLLECTOR_SHAS)
 
     def test_unreviewed_source_is_not_compiled(self):
-        with patch.object(retry, 'COLLECTOR_SHA', '0'*64):
+        with patch.object(retry, 'COLLECTOR_SHAS', frozenset({'0'*64})):
             with self.assertRaisesRegex(ValueError, 'UNREVIEWED_COLLECTOR'):
                 retry._restricted_collector(self.original, [], BASE)
+
+    def test_unreviewed_source_keeps_original_context_binding(self):
+        module = types.ModuleType('g11.canonical.official_pipeline')
+        module.CanonicalRunner = self.Runner
+        with patch.dict('sys.modules', {'g11.canonical.official_pipeline': module}), \
+             patch.object(retry, 'COLLECTOR_SHAS', frozenset({'0'*64})):
+            with retry.bounded_content_retry():
+                self.assertIs(self.Runner.run_due_predeadline, self.original)
+        self.assertIs(self.Runner.run_due_predeadline, self.original)
+        self.assertIn('UNREVIEWED_SOURCE_UNCHANGED', self.log.getvalue())
 
     def test_context_restores_binding_after_failure(self):
         module = types.ModuleType('g11.canonical.official_pipeline')
@@ -350,6 +404,58 @@ class RetryTests(unittest.TestCase):
         self.assertIsInstance(loop.body[2], ast.If)
         del loop.body[1:3]
         self.assertEqual(ast.dump(after), ast.dump(before))
+
+
+class TerminalWithdrawalMergeTests(unittest.TestCase):
+    def setUp(self):
+        self.key = '20261111-01-01'
+        self.first = {key: [] for key in ('ACQUIRED', 'MISSED', 'SKIPPED', 'REJECTED',
+            'TASK_DEFERRED', 'RETRYABLE_FAILURES', 'UNAVAILABLE')}
+        self.first.update(DEFERRED=None, STATUS='PASS')
+        self.second = copy.deepcopy(self.first)
+        self.first['REJECTED'] = [{'SOURCE_ID': 'beforeinfo-'+self.key, 'RACE_KEY': self.key,
+                                   'REASON': 'HTML_NUMBER_PARSE'}]
+        self.first['TASK_DEFERRED'] = [{'SOURCE_ID': 'odds3t-'+self.key, 'RACE_KEY': self.key,
+                                        'REASON': 'SOURCE_CONTENT_PAUSED'}]
+        self.second['UNAVAILABLE'] = [{'SOURCE_ID': kind+'-'+self.key, 'RACE_KEY': self.key,
+            'REASON': 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE',
+            'AVAILABILITY_SNAPSHOT_SHA256': 'a'*64} for kind in ('beforeinfo', 'odds3t')]
+
+    def test_proof_backed_terminal_race_resolves_only_its_content_waits(self):
+        unrelated = {'SOURCE_ID': 'beforeinfo-20261111-01-02', 'RACE_KEY': '20261111-01-02',
+                     'REASON': 'HTML_NUMBER_PARSE'}
+        http_failure = {'SOURCE_ID': 'beforeinfo-'+self.key, 'RACE_KEY': self.key,
+                        'REASON': 'HTTP_429'}
+        self.first['REJECTED'].append(unrelated)
+        self.first['RETRYABLE_FAILURES'].append(http_failure)
+        before = copy.deepcopy((self.first, self.second))
+        merged = retry.merge_attempts(self.first, self.second)
+        self.assertEqual([unrelated], merged['REJECTED'])
+        self.assertEqual([], merged['TASK_DEFERRED'])
+        self.assertEqual([http_failure], merged['RETRYABLE_FAILURES'])
+        self.assertEqual([], merged['ACQUIRED'])
+        self.assertEqual(self.second['UNAVAILABLE'], merged['UNAVAILABLE'])
+        self.assertEqual(before, (self.first, self.second))
+
+    def test_unproven_or_generic_unavailability_does_not_resolve_content_waits(self):
+        for field, bad in (
+            ('REASON', 'SOURCE_CONTENT_RETRY_EXHAUSTED'),
+            ('AVAILABILITY_SNAPSHOT_SHA256', None), ('AVAILABILITY_SNAPSHOT_SHA256', 'bad'),
+            ('SOURCE_ID', 'unknown-'+self.key), ('RACE_KEY', '20261111-01-02'),
+            ('RACE_KEY', '20261110-01-01'),
+        ):
+            with self.subTest(field=field, value=bad):
+                second = copy.deepcopy(self.second)
+                for row in second['UNAVAILABLE']:
+                    row[field] = bad
+                merged = retry.merge_attempts(self.first, second)
+                self.assertEqual(self.first['REJECTED'], merged['REJECTED'])
+                self.assertEqual(self.first['TASK_DEFERRED'], merged['TASK_DEFERRED'])
+
+    def test_terminal_unavailability_does_not_trigger_another_retry(self):
+        now = datetime(2026, 11, 11, 12, 4, tzinfo=JST)
+        result = retry.merge_attempts(self.first, self.second)
+        self.assertEqual(([], 0, 'EXISTING_FAILURE_POLICY'), retry.select_retry(result, [], now))
 
 
 if __name__ == '__main__':

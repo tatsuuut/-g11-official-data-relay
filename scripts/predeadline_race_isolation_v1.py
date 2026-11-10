@@ -19,6 +19,15 @@ import subprocess
 
 COLLECT_SHA = 'a1d5c2166a4e305825d593f6f48ffa76717bc5998226d5522eb0bde38ff6e42b'
 BET_HANDOFF_SHA = 'ed14b607cb6b590be3a03eff2d08ddc153bc204df6d8ef6c32feffe731adedd6'
+# Preserve today's frozen functions alongside the reviewed withdrawal guards.
+COLLECT_SHAS = frozenset({
+    COLLECT_SHA,
+    '030e03f3a70cbaa5101c1c123f33708e75d4b28fb9d4d5408518393238ebe1fb',
+})
+BET_HANDOFF_SHAS = frozenset({
+    BET_HANDOFF_SHA,
+    '7ee0f00a7062ac524865b3a6cdd0af3b8d94ceea5bf5156a96f4e9e7efe9443e',
+})
 DISPLAY_SHA = '69c84eb70e24ca43e3ca46aa987b3cdd2db965b3884a97a084bd61ad8efa896d'
 
 
@@ -30,7 +39,8 @@ def _replace(source, before, after):
 
 def _compile(function, expected, transform, additions=None):
     source = inspect.getsource(function)
-    if hashlib.sha256(source.encode()).hexdigest() != expected:
+    reviewed = {expected} if isinstance(expected, str) else frozenset(expected)
+    if hashlib.sha256(source.encode()).hexdigest() not in reviewed:
         raise RuntimeError('PREDEADLINE_ISOLATION_UNREVIEWED_SOURCE:' + function.__name__)
     namespace = dict(function.__globals__)
     namespace.update(additions or {})
@@ -122,12 +132,12 @@ def isolate_predeadline_inputs():
         return
     originals = (wild._collect_pre_race_packets, wild.run_predeadline, display.capture_due)
     try:
-        collector = _compile(originals[0], COLLECT_SHA, _collect_source, {
+        collector = _compile(originals[0], COLLECT_SHAS, _collect_source, {
             '_isolated_input_errors': (wild.pre_position.PreRacePositionError,
                 wild.WildRuntimeOrchestratorError, official.PipelineError),
             '_isolation_report': _report,
         })
-        handoff = _compile(originals[1], BET_HANDOFF_SHA, _handoff_source,
+        handoff = _compile(originals[1], BET_HANDOFF_SHAS, _handoff_source,
                            {'_collect_pre_race_packets': collector})
         capture = _compile(originals[2], DISPLAY_SHA, _display_source)
     except RuntimeError as exc:
