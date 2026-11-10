@@ -8,6 +8,10 @@ permissions:
 jobs:
   p3-head-selection:
     if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/p3-head-selection-fix-20261110'
+    strategy:
+      fail-fast: false
+      matrix:
+        day: ['2026-11-07', '2026-11-08', '2026-11-09']
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -17,8 +21,8 @@ jobs:
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-published-2026-11-10-p3-head-audit
-          restore-keys: g11-state-v4-published-2026-11-10-
+          key: g11-state-v4-published-${{matrix.day}}-p3-head-audit
+          restore-keys: g11-state-v4-published-${{matrix.day}}-
           fail-on-cache-miss: true
       - name: Extract disposable saved state
         env:
@@ -38,7 +42,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{secrets.PRIVATE_SOURCE_REPO}}
-          ref: b2b7da07c43ce1d8980cc59995697eaa14255f20
+          ref: 0ccc72ce5dbaf9a7daadab30eca058d9c00d88a3
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
@@ -64,34 +68,50 @@ jobs:
         run: |
           python3 tools/audit_p3_head_selection_v1.py \
             --state "${RUNNER_TEMP}/p3-head-audit" \
+            --day "${{matrix.day}}" \
             --cohort g11/growth_p3/v1_1/audits/head_selection_20261110/cohort.json \
             --output "${RUNNER_TEMP}/p3-head-selection-report.json"
-      - name: Save detailed research only to the isolated private branch
+      - name: Encrypt detailed read-only observations for this analysis
         if: always() && steps.analyze.outcome != 'skipped'
         env:
-          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
-          G11_AUDIT_REPO: tatsuuut/boat-brain-lab
-          G11_AUDIT_BRANCH: codex/p3-head-selection-fix-20261110
-          G11_EXPECTED_AUDIT_SHA: b2b7da07c43ce1d8980cc59995697eaa14255f20
+          G11_AUDIT_DAY: ${{matrix.day}}
         run: |
+          cat > "${RUNNER_TEMP}/p3-audit-cert.pem" <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIEGzCCAoOgAwIBAgIUEnfzEu2wr3OkjbMhSysKe8dx5agwDQYJKoZIhvcNAQEL
+          BQAwHTEbMBkGA1UEAwwSRzExLWlzb2xhdGVkLWF1ZGl0MB4XDTI2MTExMDA1NTQ1
+          NFoXDTI2MTExMTA1NTQ1NFowHTEbMBkGA1UEAwwSRzExLWlzb2xhdGVkLWF1ZGl0
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAs7glCfEN9G6gtZ1b1Xvw
+          X5AhFduMUscCJB6TjR9nrpmUkAyC6ycWlEHY5X+yHpuhNVirkvZs88iAyEqb9toO
+          hyxTmiVt9VQuRH/JOadCq+IMR4LldQsrcnp2ohIcrrdsEq1Mm0xIYE/gHSlIeYTq
+          WvNggx7UWnqepgYiLKvApzEKrSlgC0832DVLDMVOiw8eglA8u7T4jCpo1BprCrEi
+          KepCGyRtKLBLol9MsF0GXyALaR/leFLEw9Wv6/4xetnvOi8DPDjTbxXDbH1l/QUJ
+          1X2A/cBNq4GouUT8yZCgWIXr7bhpHu6B6apYgR888nea3IEByQ4XRMmbFIZ2rL99
+          HmRlMovcTJozM1wzjY9kRzvS0jH7iWQpULvVaEuyfCu0GmYeg4Cu3d+Axvn1Y74n
+          pc6qhNbbZOVMgawr946cqGl6YRKA4CcmmEoYNpO2tg79G/DbQSoEA48uTq0yGkJC
+          XLN5ZmooF/855hRA5TzmWRnYe5uRSfrVMe/k51ekLkvhAgMBAAGjUzBRMB0GA1Ud
+          DgQWBBSS4clSD2QsL1+vrTP0fk1EAqrhLDAfBgNVHSMEGDAWgBSS4clSD2QsL1+v
+          rTP0fk1EAqrhLDAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBgQBu
+          79scnpFlncu+qbkz4GZp9qgCjZP3+TG714ggCuEeotFLc73hTLqwpAQ7k9w96zes
+          dX5AyLSitar0iaiEaODUFWsDkdq9m8bvE0kVqXI3p05wRunHkWQY49MSpSNkJdqb
+          lB6yNLxvxxdyJNPSdA6M+cngVVOxQ52zllypbOF5MKsM2t4KvSnBix+Hs7QfFQHL
+          HIxwHBdddq+F9YvBN6xo80aF4evbCKsaTROBEdZoSo8gue6r1e7qET/aDOByqFbp
+          IW6nvoi7QbZ3Oe2mNTTJn4ba/qop2iJJ+0fxHhMfhRNodaKQC3/Zt6Ou4s+k5N1L
+          EyAhn2ijDrQ9f9+Dv8FghrU3HqDgZFJmcZA29g2M6eDWt+00hk1K5+FGoCnTNG1x
+          CReUQL+XG4A+uer/K6Y6dq6vyr7KVHhU/H/jVCj1UajRXj+AF09KgiyIl9fNStk+
+          rASfZe/yuH2jGLc7vjpAe1WqASiXGrmIUsKTV1INNWKhK9C4lqURQKqhsgOeCbs=
+          -----END CERTIFICATE-----
+          CERT
           python3 - <<'PY'
-          import json,os,pathlib,urllib.request
-          report=pathlib.Path(os.environ['RUNNER_TEMP'])/'p3-head-selection-report.json'
+          import base64,gzip,hashlib,json,os,pathlib,subprocess
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          report=root/'p3-head-selection-report.json'
           if not report.is_file():
-              print('No completed research report to retain')
+              print('No completed research observations')
               raise SystemExit(0)
-          repo=os.environ['G11_AUDIT_REPO'];branch=os.environ['G11_AUDIT_BRANCH']
-          expected=os.environ['G11_EXPECTED_AUDIT_SHA']
-          base='https://api.github.com/repos/'+repo
-          def api(route,data=None,method=None):
-              req=urllib.request.Request(base+route,data=None if data is None else json.dumps(data).encode(),method=method,headers={'Authorization':'Bearer '+os.environ['G11_PRIVATE_REPO_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'})
-              with urllib.request.urlopen(req,timeout=45)as res:return json.load(res)
-          head=api('/git/ref/heads/'+branch)['object']['sha']
-          if head!=expected:raise SystemExit('Private analysis branch moved; refusing overwrite')
-          tree=api('/git/commits/'+head)['tree']['sha']
-          target='g11/growth_p3/v1_1/audits/head_selection_20261110/report.json'
-          created=api('/git/trees',{'base_tree':tree,'tree':[{'path':target,'mode':'100644','type':'blob','content':report.read_text()}]})
-          commit=api('/git/commits',{'message':'Retain read-only saved P3 head selection attribution','tree':created['sha'],'parents':[head]})
-          api('/git/refs/heads/'+branch,{'sha':commit['sha'],'force':False},method='PATCH')
-          print(json.dumps({'private_report_saved':True,'commit':commit['sha']}))
+          packed=root/'p3-head-report.json.gz';packed.write_bytes(gzip.compress(report.read_bytes()))
+          encrypted=root/'p3-head-report.cms'
+          subprocess.run(['openssl','cms','-encrypt','-binary','-aes256','-outform','DER','-in',str(packed),'-out',str(encrypted),str(root/'p3-audit-cert.pem')],check=True)
+          data=encrypted.read_bytes()
+          print('G11_AUDIT_ENCRYPTED_V1='+json.dumps({'day':os.environ['G11_AUDIT_DAY'],'sha256':hashlib.sha256(data).hexdigest(),'data':base64.b64encode(data).decode()}))
           PY
