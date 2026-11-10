@@ -9,6 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    ".github/workflows/g11-goripan-500-contract.yml",
     ".github/workflows/g11-p3-head-selection-audit.yml",
     ".github/workflows/g11-p3-tactical-outlook-audit.yml",
     "scripts/saved_deme_recovery_v1.py",
