@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 95d81f4b6771747ce6b6c2e942e746f3bb6c9658
+          ref: b740eae104e79432cffe8578095deea6aec2df24
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
@@ -56,6 +56,9 @@ jobs:
         with:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-published-2026-11-09-42634529780-1-checkpoint
+          restore-keys: |
+            g11-state-v4-published-2026-11-10-
+            g11-state-v4-published-2026-11-09-
           fail-on-cache-miss: true
       - name: Retrieve original saved Nov 9 current and candidate pairs
         uses: actions/download-artifact@v4
