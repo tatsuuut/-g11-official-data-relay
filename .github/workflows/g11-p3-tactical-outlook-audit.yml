@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{secrets.PRIVATE_SOURCE_REPO}}
-          ref: 85c9af153b8fd1bcfe4e65b14d60fb341e29074e
+          ref: 64285e8a0ecca457a9f09a49ca683d2ba8ad5d70
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
