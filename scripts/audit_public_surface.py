@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/saved_deme_recovery_v1.py",
+    "scripts/test_saved_deme_recovery_v1.py",
+    "docs/deme-app-recovery-20261110.md",
     "scripts/optional_display_isolation_v1.py",
     "scripts/test_optional_display_isolation_v1.py",
     "scripts/saved_morning_publication_20261109.py",

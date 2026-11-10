@@ -907,13 +907,13 @@ jobs:
           }, sort_keys=True))
           PY
       - name: P3 research source
-        if: steps.runtime.outcome=='success'&&steps.due.outputs.phase!='dry-run'&&hashFiles('.relay-output/feed.json')!=''&&env.G11_R13!='true'&&!contains('2026-10-16,2026-10-18',steps.due.outputs.operational_date)
+        if: ((steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'))&&steps.due.outputs.phase!='dry-run'&&env.G11_R13!='true'&&!contains('2026-10-16,2026-10-18',steps.due.outputs.operational_date)
         id: deme-source
         continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{env.G11_PRIVATE_REPOSITORY}}
-          ref: f8c02e1d1068efec21b575f424026ffec73e6cfc
+          ref: 80f17be765f135d85e4b0efd7aa0b4d8c9417c14
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .g11-deme-research
           persist-credentials: false
@@ -1801,9 +1801,14 @@ jobs:
         run: |
           set -euo pipefail
           rm -f .relay-output/deme-discovery-public.json
-          timeout 120 python3 .g11-deme-research/g11/canonical/deme_discovery_thirty_entry.py \
-            --store .relay-state/store --feed .relay-output/feed.json \
-            --projection-output .relay-output/deme-discovery-public.json
+          if [ '${{steps.fast-lane.outputs.enabled}}' = true ]; then
+            timeout 90 python3 scripts/saved_deme_recovery_v1.py --day '${{steps.due.outputs.operational_date}}' \
+              --state-root .relay-state --source-root .g11-deme-research --feed .relay-output/feed.json
+          else
+            timeout 120 python3 .g11-deme-research/g11/canonical/deme_discovery_thirty_entry.py \
+              --store .relay-state/store --feed .relay-output/feed.json \
+              --projection-output .relay-output/deme-discovery-public.json
+          fi
       - name: Persist delivery receipts
         if: >-
           always() && !cancelled() && steps.due.outputs.phase != 'dry-run' &&
@@ -1839,7 +1844,7 @@ jobs:
           cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       # Before the first due race, a verified idle LIVE run keeps its MORNING feed.
       - name: Publish persisted LIVE research after predictions
-        if: steps.deme-live.outcome=='success'&&steps.publish.outcome=='success'&&steps.delivery-checkpoint.outputs.ready=='true'
+        if: steps.deme-live.outcome=='success'&&steps.delivery-checkpoint.outputs.ready=='true'&&(steps.publish.outcome=='success'||(steps.fast-lane.outputs.enabled=='true'&&(steps.critical-publish.outcome=='success'||steps.critical-retry.outcome=='success')))
         continue-on-error: true
         env:
           RESEARCH_CHECKPOINT_VERIFIED: ${{steps.delivery-checkpoint.outputs.ready}}

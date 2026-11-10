@@ -25,6 +25,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  saved-deme-nov10:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/hinata-app-recovery-20261110'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-10-deme-audit
+          restore-keys: g11-state-v4-published-2026-11-10-
+          fail-on-cache-miss: true
+      - name: Extract disposable saved research state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/deme-state.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - <<'PY'
+          import os,pathlib,sys
+          sys.path.insert(0,'scripts')
+          from extract_runtime_state_v1 import extract_complete_state
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          extract_complete_state(root/'deme-state.tgz',root/'deme-audit')
+          PY
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: 80f17be765f135d85e4b0efd7aa0b4d8c9417c14
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-deme-audit
+          persist-credentials: false
+      - name: Verify today's saved inputs, immutable files and duplicate retry
+        env:
+          G11_APP_ORIGIN: ${{secrets.APP_ENDPOINT}}
+        run: python3 scripts/saved_deme_recovery_v1.py --state-root "${RUNNER_TEMP}/deme-audit" --source-root .g11-deme-audit --day 2026-11-10 --feed "${RUNNER_TEMP}/deme-feed/feed.json" --audit
   saved-morning-nov9:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov9-optional-display-isolation'
     runs-on: ubuntu-24.04
@@ -510,13 +549,13 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
-          ref: f8c02e1d1068efec21b575f424026ffec73e6cfc
+          ref: 80f17be765f135d85e4b0efd7aa0b4d8c9417c14
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-thirty-budget
           persist-credentials: false
 
       - name: Verify retained history and all three current research cohorts
         working-directory: .g11-thirty-budget/g11/canonical
-        run: python3 -m unittest -v test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget test_deme_discovery_yotsuba test_deme_discovery_standard_preview test_deme_discovery_v5 test_deme_discovery_adoptions
+        run: python3 -m unittest -v test_deme_discovery_checkpoint test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget test_deme_discovery_yotsuba test_deme_discovery_standard_preview test_deme_discovery_v5 test_deme_discovery_adoptions
 
 
