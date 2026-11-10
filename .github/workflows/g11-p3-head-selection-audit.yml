@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        day: ['2026-11-09']
+        day: ['2026-11-10']
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{secrets.PRIVATE_SOURCE_REPO}}
-          ref: b50b98ddca6cee5d0d5d1bfa35149f701e0e8d5d
+          ref: bac4d774bae318e501bece377c60e1052d03ad64
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
@@ -63,7 +63,9 @@ jobs:
             g11.growth_p3.v1_1.test_true_only_models_v2 \
             g11.growth_p3.v1_1.test_p3_racer_runtime_v1 \
             g11.growth_p3.v1_1.test_true_official_missing_st_v1 \
-            g11.growth_p3.v1_1.test_current_runtime_v1
+            g11.growth_p3.v1_1.test_current_runtime_v1 \
+            g11.canonical.test_p3_confidence_daily_evidence \
+            g11.growth_p3.v1_1.test_confidence_current_v2
       - name: Audit frozen outputs without regenerating predictions
         id: analyze
         working-directory: candidate
@@ -72,7 +74,8 @@ jobs:
         run: |
           python3 tools/audit_p3_head_selection_v1.py \
             --state "${RUNNER_TEMP}/p3-head-audit" \
-            --day "${{matrix.day}}" \
+            --day all \
+            --capture-retained-day "${{matrix.day}}" \
             --cohort g11/growth_p3/v1_1/audits/head_selection_20261110/cohort.json \
             --output "${RUNNER_TEMP}/p3-head-selection-report.json"
       - name: Encrypt detailed read-only observations for this analysis
