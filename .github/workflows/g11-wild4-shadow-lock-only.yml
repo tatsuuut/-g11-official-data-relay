@@ -1286,7 +1286,7 @@ jobs:
           print('WILD4_CANDIDATE_HOLDOUT_SUMMARY='+json.dumps(report,sort_keys=True))
           PY
       - name: Checkout pinned official settlement source
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true' || steps.saved-pair-review.outputs.saved == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true')
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -1295,7 +1295,7 @@ jobs:
           path: .g11-settlement
           persist-credentials: false
       - name: Settle only immutable locks from verified final NIGHT
-        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true' || steps.saved-pair-review.outputs.saved == 'true')
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (((github.event_name == 'schedule' && github.event.schedule == '25,40,55 13 * * *' || github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'wild4-settle')) || steps.publication-recovery.outputs.changed == 'true')
         id: settlement
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
