@@ -8,6 +8,7 @@ on:
     paths: ['.github/workflows/g11-goripan-500-contract.yml']
 permissions:
   contents: read
+  actions: read
 jobs:
   contract:
     if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/goripan-500-rollout-20261110')
@@ -17,7 +18,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 8947d79d37e56a41384f679a5620408e3fa440a2
+          ref: 515be73d42f67993c96ccf57230dce651f2237a4
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
@@ -27,6 +28,7 @@ jobs:
           PYTHONPATH: .
         run: |
           python3 -m unittest \
+            g11.wild_pack.v1.test_goripan_saved_cohort_v1 \
             g11.wild_pack.v1.test_goripan_500_update_v1 \
             g11.wild_pack.v1.test_wild4_lifecycle_v1 \
             g11.wild_pack.v1.test_wild4_generation_gate_v2 \
@@ -45,3 +47,33 @@ jobs:
           cp ../candidate/g11/wild_pack/v1/wild4_lifecycle_v1.py g11/wild_pack/v1/wild4_lifecycle_v1.py
           cmp ../candidate/g11/wild_pack/v1/wild4_lifecycle_v1.py g11/wild_pack/v1/wild4_lifecycle_v1.py
           python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1
+      - name: Prepare pinned dependencies and safe archive reader
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@57883a3ba0a77d674f749acfaba0bbc2054a05ee
+        with:
+          enabled: 'true'
+      - name: Retrieve original saved Nov 9 current and candidate pairs
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-wild4-20261109-future-oos-locks-encrypted
+          run-id: 42635237798
+          github-token: ${{ github.token }}
+          path: .held-pair-original
+      - name: Verify saved-pair review on disposable copies without any operational write
+        working-directory: candidate
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/held-locks.tgz" ../.held-pair-original/future-locks.tgz.gpg
+          exec 3<&-
+          python3 - <<'PYEXTRACT'
+          import os,pathlib,sys
+          sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
+          from extract_runtime_state_v1 import extract_complete_state
+          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
+          extract_complete_state(temp/'held-locks.tgz',temp/'held-locks')
+          PYEXTRACT
+          python3 -m g11.wild_pack.v1.goripan_saved_cohort_review_v1 \
+            --original-ledger "${RUNNER_TEMP}/held-locks/g11-wild4-future-locks" \
+            --public-night-projection --day 2026-11-09
