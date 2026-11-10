@@ -1,0 +1,62 @@
+name: P3 pinned tactical outlook audit
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/g11-p3-tactical-outlook-audit.yml']
+permissions:
+  contents: read
+jobs:
+  p3-tactics:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/p3-resistance-tactical-20261110'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-10-p3-tactics-audit
+          restore-keys: g11-state-v4-published-2026-11-10-
+          fail-on-cache-miss: true
+      - name: Extract disposable saved state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/p3-tactics-state.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - <<'PY'
+          import os,pathlib,sys
+          sys.path.insert(0,'scripts')
+          from extract_runtime_state_v1 import extract_complete_state
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          extract_complete_state(root/'p3-tactics-state.tgz',root/'p3-tactics-audit')
+          PY
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: 85c9af153b8fd1bcfe4e65b14d60fb341e29074e
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: candidate
+          persist-credentials: false
+      - name: Install fixed inference test dependencies
+        run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8' 'lxml==6.1.1'
+      - name: Test new hypotheses, old contracts and per-race missing data
+        working-directory: candidate
+        env:
+          PYTHONPATH: .
+        run: |
+          python3 -m unittest \
+            g11.growth_p3.v1_1.test_racer_tactical_outlook_v1 \
+            g11.growth_p3.v1_1.test_true_only_models_v2 \
+            g11.growth_p3.v1_1.test_p3_racer_runtime_v1 \
+            g11.growth_p3.v1_1.test_true_official_missing_st_v1 \
+            g11.growth_p3.v1_1.test_current_runtime_v1
+      - name: Replay real saved morning and live locks without writes or official requests
+        working-directory: candidate
+        env:
+          PYTHONPATH: .
+        run: python3 tools/audit_p3_tactical_outlook_v1.py --state "${RUNNER_TEMP}/p3-tactics-audit" --day 2026-11-10
