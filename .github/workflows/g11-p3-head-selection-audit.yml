@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        day: ['2026-11-07', '2026-11-08', '2026-11-09']
+        day: ['2026-11-09']
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -22,7 +22,11 @@ jobs:
         with:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-published-${{matrix.day}}-p3-head-audit
-          restore-keys: g11-state-v4-published-${{matrix.day}}-
+          restore-keys: |
+            g11-state-v4-published-${{matrix.day}}-
+            g11-state-v4-critical-${{matrix.day}}-
+            g11-state-v3-${{matrix.day}}-
+            g11-state-v4-published-2026-11-10-
           fail-on-cache-miss: true
       - name: Extract disposable saved state
         env:
@@ -42,7 +46,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{secrets.PRIVATE_SOURCE_REPO}}
-          ref: 0ccc72ce5dbaf9a7daadab30eca058d9c00d88a3
+          ref: b50b98ddca6cee5d0d5d1bfa35149f701e0e8d5d
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
