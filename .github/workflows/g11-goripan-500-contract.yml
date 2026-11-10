@@ -87,6 +87,12 @@ jobs:
           extract_complete_state(temp/'held-night.tgz',temp/'held-night')
           extract_complete_state(temp/'held-locks.tgz',temp/'held-locks')
           PYEXTRACT
+          python3 - <<'PYINVENTORY'
+          import os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'held-night'
+          for pat in ('*workbook-ledger*','*official-day-results*'):
+              print('RETAINED_NIGHT_PATHS='+str([str(p.relative_to(root)) for p in root.rglob(pat) if p.is_file()][:40]))
+          PYINVENTORY
           python3 -m g11.wild_pack.v1.goripan_saved_cohort_review_v1 \
             --original-ledger "${RUNNER_TEMP}/held-locks/g11-wild4-future-locks" \
             --night-root "${RUNNER_TEMP}/held-night" --day 2026-11-09
