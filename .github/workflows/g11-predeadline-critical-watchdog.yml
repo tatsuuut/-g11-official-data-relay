@@ -1,6 +1,12 @@
 name: G11 PREDEADLINE critical watchdog
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/predeadline_dispatch_v1.py
+      - scripts/predeadline_watchdog_v1.py
+      - .github/workflows/g11-predeadline-critical-watchdog.yml
   workflow_run:
     workflows: ["runtime sync", "runtime completion dispatch"]
     types: [completed]
@@ -43,3 +49,4 @@ jobs:
         run: python3 scripts/audit_public_surface.py
       - name: Recover absent critical checkpoint without a model runtime
         run: python3 scripts/predeadline_watchdog_v1.py
+

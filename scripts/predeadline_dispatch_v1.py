@@ -95,18 +95,25 @@ def checked_get(client, path, sleep):
 
 
 def active_successor(client, day, current_id, current_number, mode, sleep):
-    """Read all active pages, fail closed if enumeration is unavailable."""
+    """Reconcile a moving run index; never dispatch from an incomplete page."""
     for status in ACTIVE:
         for page in range(1, 6):
             query = urlencode({'branch': 'main', 'event': 'workflow_dispatch',
                                'status': status, 'per_page': 100, 'page': page})
-            data = checked_get(client, '/actions/workflows/' + WORKFLOW + '/runs?' + query, sleep)
-            rows, total = data.get('workflow_runs'), data.get('total_count')
-            if not isinstance(rows, list) or type(total) is not int or total < 0:
-                raise DispatchError('RUN_LIST_SHAPE')
-            expected = min(100, max(0, total - 100 * (page - 1)))
-            if len(rows) != expected:
-                raise DispatchError('RUN_LIST_INCOMPLETE')
+            for read_attempt in range(3):
+                data = checked_get(client, '/actions/workflows/' + WORKFLOW + '/runs?' + query, sleep)
+                rows, total = data.get('workflow_runs'), data.get('total_count')
+                if not isinstance(rows, list) or type(total) is not int or total < 0:
+                    raise DispatchError('RUN_LIST_SHAPE')
+                expected = min(100, max(0, total - 100 * (page - 1)))
+                if len(rows) == expected:
+                    break
+                print('G11_DISPATCH_RUN_LIST_RECHECK=' + json.dumps({
+                    'status': status, 'page': page, 'reported_total': total,
+                    'returned': len(rows), 'attempt': read_attempt + 1}, sort_keys=True))
+                if read_attempt == 2:
+                    raise DispatchError('RUN_LIST_INCOMPLETE')
+                sleep(read_attempt + 1)
             for row in rows:
                 if not isinstance(row, dict):
                     raise DispatchError('RUN_ROW_SHAPE')
@@ -194,3 +201,4 @@ if __name__ == '__main__':
         code = str(exc) if isinstance(exc, DispatchError) else 'ENVIRONMENT'
         print('G11_SAFE_PREDEADLINE_DISPATCH=HELD REASON=' + code)
         raise SystemExit(1) from None
+
