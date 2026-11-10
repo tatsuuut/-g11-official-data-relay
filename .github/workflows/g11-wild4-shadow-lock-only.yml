@@ -243,7 +243,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: b740eae104e79432cffe8578095deea6aec2df24
+          ref: 515be73d42f67993c96ccf57230dce651f2237a4
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -902,57 +902,20 @@ jobs:
         working-directory: .g11-private
         run: |
           python3 - <<'PYPAIRNEEDED'
-          import os,pathlib,shutil
+          import os,pathlib
           from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
-          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
-          state=life.read(life.state_path(temp/'g11-wild4-future-locks'))
+          state=life.read(life.state_path(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-future-locks'))
           attempt=state.get('last_attempt') or {}
           needed=(attempt.get('date')=='2026-11-09' and attempt.get('state')=='TECHNICAL_HOLD'
               and attempt.get('reason')=='OFFICIAL_DAY_PREDICTION_COVERAGE'
               and bool(state.get('challenger')) and not state.get('pending')
               and state.get('night_coverage_retry',{}).get('binding',{}).get('date')=='2026-11-09')
-          if needed:
-              source=pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'.relay-cache/state.tgz.gpg'
-              shutil.copyfile(source,temp/'goripan-current-canonical-cache.gpg')
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:out.write('needed='+str(needed).lower()+'\n')
           print('G11_SAVED_PAIR_REVIEW_NEEDED='+str(needed).lower())
           PYPAIRNEEDED
-      - name: Restore exact retained Nov 9 final NIGHT for saved pairs
-        id: saved-pair-night
-        if: steps.saved-pair-needed.outputs.needed == 'true'
-        continue-on-error: true
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-published-2026-11-09-42634529780-1-checkpoint
-          restore-keys: |
-            g11-state-v4-published-2026-11-10-
-            g11-state-v4-published-2026-11-09-
-          fail-on-cache-miss: true
-      - name: Isolate retained NIGHT and restore current encrypted input
-        id: saved-pair-isolated
-        if: always() && steps.saved-pair-needed.outputs.needed == 'true'
-        env:
-          RETAINED_CACHE_KEY: ${{ steps.saved-pair-night.outputs.cache-matched-key }}
-        run: |
-          python3 - <<'PYISOLATEPAIR'
-          import hashlib,os,pathlib,shutil
-          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
-          cache=pathlib.Path('.relay-cache/state.tgz.gpg')
-          backup=temp/'goripan-current-canonical-cache.gpg'
-          try:
-              if os.environ['RETAINED_CACHE_KEY'].startswith(('g11-state-v4-published-2026-11-10-','g11-state-v4-published-2026-11-09-')):
-                  shutil.copyfile(cache,temp/'goripan-held-pair-night.gpg')
-          finally:
-              shutil.copyfile(backup,cache)
-          if hashlib.sha256(backup.read_bytes()).digest()!=hashlib.sha256(cache.read_bytes()).digest():
-              raise SystemExit('G11_CURRENT_ENCRYPTED_INPUT_CHANGED')
-          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
-              out.write('ready='+str((temp/'goripan-held-pair-night.gpg').is_file()).lower()+'\n')
-          PYISOLATEPAIR
       - name: Retrieve original Nov 9 saved current and candidate pairs
         id: saved-pair-original
-        if: steps.saved-pair-isolated.outputs.ready == 'true'
+        if: steps.saved-pair-needed.outputs.needed == 'true'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -962,7 +925,7 @@ jobs:
           path: .goripan-held-pair-original
       - name: Review retained saved pairs without replacing any prediction
         id: saved-pair-review
-        if: steps.saved-pair-isolated.outputs.ready == 'true' && steps.saved-pair-original.outcome == 'success'
+        if: steps.saved-pair-needed.outputs.needed == 'true' && steps.saved-pair-original.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 3
         working-directory: .g11-private
@@ -972,10 +935,6 @@ jobs:
           set -euo pipefail
           exec 3<<<"${STATE_PASSPHRASE}"
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
-            --output "${RUNNER_TEMP}/goripan-held-pair-night.tgz" "${RUNNER_TEMP}/goripan-held-pair-night.gpg"
-          exec 3<&-
-          exec 3<<<"${STATE_PASSPHRASE}"
-          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
             --output "${RUNNER_TEMP}/goripan-held-pair-locks.tgz" "${GITHUB_WORKSPACE}/.goripan-held-pair-original/future-locks.tgz.gpg"
           exec 3<&-
           python3 - <<'PYEXTRACTPAIRS'
@@ -983,13 +942,11 @@ jobs:
           sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
           from extract_runtime_state_v1 import extract_complete_state
           temp=pathlib.Path(os.environ['RUNNER_TEMP'])
-          extract_complete_state(temp/'goripan-held-pair-night.tgz',temp/'goripan-held-pair-night')
           extract_complete_state(temp/'goripan-held-pair-locks.tgz',temp/'goripan-held-pair-locks')
           PYEXTRACTPAIRS
           python3 -m g11.wild_pack.v1.goripan_saved_cohort_review_v1 \
             --original-ledger "${RUNNER_TEMP}/goripan-held-pair-locks/g11-wild4-future-locks" \
-            --night-root "${RUNNER_TEMP}/goripan-held-pair-night" \
-            --current-ledger "${RUNNER_TEMP}/g11-wild4-future-locks" \
+            --public-night-projection --current-ledger "${RUNNER_TEMP}/g11-wild4-future-locks" \
             --day 2026-11-09
           echo 'saved=true' >> "${GITHUB_OUTPUT}"
       - name: Verify frozen WILD4 inference runtime
