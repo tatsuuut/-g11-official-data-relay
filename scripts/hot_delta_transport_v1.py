@@ -33,7 +33,7 @@ BASE_RACE_FIELDS = {
     "p3_production_bets", "p3_published_at_jst", "p3_snapshot",
     "p3_snapshot_sha256", "p3_morning_snapshot_sha256", "p3_status", "special_case_id", "special_strength",
     "strong_mark", "trifecta_confidence", "predeadline", "pre_race_v2",
-    "predeadline_exclusion_reason", "odds_merit", "best_ev", "best_ev_bet",
+    "predeadline_exclusion_reason", "predeadline_availability", "odds_merit", "best_ev", "best_ev_bet",
     "value_bets", "odds_captured_at_jst", "result_trifecta", "payout",
     "practical_hit", "validation_hit", "miss_classification", "research_decision",
     "result_meta", "research_finance", "actual_purchase", "abeken_shadow",
@@ -43,7 +43,7 @@ BASE_RACE_FIELDS = {
 PRE_FIELDS = (
     "predeadline", "pre_race_v2", "odds_merit", "best_ev", "best_ev_bet",
     "value_bets", "odds_captured_at_jst", "p3_verification", "abeken_shadow",
-    "wild_pack", "trifecta_confidence",
+    "wild_pack", "trifecta_confidence", "predeadline_availability",
 )
 NIGHT_FIELDS = PRE_FIELDS + (
     "result_trifecta", "payout", "practical_hit", "validation_hit",
@@ -66,6 +66,11 @@ PRE_KEYS = {
     "value_alert", "value_alert_type", "trifecta_confidence",
     "special_case_id", "special_strength", "strong_mark", "pre_race_impact",
     "p3_live_conditions",
+}
+AVAILABILITY_KEYS = {
+    "schema", "status", "reason", "withdrawn_boats", "active_boats",
+    "captured_at_jst", "source_snapshot_sha256", "official_response_sha256",
+    "source_url",
 }
 VERIFICATION_KEYS = {
     "SCHEMA", "RACE_ID", "MASHIRO_DEFINITION", "MASHIRO_EVALUATION_STATUS",
@@ -183,6 +188,8 @@ def mashiro_hot(value: dict) -> dict:
 def project(field: str, value: object) -> object:
     if field == "predeadline" and isinstance(value, dict):
         return {k: v for k, v in value.items() if k in PRE_KEYS}
+    if field == "predeadline_availability" and isinstance(value, dict):
+        return {k: v for k, v in value.items() if k in AVAILABILITY_KEYS}
     if field == "p3_verification" and isinstance(value, dict):
         out = {k: v for k, v in value.items() if k in VERIFICATION_KEYS}
         if isinstance(out.get("MASHIRO_TARGETS"), list):
@@ -206,6 +213,65 @@ def project(field: str, value: object) -> object:
             "pre_race", "pre_race_stage", "pre_race_history", "changed",
         ) if k in value}
     return value
+
+
+def validate_availability(row: dict, day: str) -> dict | None:
+    """Admit only the bounded, same-race evidence contract; never a forecast.
+
+    The frozen collector verifies the official withdrawal pattern and commits
+    its immutable snapshot. Transport repeats the public identity and time
+    checks without loading private parsing or prediction code.
+    """
+    from datetime import datetime, timedelta
+    from urllib.parse import parse_qs, urlsplit
+
+    value = row.get("predeadline_availability")
+    if value is None:
+        return None
+    evidence = project("predeadline_availability", value)
+    if (not isinstance(evidence, dict) or set(evidence) != AVAILABILITY_KEYS
+            or day < "2026-11-11"
+            or evidence.get("schema") != "G11_PREDEADLINE_AVAILABILITY_V1"
+            or evidence.get("status") != "UNAVAILABLE"
+            or evidence.get("reason") != "OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE"):
+        raise RuntimeError("HOT_AVAILABILITY_CONTRACT")
+    withdrawn, active = evidence["withdrawn_boats"], evidence["active_boats"]
+    if (not isinstance(withdrawn, list) or not isinstance(active, list)
+            or not 1 <= len(withdrawn) <= 3 or not 3 <= len(active) <= 5
+            or any(type(boat) is not int for boat in withdrawn + active)
+            or withdrawn != sorted(set(withdrawn)) or active != sorted(set(active))
+            or sorted(withdrawn + active) != [1, 2, 3, 4, 5, 6]):
+        raise RuntimeError("HOT_AVAILABILITY_ROSTER")
+    if any(not isinstance(evidence[field], str)
+           or re.fullmatch(r"[a-f0-9]{64}", evidence[field]) is None
+           for field in ("source_snapshot_sha256", "official_response_sha256")):
+        raise RuntimeError("HOT_AVAILABILITY_HASH")
+    try:
+        captured = datetime.fromisoformat(evidence["captured_at_jst"])
+        deadline = datetime.fromisoformat(row["deadline_jst"])
+        if (captured.utcoffset() != timedelta(hours=9)
+                or deadline.utcoffset() != timedelta(hours=9)
+                or captured.date().isoformat() != day or deadline.date().isoformat() != day
+                or not deadline - timedelta(minutes=7) <= captured < deadline):
+            raise ValueError("capture window")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("HOT_AVAILABILITY_CAPTURE") from exc
+    try:
+        source = urlsplit(evidence["source_url"])
+        query = parse_qs(source.query, strict_parsing=True, keep_blank_values=True)
+        expected_query = {"rno": [str(row["race"])], "jcd": [row["venue_code"]],
+                          "hd": [day.replace("-", "")]}
+        if (source.scheme != "https" or source.netloc != "www.boatrace.jp"
+                or source.path != "/owpc/pc/race/odds3t" or source.fragment
+                or query != expected_query
+                or row.get("date_jst") != day or type(row["race"]) is not int
+                or not 1 <= row["race"] <= 12
+                or re.fullmatch(r"(?:0[1-9]|1[0-9]|2[0-4])", row["venue_code"]) is None
+                or row["key"] != day.replace("-", "") + f'-{row["venue_code"]}-{row["race"]:02d}'):
+            raise ValueError("source identity")
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise RuntimeError("HOT_AVAILABILITY_SOURCE") from exc
+    return evidence
 
 
 def diff(old: object, new: object) -> object:
@@ -238,9 +304,12 @@ def project_morning_base(path: Path, research_projection: dict | None = None) ->
         raise RuntimeError("HOT_BASE_STAGE")
     base = {key: value for key, value in feed.items() if key in BASE_TOP_FIELDS}
     base["races"] = [
-        {key: value for key, value in race.items() if key in BASE_RACE_FIELDS}
+        {key: project(key, value) if key == "predeadline_availability" else value
+         for key, value in race.items() if key in BASE_RACE_FIELDS}
         for race in feed["races"]
     ]
+    for row in base["races"]:
+        validate_availability(row, feed["operational_date_jst"])
     # Full p3_verification and all unknown research fields remain in the
     # encrypted canonical state; only an identity of the source is published.
     base["hot_reference"] = {"schema": "G11_SITE_HOT_BASE_V1",
@@ -373,6 +442,10 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
         prior = old.get(row["key"])
         if prior is None:
             raise RuntimeError("HOT_UNKNOWN_RACE")
+        availability = validate_availability(row, day)
+        if (availability is not None and prior.get("predeadline_availability") is not None
+                and prior["predeadline_availability"] != availability):
+            raise RuntimeError("HOT_AVAILABILITY_IMMUTABLE:" + row["key"])
         fields = {}
         for field in allowed:
             if field not in row or row[field] is None and not (
@@ -388,11 +461,14 @@ def create_delta(incoming: dict, accepted: dict, base_sha: str, research_project
                 fields[output_field] = delta
         if not fields:
             continue
-        # An independent saved Abeken LOCK does not acquire a P3 version.
-        # Bind this narrow update to the exact accepted feed instead; the
-        # receiver repeats the identity/scope check and all LOCK validation.
+        # An independent saved Abeken LOCK or terminal availability evidence
+        # does not acquire a P3 version. Bind only these narrow updates to the
+        # exact accepted feed; the receiver repeats identity, evidence and
+        # existing LOCK validation before admitting them.
         independent_version = (night_no_body_base_version(prior, row, day, base_sha)
-            if incoming["stage"] == "PREDEADLINE" and set(fields) == {"abeken_shadow"}
+            if incoming["stage"] == "PREDEADLINE"
+            and set(fields) in ({"abeken_shadow"}, {"predeadline_availability"},
+                                {"abeken_shadow", "predeadline_availability"})
             else None)
         if (incoming["stage"] == "PREDEADLINE"
                 and independent_version is None

@@ -75,6 +75,22 @@ class EarlyPublicationTests(unittest.TestCase):
         self.relay.build_feed.assert_not_called()
         self.assertFalse(self.out.exists())
 
+    def test_saved_terminal_availability_publishes_without_new_prediction_locks(self):
+        day = '2026-11-11'
+        self.meta['OPERATIONAL_DATE_JST'] = day
+        self.meta['CRITICAL'].update(OPERATIONAL_DATE=day,
+            LAST_TIMELY_P3_LIVE_COUNT=0, LAST_TIMELY_V53_COUNT=0)
+        row = {'key': '20261111-01-01', 'predeadline_availability': {
+            'schema': 'G11_PREDEADLINE_AVAILABILITY_V1', 'status': 'UNAVAILABLE',
+            'reason': 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE'}}
+        self.relay.build_feed.return_value.update(operational_date_jst=day, races=[row])
+        (self.root/'relay-state.json').write_text(json.dumps(self.meta))
+        self.assertTrue(early.project_saved(self.root, day, '123', self.root/'frozen', self.out,
+            authority_module=self.module, relay=self.relay, publisher=self.publisher,
+            now=datetime.fromisoformat(day+'T12:04:00+09:00')))
+        self.assertEqual([row], json.loads(self.out.read_text())['races'])
+        self.assertEqual(4, self.module.verify_locks.call_count)
+
     def test_wrong_day_run_or_authority_cannot_publish(self):
         for key, value in [('LAST_CRITICAL_RUN_ID', '122'), ('AUTHORITY_SHA256', 'd'*64),
                            ('CRITICAL_CHECKPOINT_STATUS', 'PARTIAL')]:
@@ -443,6 +459,201 @@ class ExcludedNoBodyTransportTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'HOT_DELTA_REJECTED:HOT_DELTA_RACE'):
             self.publish()
         self.assertFalse(Path('.relay-output/hot-delta-accepted').exists())
+
+
+class WithdrawalAvailabilityTransportTests(unittest.TestCase):
+    """Synthetic evidence only: no private prediction or official response bytes."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        cwd = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, cwd)
+        Path('.relay-output').mkdir()
+        self.day = '2026-11-11'
+        self.key = '20261111-01-01'
+        self.evidence = {
+            'schema': 'G11_PREDEADLINE_AVAILABILITY_V1', 'status': 'UNAVAILABLE',
+            'reason': 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE',
+            'withdrawn_boats': [3], 'active_boats': [1, 2, 4, 5, 6],
+            'captured_at_jst': self.day+'T12:04:00+09:00',
+            'source_snapshot_sha256': 'c'*64, 'official_response_sha256': 'd'*64,
+            'source_url': 'https://www.boatrace.jp/owpc/pc/race/odds3t?rno=1&jcd=01&hd=20261111',
+        }
+        self.accepted = {'operational_date_jst': self.day, 'stage': 'MORNING',
+            'source': {'run_id': 123}, 'generated_at_jst': self.day+'T06:00:00+09:00',
+            'races': [{'key': self.key, 'date_jst': self.day, 'venue': '検証会場',
+                'venue_code': '01', 'race': 1, 'deadline_jst': self.day+'T12:10:00+09:00',
+                'formal_status': 'FORMAL', 'exclusion_reason': None, 'research_eligible': True,
+                'p3_snapshot': 'MORNING', 'p3_status': 'PASS', 'p3_snapshot_sha256': 'b'*64,
+                'p3_morning_snapshot_sha256': 'b'*64, 'practical_bets': ['1-2-4'],
+                'predeadline': None}]}
+        self.incoming = copy.deepcopy(self.accepted)
+        self.incoming.update(stage='PREDEADLINE', source={'run_id': 124},
+                             generated_at_jst=self.day+'T12:04:01+09:00')
+        self.incoming['races'][0]['predeadline_availability'] = copy.deepcopy(self.evidence)
+        self.site = copy.deepcopy(self.accepted)
+        self.posts = []
+        self.corrupt = None
+
+    def delta(self):
+        with redirect_stdout(io.StringIO()):
+            return hot.create_delta(self.incoming, self.accepted, 'a'*64)
+
+    def fetch(self, url):
+        value = copy.deepcopy(self.site)
+        if self.posts and self.corrupt == 'absent':
+            value['races'][0].pop('predeadline_availability', None)
+        elif self.posts and self.corrupt == 'changed':
+            value['races'][0]['predeadline_availability']['source_snapshot_sha256'] = 'e'*64
+        return value, {'x-g11-source-feed-sha256': hot.hash_bytes(hot.compact(self.site))}, hot.compact(value)
+
+    def send(self, args, **kwargs):
+        delta = json.loads(Path(args[args.index('--data-binary')+1][1:]).read_bytes())
+        self.posts.append(delta)
+        self.site.update(copy.deepcopy(delta['TOP_LEVEL']))
+        self.site['stage'] = delta['STAGE']
+        rows = {row['key']: row for row in self.site['races']}
+        for change in delta['RACES']:
+            self.assertEqual('b'*64, change['EXPECTED_RACE_VERSION'])
+            rows[change['RACE_KEY']].update(copy.deepcopy(change['CHANGED_FIELDS']))
+        response = {'status': 'PASS', 'payload_sha256': hot.hash_bytes(hot.compact(self.site))}
+        Path(args[args.index('--output')+1]).write_text(json.dumps(response))
+        return subprocess.CompletedProcess(args, 0, stdout='200', stderr='')
+
+    def publish(self):
+        path = Path('synthetic-feed.json')
+        source = hot.compact(self.incoming)
+        path.write_bytes(source)
+        before = copy.deepcopy((self.incoming, self.accepted))
+        with patch.object(hot, 'fetch', side_effect=self.fetch), \
+             patch.object(hot.subprocess, 'run', side_effect=self.send), \
+             patch.dict(os.environ, {'G11_SYNC_OIDC': 'fixture-only', 'GITHUB_OUTPUT': 'output'}), \
+             redirect_stdout(io.StringIO()) as output:
+            try:
+                hot.publish(path, 'https://example.invalid')
+            finally:
+                self.assertEqual(source, path.read_bytes())
+                self.assertEqual(before, (self.incoming, self.accepted))
+        return output.getvalue()
+
+    def test_availability_only_delta_publishes_and_preserves_existing_locks(self):
+        before = copy.deepcopy(self.accepted['races'][0])
+        delta = self.delta()
+        self.assertEqual(1, len(delta['RACES']))
+        self.assertEqual({'predeadline_availability': self.evidence}, delta['RACES'][0]['CHANGED_FIELDS'])
+        self.assertEqual('b'*64, delta['RACES'][0]['EXPECTED_RACE_VERSION'])
+        output = self.publish()
+        self.assertEqual(1, len(self.posts))
+        self.assertIn('G11_HOT_DELTA_READBACK=PASS', output)
+        self.assertNotIn('G11_HOT_DELTA_NO_CHANGE=PASS', output)
+        retained = {key: value for key, value in self.site['races'][0].items()
+                    if key != 'predeadline_availability'}
+        self.assertEqual(before, retained)
+        self.assertEqual(self.evidence, self.site['races'][0]['predeadline_availability'])
+
+    def test_repeat_evidence_is_no_change_and_does_not_advance_public_time(self):
+        self.accepted['races'][0]['predeadline_availability'] = copy.deepcopy(self.evidence)
+        self.site = copy.deepcopy(self.accepted)
+        output = self.publish()
+        self.assertEqual([], self.posts)
+        self.assertEqual(self.accepted, self.site)
+        self.assertIn('G11_HOT_DELTA_NO_CHANGE=PASS', output)
+
+    def test_missing_or_changed_readback_never_records_acceptance(self):
+        for corrupt in ('absent', 'changed'):
+            with self.subTest(corrupt=corrupt):
+                self.corrupt, self.posts, self.site = corrupt, [], copy.deepcopy(self.accepted)
+                with self.assertRaisesRegex(RuntimeError, 'HOT_DELTA_READBACK_FIELD:.*:predeadline_availability'):
+                    self.publish()
+                self.assertFalse(Path('.relay-output/hot-delta-accepted').exists())
+
+    def test_only_reviewed_rosters_same_race_hashes_and_capture_window_are_admitted(self):
+        failures = [
+            ('schema', 'unknown', 'CONTRACT'), ('status', 'WAITING', 'CONTRACT'),
+            ('reason', 'INPUT_MISSING', 'CONTRACT'),
+            ('withdrawn_boats', [True], 'ROSTER'), ('withdrawn_boats', [3, 3], 'ROSTER'),
+            ('active_boats', [1, 2, 3, 4, 5, 6], 'ROSTER'),
+            ('source_snapshot_sha256', 'bad', 'HASH'), ('official_response_sha256', 'G'*64, 'HASH'),
+            ('captured_at_jst', self.day+'T12:10:00+09:00', 'CAPTURE'),
+            ('captured_at_jst', self.day+'T12:02:59+09:00', 'CAPTURE'),
+            ('captured_at_jst', self.day+'T12:04:00', 'CAPTURE'),
+            ('captured_at_jst', '2026-11-10T12:04:00+09:00', 'CAPTURE'),
+            ('source_url', self.evidence['source_url'].replace('www.boatrace.jp', 'example.invalid'), 'SOURCE'),
+            ('source_url', self.evidence['source_url'].replace('rno=1', 'rno=2'), 'SOURCE'),
+            ('source_url', self.evidence['source_url']+'&rno=1', 'SOURCE'),
+        ]
+        for field, value, reason in failures:
+            with self.subTest(field=field, value=value):
+                self.incoming['races'][0]['predeadline_availability'] = {**self.evidence, field: value}
+                with self.assertRaisesRegex(RuntimeError, 'HOT_AVAILABILITY_'+reason):
+                    self.delta()
+        self.incoming['races'][0]['predeadline_availability'] = copy.deepcopy(self.evidence)
+        self.accepted['operational_date_jst'] = self.incoming['operational_date_jst'] = '2026-11-10'
+        with self.assertRaisesRegex(RuntimeError, 'HOT_AVAILABILITY_CONTRACT'):
+            self.delta()
+
+    def test_valid_three_to_five_active_boats_and_query_order_are_supported(self):
+        for withdrawn in ([3], [2, 3], [2, 3, 6]):
+            with self.subTest(withdrawn=withdrawn):
+                evidence = self.incoming['races'][0]['predeadline_availability']
+                evidence.update(withdrawn_boats=withdrawn,
+                    active_boats=[boat for boat in range(1, 7) if boat not in withdrawn],
+                    source_url='https://www.boatrace.jp/owpc/pc/race/odds3t?hd=20261111&jcd=01&rno=1')
+                self.assertEqual(1, len(self.delta()['RACES']))
+
+    def test_previously_published_evidence_is_immutable(self):
+        self.accepted['races'][0]['predeadline_availability'] = copy.deepcopy(self.evidence)
+        self.incoming['races'][0]['predeadline_availability']['source_snapshot_sha256'] = 'e'*64
+        with self.assertRaisesRegex(RuntimeError, 'HOT_AVAILABILITY_IMMUTABLE'):
+            self.delta()
+
+    def test_no_body_exclusion_uses_exact_base_cas_only_for_bounded_fields(self):
+        for feed in (self.accepted, self.incoming):
+            row = feed['races'][0]
+            row.update(formal_status='EXCLUDED', exclusion_reason='BODY_NOT_GENERATED',
+                       research_eligible=False, practical_bets=[])
+            for field in ('p3_snapshot_sha256', 'p3_morning_snapshot_sha256', 'p3_snapshot', 'p3_status'):
+                row[field] = None
+        delta = self.delta()
+        self.assertEqual('a'*64, delta['RACES'][0]['EXPECTED_RACE_VERSION'])
+        self.assertEqual({'predeadline_availability'}, set(delta['RACES'][0]['CHANGED_FIELDS']))
+        self.incoming['races'][0]['abeken_shadow'] = {'v53': {'formal_use': False}}
+        delta = self.delta()
+        self.assertEqual('a'*64, delta['RACES'][0]['EXPECTED_RACE_VERSION'])
+        self.assertEqual({'predeadline_availability', 'abeken_shadow'}, set(delta['RACES'][0]['CHANGED_FIELDS']))
+        self.incoming['races'][0]['wild_pack'] = {'changed': True}
+        self.assertEqual([], self.delta()['RACES'])
+
+    def test_morning_projection_bounds_evidence_and_keeps_morning_values(self):
+        feed = copy.deepcopy(self.incoming)
+        feed['stage'] = 'MORNING'
+        feed['races'][0]['predeadline_availability']['private_detail'] = 'not-public'
+        path = self.root/'morning.json'
+        path.write_text(json.dumps(feed))
+        with redirect_stdout(io.StringIO()):
+            hot.project_morning_base(path)
+        row = json.loads(path.read_bytes())['races'][0]
+        self.assertEqual(self.evidence, row['predeadline_availability'])
+        for field in ('practical_bets', 'p3_snapshot_sha256', 'p3_morning_snapshot_sha256'):
+            self.assertEqual(self.accepted['races'][0][field], row[field])
+
+    def test_night_transport_and_readback_retain_terminal_evidence(self):
+        self.incoming.update(stage='NIGHT', status='PASS', counts={'races': 1, 'results': 1, 'pending': 0})
+        self.incoming['races'][0].update(result_trifecta='1-2-4', payout=100)
+        self.assertEqual(self.evidence, self.delta()['RACES'][0]['CHANGED_FIELDS']['predeadline_availability'])
+        checkpoint = {'races': 1, 'feed_sha256': 'e'*64, 'checkpoint_sha256': 'f'*64, 'authority_sha256': 'a'*64}
+        readback = copy.deepcopy(self.incoming)
+        readback['transport'] = {'canonical_feed_sha256': 'e'*64, 'night_checkpoint_sha256': 'f'*64,
+                                 'daily_authority_sha256': 'a'*64}
+        headers = {'x-g11-canonical-feed-sha256': 'e'*64, 'x-g11-daily-authority-sha256': 'a'*64}
+        with patch.object(delivery, 'identity'), patch.object(delivery, 'n13_transport_only', return_value=False):
+            delivery.verify_night_readback(self.incoming, readback, headers, checkpoint, {})
+            del readback['races'][0]['predeadline_availability']
+            with self.assertRaisesRegex(RuntimeError, 'DAILY_SITE_RACE_READBACK:.*:predeadline_availability'):
+                delivery.verify_night_readback(self.incoming, readback, headers, checkpoint, {})
 
 
 class CaptureBoundaryTests(unittest.TestCase):
