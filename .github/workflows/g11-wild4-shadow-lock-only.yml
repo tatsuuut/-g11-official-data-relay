@@ -243,7 +243,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 95d81f4b6771747ce6b6c2e942e746f3bb6c9658
+          ref: b740eae104e79432cffe8578095deea6aec2df24
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -925,12 +925,15 @@ jobs:
         with:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-published-2026-11-09-42634529780-1-checkpoint
+          restore-keys: |
+            g11-state-v4-published-2026-11-10-
+            g11-state-v4-published-2026-11-09-
           fail-on-cache-miss: true
       - name: Isolate retained NIGHT and restore current encrypted input
         id: saved-pair-isolated
         if: always() && steps.saved-pair-needed.outputs.needed == 'true'
         env:
-          RETAINED_CACHE_HIT: ${{ steps.saved-pair-night.outputs.cache-hit }}
+          RETAINED_CACHE_KEY: ${{ steps.saved-pair-night.outputs.cache-matched-key }}
         run: |
           python3 - <<'PYISOLATEPAIR'
           import hashlib,os,pathlib,shutil
@@ -938,7 +941,7 @@ jobs:
           cache=pathlib.Path('.relay-cache/state.tgz.gpg')
           backup=temp/'goripan-current-canonical-cache.gpg'
           try:
-              if os.environ['RETAINED_CACHE_HIT']=='true':
+              if os.environ['RETAINED_CACHE_KEY'].startswith(('g11-state-v4-published-2026-11-10-','g11-state-v4-published-2026-11-09-')):
                   shutil.copyfile(cache,temp/'goripan-held-pair-night.gpg')
           finally:
               shutil.copyfile(backup,cache)
