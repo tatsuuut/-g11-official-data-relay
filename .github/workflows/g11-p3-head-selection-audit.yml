@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{secrets.PRIVATE_SOURCE_REPO}}
-          ref: bac4d774bae318e501bece377c60e1052d03ad64
+          ref: bc4a9f4fb1d21717781ef0f2c8a8a47c882a35ad
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: candidate
           persist-credentials: false
@@ -65,7 +65,8 @@ jobs:
             g11.growth_p3.v1_1.test_true_official_missing_st_v1 \
             g11.growth_p3.v1_1.test_current_runtime_v1 \
             g11.canonical.test_p3_confidence_daily_evidence \
-            g11.growth_p3.v1_1.test_confidence_current_v2
+            g11.growth_p3.v1_1.test_confidence_current_v2 \
+            g11.growth_p3.v1_1.test_confidence_night_research_v1
       - name: Audit frozen outputs without regenerating predictions
         id: analyze
         working-directory: candidate
