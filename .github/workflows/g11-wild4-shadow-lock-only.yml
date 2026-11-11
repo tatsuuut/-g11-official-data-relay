@@ -243,7 +243,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: c93325d50220c047fd43a6e328828f6fbc0c6bfc
+          ref: 894cabd72cc2dbc124115098ccc43c0a4c76f9fd
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
