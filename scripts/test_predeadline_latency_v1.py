@@ -241,15 +241,17 @@ class WorkflowTests(unittest.TestCase):
             expression = expression.replace('&&', ' and ').replace('||', ' or ')
             expression = re.sub(r'!(?!=)', ' not ', expression)
             return eval(expression, {'__builtins__': {}}, {})
-        for phase, frozen, rescue, bootstrap in itertools.product(
-                ['morning', 'predeadline', 'night'], ['true', 'false'], ['true', ''], ['true', '']):
+        for phase, frozen, rescue, bootstrap, coalesced in itertools.product(
+                ['morning', 'predeadline', 'night'], ['true', 'false'], ['true', ''], ['true', ''],
+                ['success','failure','skipped']):
             values = {'steps.deme-source.outcome': 'success', 'steps.due.outputs.phase': phase,
                 'steps.authority.outputs.frozen': frozen, 'steps.critical.outputs.rescue': rescue,
-                'steps.authority.outputs.rescue_bootstrap': bootstrap}
+                'steps.authority.outputs.rescue_bootstrap': bootstrap,
+                'steps.fast-deme-live.outcome': coalesced}
             deferred = phase == 'predeadline' and (frozen == 'true' or rescue == 'true' or bootstrap == 'true')
             with self.subTest(**values):
                 self.assertEqual(not deferred, condition('P3 research update', values))
-                self.assertEqual(deferred, condition('P3 research update after LIVE publication', values))
+                self.assertEqual(deferred and coalesced != 'success', condition('P3 research update after LIVE publication', values))
 
     def test_rescue_continuation_uses_verified_elapsed_time_and_safe_dispatch(self):
         text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
@@ -262,3 +264,4 @@ class WorkflowTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+

@@ -656,6 +656,29 @@ class WithdrawalAvailabilityTransportTests(unittest.TestCase):
                 delivery.verify_night_readback(self.incoming, readback, headers, checkpoint, {})
 
 
+class OfficialScopeTests(unittest.TestCase):
+    def test_successful_admitted_scope_does_not_hide_an_excluded_official_race(self):
+        day='2026-11-11'
+        morning={'OPERATIONAL_DATE_JST':day,'RACES':[
+            {'operational_date':day,'venue_code':'17','race_no':1},
+            {'operational_date':day,'venue_code':'17','race_no':2}],
+            'QUARANTINED_RACES':[{'RACE_KEY':'20261111-17-03','REASON':'B_ENTRY_CARDINALITY:17:3:5'}]}
+        feed={'operational_date_jst':day,'races':[{'key':'20261111-17-01'},{'key':'20261111-17-02'}]}
+        report=delivery.official_scope_coverage(morning,feed,'a'*64)
+        self.assertEqual((report['scheduled_races'],report['admitted_races'],report['excluded_races']),(3,2,1))
+        self.assertEqual(report['status'],'PARTIAL_OFFICIAL_SCOPE')
+        self.assertFalse(report['whole_official_schedule_in_scope'])
+        self.assertFalse(report['accounting_mutated'])
+        self.assertEqual(report['excluded'],morning['QUARANTINED_RACES'])
+        feed['races'].append({'key':'20261111-17-03'})
+        with self.assertRaisesRegex(RuntimeError,'OFFICIAL_SCOPE_FEED_BINDING'):
+            delivery.official_scope_coverage(morning,feed,'a'*64)
+
+    def test_missing_scope_proof_cannot_default_to_whole_day_coverage(self):
+        with self.assertRaisesRegex(RuntimeError,'OFFICIAL_SCOPE_SOURCE_BINDING'):
+            delivery.official_scope_coverage({}, {'operational_date_jst':'2026-11-11','races':[]},'a'*64)
+
+
 class CaptureBoundaryTests(unittest.TestCase):
     def task(self, due, deadline, key='a'):
         return {'DUE_AT_JST': DAY+'T'+due+'+09:00',
@@ -759,4 +782,5 @@ class PublishedGoripanTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
 
