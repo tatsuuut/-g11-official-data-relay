@@ -80,9 +80,10 @@ from contextlib import contextmanager
 @contextmanager
 def official_input_compatibility():
     from g11.canonical import official_pipeline as official
-    from morning_race_isolation_v1 import adapted_morning, adapted_night_binding
+    from morning_race_isolation_v1 import adapted_morning, adapted_night_binding, adapted_schedule
     from racer_period_source_v1 import adapted_period_morning
     parser=official.parse_result_text
+    schedule_parser=official.parse_schedule_text
     gate=official.FORMAL_GATE
     bridge=gate.build_canonical_official_morning_input
     invocation=official.FORMAL_ADAPTER
@@ -93,6 +94,7 @@ def official_input_compatibility():
         return parse_night_results(text,target_date,official,parser,require_full_races=require_full_races)
     try:
         official.parse_result_text=adapted
+        official.parse_schedule_text=adapted_schedule(official)
         compiled_bridge=morning_metadata_bridge(gate)
         admitted={}
         def admitted_bridge(verified):
@@ -114,6 +116,7 @@ def official_input_compatibility():
             yield
     finally:
         official.parse_result_text=parser
+        official.parse_schedule_text=schedule_parser
         gate.build_canonical_official_morning_input=bridge
         invocation.verify_formal_p3_invocation=verify_permit
         official.CanonicalRunner.run_morning=morning
@@ -162,3 +165,4 @@ def run_relay():
 
 if __name__ == '__main__':
     run_relay()
+

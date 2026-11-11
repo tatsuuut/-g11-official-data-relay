@@ -9,11 +9,43 @@ from unittest.mock import patch
 
 from g11.canonical import official_pipeline as official
 from g11.canonical import test_official_pipeline as fixtures
-from morning_race_isolation_v1 import isolated_results, valid_quarantine, results_for_saved_morning
+from morning_race_isolation_v1 import isolated_results, valid_quarantine, results_for_saved_morning, adjacent_full_rate_pattern, adapted_schedule
 from rescue_night_result_parser_v1 import official_input_compatibility
 
 
 DAY = fixtures.TARGET
+
+
+class AdjacentBoatRateTests(unittest.TestCase):
+    line = '3 4728山口 亮39東京55B1 4.81 28.00 3.10  6.67 19 40.00 21100.00 2 53          '
+
+    def test_actual_official_full_rate_is_unambiguous_without_changing_other_fields(self):
+        self.assertIsNone(official._B_ENTRY_RE.match(self.line))
+        fixed = adjacent_full_rate_pattern(official._B_ENTRY_RE)
+        compact = fixed.match(self.line)
+        separated = official._B_ENTRY_RE.match(self.line.replace('21100.00','21 100.00'))
+        self.assertIsNotNone(compact)
+        self.assertEqual(compact.groups(),separated.groups())
+        self.assertEqual(('4728','21','100.00'),tuple(compact.group(i) for i in (2,14,15)))
+        for bad in ('21100.01','21101.00','21BROKEN','21'):
+            self.assertIsNone(fixed.match(self.line.replace('21100.00',bad)))
+
+    def test_frozen_days_keep_the_original_rule_and_parser_state_is_restored(self):
+        regex = official._B_ENTRY_RE
+        def parse(text,day,**kwargs):
+            return bool(official._B_ENTRY_RE.match(text))
+        with patch.object(official,'parse_schedule_text',parse):
+            adapted = adapted_schedule(official)
+            for day in (date(2026,11,11),date(2026,11,12)):
+                self.assertFalse(adapted(self.line,day,quarantined_races=[]))
+            self.assertTrue(adapted(self.line,date(2026,11,13),quarantined_races=[]))
+            self.assertIs(official._B_ENTRY_RE,regex)
+        def broken(*args,**kwargs):
+            raise ValueError('BROKEN_B')
+        with patch.object(official,'parse_schedule_text',broken):
+            with self.assertRaisesRegex(ValueError,'BROKEN_B'):
+                adapted_schedule(official)(self.line,date(2026,11,13))
+        self.assertIs(official._B_ENTRY_RE,regex)
 
 
 def schedule_fixture():
@@ -288,3 +320,4 @@ class MorningIsolationTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+

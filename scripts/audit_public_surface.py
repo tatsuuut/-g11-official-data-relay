@@ -19,6 +19,8 @@ ALLOWED_FILES = {
     "scripts/test_optional_display_isolation_v1.py",
     "scripts/saved_morning_publication_20261109.py",
     "scripts/audit_saved_morning_20261109.py",
+    "scripts/audit_missing_race_20261111.py",
+    "docs/nov11-delivery-and-missing-race.md",
     "docs/optional-display-isolation-20261109.md",
     "scripts/wild4_publication_continuity_v1.py",
     "scripts/test_wild4_publication_continuity_v1.py",
@@ -1044,6 +1046,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
+
 
 
 

@@ -29,6 +29,46 @@ N13_CHECKPOINT_FILE_SHA = "208e8a84c35444ecfbdfcd49bcd1ba2224e61ca0d33185ba1c9c5
 N13_CREATED = "2026-10-14T02:20:52.268957+09:00"
 
 
+def official_scope_coverage(morning, feed, snapshot_sha256):
+    """Separate whole B-schedule coverage from successful admitted-scope delivery."""
+    from morning_race_isolation_v1 import valid_quarantine
+    day = feed.get('operational_date_jst')
+    require(morning.get('OPERATIONAL_DATE_JST') == day and valid_quarantine(morning)
+            and re.fullmatch('[a-f0-9]{64}', snapshot_sha256 or '') is not None,
+            'OFFICIAL_SCOPE_SOURCE_BINDING')
+    admitted = {r['operational_date'].replace('-','')+'-'+r['venue_code']+'-'+str(r['race_no']).zfill(2)
+                for r in morning['RACES']}
+    rows = feed.get('races')
+    require(isinstance(rows,list) and admitted and len(admitted) == len(morning['RACES'])
+            and {r.get('key') for r in rows} == admitted and len(rows) == len(admitted),
+            'OFFICIAL_SCOPE_FEED_BINDING')
+    excluded = morning.get('QUARANTINED_RACES',[])
+    return {'schema':'G11_OFFICIAL_SCHEDULE_SCOPE_V1','operational_date_jst':day,
+        'morning_input_sha256':snapshot_sha256,'scheduled_races':len(admitted)+len(excluded),
+        'admitted_races':len(admitted),'excluded_races':len(excluded),
+        'whole_official_schedule_in_scope':not excluded,
+        'status':'PARTIAL_OFFICIAL_SCOPE' if excluded else 'WHOLE_SCHEDULE_IN_SCOPE',
+        'excluded':excluded,'prediction_recalculation':0,'accounting_mutated':False}
+
+
+def record_official_scope(state, day, feed, implementation):
+    """Write additive coverage evidence; never revise an existing NIGHT receipt."""
+    path = state/'store/snapshots/morning/official-day-input.json'
+    try:
+        raw = path.read_bytes()
+        envelope = json.loads(raw)
+        require(envelope.get('STAGE') == 'MORNING' and envelope.get('NAME') == 'official-day-input',
+                'OFFICIAL_SCOPE_SNAPSHOT_IDENTITY')
+        report = official_scope_coverage(envelope['PAYLOAD'],feed,hot.hash_bytes(raw))
+        implementation.immutable(implementation.day_root(state,day)/'official-schedule-scope.json',
+            implementation.canonical(report)+b'\n')
+    except Exception:
+        report = {'schema':'G11_OFFICIAL_SCHEDULE_SCOPE_V1','operational_date_jst':day,
+            'status':'COVERAGE_UNVERIFIED','whole_official_schedule_in_scope':None}
+    print('G11_OFFICIAL_SCHEDULE_SCOPE='+json.dumps(report,sort_keys=True))
+    return report
+
+
 def n13_transport_only():
     return os.environ.get("G11_N13T") == "true"
 
@@ -663,6 +703,8 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
         target = implementation.day_root(state, day) / "delivery" / phase / (ack["payload_sha256"] + ".json")
     receipt["receipt_sha256"] = implementation.digest(implementation.canonical(receipt))
     implementation.immutable(target, implementation.canonical(receipt) + b"\n")
+    if checkpoint and day >= '2026-11-12' and not n13_transport_only():
+        record_official_scope(state,day,feed,implementation)
     # Optional saved-input evidence only, after canonical delivery/readback.
     # No prediction pin, authority, notification candidate or delivery changes.
     try:
@@ -1026,6 +1068,7 @@ if __name__ == "__main__":
                 raise SystemExit('OFFICIAL_RESULT_PUBLICATION_INCOMPLETE')
             from deme_research_delivery_v1 import optional_publish
             optional_publish(args.state_root, args.feed, args.origin)
+
 
 
 
