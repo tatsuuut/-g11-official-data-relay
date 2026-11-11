@@ -11,6 +11,42 @@ import re
 import sys
 import textwrap
 import types
+from functools import wraps
+
+
+ADJACENT_BOAT_RATE_FROM = date(2026, 11, 13)
+
+
+def adjacent_full_rate_pattern(original):
+    """Decode an official fixed-width full 100.00 rate without guessing fields."""
+    before = r'(\d{1,3})\s+(\d+\.\d{2})(?:\s+.*)?$'
+    after = r'(\d{1,3})(?:\s+|(?=100\.00(?:\s|$)))(\d+\.\d{2})(?:\s+.*)?$'
+    if original.pattern.count(before) != 1:
+        raise ValueError('B_FULL_RATE_PATTERN_CONTRACT')
+    fixed = re.compile(original.pattern.replace(before, after, 1), original.flags)
+    if fixed.groups != original.groups:
+        raise ValueError('B_FULL_RATE_GROUP_CONTRACT')
+    return fixed
+
+
+def adapted_schedule(official):
+    original = official.parse_schedule_text
+
+    @wraps(original)
+    def parse(text, target_date, **kwargs):
+        # November 11 and the already-started November 12 keep their exact B
+        # admission/replay rule. Never expand a sealed historical scope.
+        if target_date < ADJACENT_BOAT_RATE_FROM:
+            return original(text, target_date, **kwargs)
+        previous = official._B_ENTRY_RE
+        fixed = adjacent_full_rate_pattern(previous)
+        try:
+            official._B_ENTRY_RE = fixed
+            return original(text, target_date, **kwargs)
+        finally:
+            official._B_ENTRY_RE = previous
+
+    return parse
 
 
 def isolated_results(text, target, official, parser):
@@ -264,4 +300,5 @@ def adapted_night_binding(official, parser):
         ('    _require(quarantined == payload.get("QUARANTINED_RACES", []),',
          '    races, quarantined = _isolation_replay(store, verified, races, quarantined, extractor)\n    _require(quarantined == payload.get("QUARANTINED_RACES", []),')],
         {'_isolation_replay':lambda store,verified,races,q,extractor:replay_scope(store,verified,races,q,extractor,official,parser)})
+
 

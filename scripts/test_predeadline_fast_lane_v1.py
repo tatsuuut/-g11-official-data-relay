@@ -114,5 +114,31 @@ class FastCycleTests(TestCase):
         self.publisher.publish_future.assert_not_called()
         self.wild.run_predeadline.assert_not_called()
 
+    def test_saved_live_research_is_included_in_one_complete_checkpoint_with_failure_fallback(self):
+        text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
+        def step(name): return text.split('      - name: '+name+'\n',1)[1].split('      - name:',1)[0]
+        ordered = ['Publish persisted critical LOCKs',
+            'Capture saved LIVE research before the complete short-cycle checkpoint',
+            'Encrypt changed state before persistence','Persist complete state before publication',
+            'Publish coalesced LIVE research from the verified complete checkpoint']
+        self.assertEqual(sorted(text.index('      - name: '+n+'\n') for n in ordered),
+            [text.index('      - name: '+n+'\n') for n in ordered])
+        capture = step(ordered[1])
+        for condition in ("steps.fast-lane.outputs.enabled=='true'", "steps.critical-publish.outcome=='success'",
+                          "steps.fast-sidecars.outcome=='success'"):
+            self.assertIn(condition,capture)
+        self.assertIn('saved_deme_recovery_v1.py',capture)
+        self.assertIn('G11_PRIVATE_REPO_TOKEN: ""',capture)
+        self.assertIn("steps.fast-deme-live.outcome!='success'",step('P3 research update after LIVE publication'))
+        delivery = step(ordered[-1])
+        self.assertIn("steps.fast-deme-live.outcome=='success'",delivery)
+        self.assertIn("steps.publication-state-verified.outputs.ready=='true'",delivery)
+        self.assertIn('RESEARCH_CHECKPOINT_VERIFIED: ${{steps.publication-state-verified.outputs.ready}}',delivery)
+        # Existing receipt persistence and a verified fallback checkpoint remain
+        # authoritative whenever the pre-checkpoint saved-only attempt fails.
+        self.assertIn("steps.deme-live.outcome == 'success'",step('Persist delivery receipts'))
+        self.assertIn("steps.delivery-checkpoint.outputs.ready=='true'",step('Publish persisted LIVE research after predictions'))
+
 
 if __name__ == '__main__': main()
+

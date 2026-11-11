@@ -934,6 +934,19 @@ jobs:
           timeout 120 python3 .g11-deme-research/g11/canonical/deme_discovery_thirty_entry.py \
             --store .relay-state/store --feed .relay-output/feed.json \
             --projection-output .relay-output/deme-discovery-public.json
+      - name: Capture saved LIVE research before the complete short-cycle checkpoint
+        if: >-
+          steps.fast-lane.outputs.enabled=='true' && steps.critical-publish.outcome=='success' &&
+          steps.fast-sidecars.outcome=='success' && steps.deme-source.outcome=='success'
+        id: fast-deme-live
+        continue-on-error: true
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: |
+          set -euo pipefail
+          rm -f .relay-output/deme-discovery-public.json
+          timeout 90 python3 scripts/saved_deme_recovery_v1.py --day '${{steps.due.outputs.operational_date}}' \
+            --state-root .relay-state --source-root .g11-deme-research --feed .relay-output/feed.json
       - name: Encrypt changed state before persistence
         if: always()&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.due.outputs.phase!='dry-run'
         id: encrypt-state
@@ -1792,6 +1805,7 @@ jobs:
       - name: P3 research update after LIVE publication
         if: >-
           always() && !cancelled() && steps.deme-source.outcome=='success' &&
+          steps.fast-deme-live.outcome!='success' &&
           steps.due.outputs.phase=='predeadline' && (steps.authority.outputs.frozen=='true' ||
           steps.critical.outputs.rescue=='true' || steps.authority.outputs.rescue_bootstrap=='true')
         id: deme-live
@@ -1848,6 +1862,14 @@ jobs:
         continue-on-error: true
         env:
           RESEARCH_CHECKPOINT_VERIFIED: ${{steps.delivery-checkpoint.outputs.ready}}
+        run: python3 scripts/deme_research_delivery_v1.py --state-root .relay-state --feed .relay-output/feed.json
+      - name: Publish coalesced LIVE research from the verified complete checkpoint
+        if: >-
+          steps.fast-deme-live.outcome=='success' && steps.publication-state-verified.outputs.ready=='true' &&
+          (steps.critical-publish.outcome=='success'||steps.critical-retry.outcome=='success')
+        continue-on-error: true
+        env:
+          RESEARCH_CHECKPOINT_VERIFIED: ${{steps.publication-state-verified.outputs.ready}}
         run: python3 scripts/deme_research_delivery_v1.py --state-root .relay-state --feed .relay-output/feed.json
       - name: Verify source identity and projected app readback
         id: readback
@@ -2246,5 +2268,6 @@ jobs:
           set -euo pipefail
           test -n "${REQUESTED_DATE}"
           python3 scripts/predeadline_dispatch_v1.py --day "${REQUESTED_DATE}" --mode rerun
+
 
 

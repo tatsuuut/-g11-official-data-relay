@@ -38,7 +38,7 @@ def section(text, venue, race_no, marker, race_re):
 def audit(state, source):
     from g11.canonical import official_pipeline as official
     from g11.relay import daily_runtime_authority_v1 as daily
-    from morning_race_isolation_v1 import isolated_results
+    from morning_race_isolation_v1 import isolated_results, adjacent_full_rate_pattern
     before = hashes(state)
     authority = daily.verify_runtime(state, DAY, source)
     for phase in ('MORNING', 'PREDEADLINE'):
@@ -65,6 +65,16 @@ def audit(state, source):
             texts[sid] = official._normalize(official.decode_cp932(extractor.extract_one(artifact.response_bytes(sid),member)))
         q = []
         b_races = official.parse_schedule_text(texts[b_id], date.fromisoformat(DAY), quarantined_races=q)
+        fixed_pattern = adjacent_full_rate_pattern(official._B_ENTRY_RE)
+        with patch.object(official, '_B_ENTRY_RE', fixed_pattern):
+            candidate_q = []
+            candidate = official.parse_schedule_text(texts[b_id], date.fromisoformat(DAY), quarantined_races=candidate_q)
+        target = [r for r in candidate if r.race_key == KEY]
+        if len(target) != 1 or len(candidate) != 144 or candidate_q:
+            raise ValueError('CORRECTED_OFFICIAL_B_SCOPE')
+        racer = next(e for e in target[0].entries if e.boat == 3)
+        if racer.racer_number != 4728 or racer.boat_number != 21 or racer.boat_top2_percent != 100.0:
+            raise ValueError('CORRECTED_OFFICIAL_B_FIELDS')
         results, rejected = isolated_results(texts[k_id], date.fromisoformat(DAY), official, official.parse_result_text)
         raw = section(texts[b_id], '17', 3, 'BBGN', official._B_RACE_RE)
         entry_lines = [l for l in raw.splitlines() if re.match(r'^\s*[1-6]\s+\d{4}',l)]
@@ -81,6 +91,8 @@ def audit(state, source):
         report = {'schema':'G11_MISSING_RACE_AUDIT_20261111_V1','day':DAY,'target':KEY,
             'runtime_source_sha':authority['runtime_source_sha'],'authority_sha256':authority['authority_sha256'],
             'morning_input_sha256':morning['SNAPSHOT_SHA256'],'night_results_sha256':night['SNAPSHOT_SHA256'],
+            'analysis_only_corrected_b':{'admitted_count':len(candidate),'quarantine':candidate_q,
+                'target_boat3':asdict(racer),'prediction_generated':False,'saved_scope_expanded':False},
             'morning_admitted_count':len(p['RACES']),'lock49_count':len(keys),
             'target_in_lock49':KEY in keys,'saved_target_snapshots':saved,
             'morning_quarantine':p.get('QUARANTINED_RACES',[]),'prior_result_quarantine':p.get('RESULT_QUARANTINE',[]),
