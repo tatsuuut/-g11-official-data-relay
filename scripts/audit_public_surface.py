@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/morning_footprint_persistence_v1.py",
+    "scripts/test_morning_footprint_persistence_v1.py",
+    "docs/morning-research-persistence-20261112.md",
     ".github/workflows/g11-goripan-500-contract.yml",
     ".github/workflows/g11-p3-head-selection-audit.yml",
     ".github/workflows/g11-p3-tactical-outlook-audit.yml",
@@ -1046,6 +1049,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
+
 
 
 
