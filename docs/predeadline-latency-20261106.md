@@ -116,3 +116,34 @@ inputs and the actual dependency/permission wiring. Existing public-surface,
 workflow lint, private regression and saved-state contracts remain required.
 Production rollout and prospective recovery observations are recorded below;
 fault-injection success alone is not a new live-operation observation.
+
+### Rollout and handoff, November 12
+
+- [PR 179](https://github.com/tatsuuut/-g11-official-data-relay/pull/179) merged
+  as `abd2348b3aceee428c5f85b11d3cd0e651dcb547`. Final pre-merge head
+  `0556b2cbb56745ba61990799f93389edde6b2e63` passed all applicable jobs in
+  [contract run 43222017469](https://github.com/tatsuuut/-g11-official-data-relay/actions/runs/43222017469).
+- The deployed source passed
+  [contract run 43222479679](https://github.com/tatsuuut/-g11-official-data-relay/actions/runs/43222479679)
+  and [runtime validation 43222479604](https://github.com/tatsuuut/-g11-official-data-relay/actions/runs/43222479604).
+  The latter reports `DRY_RUN_PASS`; its next-day authority check confirms
+  `prediction_executed=false`, `production_state_mutated=false` and
+  `site_write=false`. This is prospective configuration validation, not a
+  claim that the November 13 MORNING/LIVE/NIGHT cycle has already operated.
+- [Deployed watchdog 43222479521](https://github.com/tatsuuut/-g11-official-data-relay/actions/runs/43222479521)
+  passed and correctly returned `NIGHT_ALREADY_PUBLISHED`. The new dependent
+  recovery job is present and correctly skipped after a successful runtime;
+  no production failure was injected to force it to run.
+- After rollout, the accepted NIGHT app feed still has all 154 results and
+  142 READY observations. Protected fields across all 154 races (morning/live
+  hash fields, saved P3 bets, imitation records, WILD projections and
+  result/payout fields) match the pre-rollout readback, including unchanged
+  absences. Their combined SHA-256 is
+  `2db91bcf0042879d5337ed5004c3dd5ac1a5f9926ee6554c399c90eae719fdf8`.
+  Today's runtime source and daily authority are unchanged.
+- Implementation, reproduction tests and production source deployment are
+  complete. Historical PREDEADLINE coverage remains **PARTIAL: 142/154**;
+  the twelve missing observations above cannot be recreated after cutoff.
+  The next natural LIVE chain and a natural failure-driven recovery remain
+  prospective operation checks. Do not mark the historical gap or an
+  unobserved future full cycle as a completed normal-operation success.
