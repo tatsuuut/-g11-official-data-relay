@@ -264,6 +264,30 @@ class CompletePrefixTests(unittest.TestCase):
             self.run_dispatch(client)
         self.assertEqual(client.post_count, 0)
 
+    def test_three_phase_audit_preserves_the_shared_duplicate_and_completeness_guards(self):
+        from pathlib import Path
+        import tempfile
+        from unittest import mock
+        import audit_three_phase_runtime_contract as audit
+        self.assertEqual(audit.audit_public()['PREDEADLINE'], 'PASS')
+        source = (audit.ROOT / 'scripts/predeadline_dispatch_v1.py').read_text()
+        mutations = (
+            ("row.get('event') != 'workflow_dispatch' or row.get('status') not in ACTIVE",
+             'PREDEADLINE_CHAIN_DISPATCH_ONLY_DEDUPE'),
+            ("mode == 'continuation' and number <= current_number", 'PREDEADLINE_CHAIN_NEWER_RUN_DEDUPE'),
+            ("len(rows) == min(100, max(0, total - 100 * (page - 1)))", 'PREDEADLINE_PREFIX_COMPLETENESS'),
+            ("if number != current_number:", 'PREDEADLINE_PREFIX_BOUNDARY_IDENTITY'),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'scripts').mkdir()
+            target = root / 'scripts/predeadline_dispatch_v1.py'
+            for needle, code in mutations:
+                target.write_text(source.replace(needle, 'REMOVED_GUARD'))
+                with mock.patch.object(audit, 'ROOT', root):
+                    with self.assertRaisesRegex(audit.ContractError, code):
+                        audit.audit_public()
+
 
 if __name__=='__main__':
     unittest.main()

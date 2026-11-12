@@ -350,7 +350,10 @@ class FailedLiveRecoveryTests(unittest.TestCase):
         night = dict(self.feed, stage='NIGHT')
         self.assertEqual(self.exercise(feeds=[night]).post_count, 0)
         self.assertEqual(self.exercise(feeds=[self.feed, night]).post_count, 0)
+        created = self.run['created_at']
+        self.run['created_at'] = '2026-11-12T11:40:00Z'
         self.assertEqual(self.exercise(at=self.now.replace(hour=20, minute=45)).post_count, 0)
+        self.run['created_at'] = created
         for at in (self.now.replace(hour=7), self.now.replace(hour=22)):
             self.assertEqual(self.exercise(at=at).post_count, 0)
         bad = copy.deepcopy(self.feed)

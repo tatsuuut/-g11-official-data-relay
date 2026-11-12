@@ -76,6 +76,10 @@ their original all-active-run requirement. Ambiguous POST responses still
 require fresh reconciliation before any retry. The workflow calls this shared
 guard directly, replacing a redundant shell/API precheck with the same newer
 active-run protection, including runs without allocated jobs.
+The three-phase static contract follows that shared guard and additionally
+requires completeness, ordering, stable pagination and exact boundary checks.
+Mutation tests prove that removing those guards still fails the audit; no
+public-surface allowlist, size limit or safety check is relaxed.
 
 A separate public-only job now follows a failed first-attempt PREDEADLINE
 runtime. It verifies the exact current-day main-branch run, completed failed
