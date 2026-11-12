@@ -94,6 +94,76 @@ def checked_get(client, path, sleep):
     raise DispatchError('UNREACHABLE')
 
 
+def complete_newer_snapshot(client, day, current_id, current_number, sleep):
+    """Independently prove the complete newer prefix when a status index drifts.
+
+    Do not accept the inconsistent response. Read the unfiltered main index,
+    require complete pages in strict run-number order, and find the exact
+    current run as the lower boundary. This is valid only for continuation,
+    whose existing duplicate guard covers runs newer than that boundary.
+    """
+    previous_number = None
+    seen_ids = set()
+    first_total = None
+    successor = None
+    for page in range(1, 6):
+        query = urlencode({'branch': 'main', 'per_page': 100, 'page': page})
+        for attempt in range(3):
+            data = checked_get(client, '/actions/workflows/' + WORKFLOW + '/runs?' + query, sleep)
+            rows, total = data.get('workflow_runs'), data.get('total_count')
+            if not isinstance(rows, list) or type(total) is not int or total < 0:
+                raise DispatchError('RUN_LIST_SHAPE')
+            if len(rows) == min(100, max(0, total - 100 * (page - 1))):
+                break
+            if attempt == 2:
+                raise DispatchError('RUN_LIST_INCOMPLETE')
+            sleep(attempt + 1)
+        if first_total is None:
+            first_total = total
+        elif total != first_total:
+            raise DispatchError('RUN_LIST_MOVED')
+        for row in rows:
+            if not isinstance(row, dict):
+                raise DispatchError('RUN_ROW_SHAPE')
+            run_id, number = row.get('id'), row.get('run_number')
+            if type(run_id) is not int or type(number) is not int or run_id <= 0 or number <= 0:
+                raise DispatchError('RUN_IDENTITY')
+            if run_id in seen_ids or (previous_number is not None and number >= previous_number):
+                raise DispatchError('RUN_LIST_ORDER')
+            if row.get('head_branch') != 'main' or row.get('status') not in (*ACTIVE, 'completed'):
+                raise DispatchError('RUN_ROW_SCOPE')
+            seen_ids.add(run_id)
+            previous_number = number
+            if run_id == current_id:
+                if number != current_number:
+                    raise DispatchError('RUN_ANCHOR_IDENTITY')
+                print('G11_DISPATCH_COMPLETE_PREFIX=VERIFIED pages=' + str(page))
+                return successor
+            if number <= current_number:
+                raise DispatchError('RUN_ANCHOR_MISSING')
+            if (row.get('event') == 'workflow_dispatch' and row.get('status') in ACTIVE
+                    and same_day_predeadline(row, day)):
+                successor = run_id
+        if page * 100 >= total:
+            raise DispatchError('RUN_ANCHOR_MISSING')
+    raise DispatchError('RUN_LIST_PAGE_LIMIT')
+
+
+def same_day_predeadline(row, day):
+    title = row.get('display_title', '')
+    if title == 'LIVE-predeadline-' + day:
+        return True
+    if title != 'LIVE-predeadline-':
+        return False
+    try:
+        created = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00'))
+    except (KeyError, ValueError, TypeError, AttributeError):
+        raise DispatchError('RUN_DATE') from None
+    if created.tzinfo is None:
+        raise DispatchError('RUN_DATE')
+    return created.astimezone(JST).date().isoformat() == day
+
+
 def active_successor(client, day, current_id, current_number, mode, sleep):
     """Reconcile a moving run index; never dispatch from an incomplete page."""
     for status in ACTIVE:
@@ -112,6 +182,8 @@ def active_successor(client, day, current_id, current_number, mode, sleep):
                     'status': status, 'page': page, 'reported_total': total,
                     'returned': len(rows), 'attempt': read_attempt + 1}, sort_keys=True))
                 if read_attempt == 2:
+                    if mode == 'continuation':
+                        return complete_newer_snapshot(client, day, current_id, current_number, sleep)
                     raise DispatchError('RUN_LIST_INCOMPLETE')
                 sleep(read_attempt + 1)
             for row in rows:
@@ -126,18 +198,8 @@ def active_successor(client, day, current_id, current_number, mode, sleep):
                     continue
                 if mode == 'continuation' and number <= current_number:
                     continue
-                title = row.get('display_title', '')
-                if title == 'LIVE-predeadline-' + day:
+                if same_day_predeadline(row, day):
                     return run_id
-                if title == 'LIVE-predeadline-':
-                    try:
-                        created = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00'))
-                    except (KeyError, ValueError, TypeError):
-                        raise DispatchError('RUN_DATE') from None
-                    if created.tzinfo is None:
-                        raise DispatchError('RUN_DATE')
-                    if created.astimezone(JST).date().isoformat() == day:
-                        return run_id
             if page * 100 >= total:
                 break
         else:

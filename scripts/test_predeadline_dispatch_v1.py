@@ -35,9 +35,9 @@ class FakeClient:
         if self.invalid is not None:
             return self.invalid
         args = parse_qs(urlsplit(path).query)
-        status, page = args['status'][0], int(args['page'][0])
+        status, page = args.get('status', [None])[0], int(args['page'][0])
         data = self.after if self.post_count else self.before
-        data = [x for x in data if x['status'] == status]
+        data = [x for x in data if status is None or x['status'] == status]
         return {'workflow_runs': data[(page-1)*100:page*100],
                 'total_count': len(data) if self.total is None else self.total}
 
@@ -78,8 +78,8 @@ class DispatchTests(unittest.TestCase):
         with self.assertRaisesRegex(DispatchError,'RUN_LIST_INCOMPLETE'):
             dispatch(c,DAY,100,100,'continuation',sleep=delays.append)
         self.assertEqual(c.post_count,0)
-        self.assertEqual(len(c.calls),3)
-        self.assertEqual(delays,[1,2])
+        self.assertEqual(len(c.calls),6)
+        self.assertEqual(delays,[1,2,1,2])
 
     def run_dispatch(self, client, mode='continuation'):
         return dispatch(client, DAY, 100, 100, mode, sleep=lambda seconds: None)
@@ -176,6 +176,93 @@ class DispatchTests(unittest.TestCase):
             c=FakeClient()
             with self.assertRaises(DispatchError): dispatch(c,day,100,100,'continuation')
             self.assertEqual(c.calls,[])
+
+
+class DriftingStatusClient(FakeClient):
+    """Observed Nov 12 count mismatch, plus an independent complete index."""
+    def __init__(self, snapshot=None, **kw):
+        super().__init__(**kw)
+        self.snapshot = snapshot
+
+    def request(self, method, path, body=None):
+        result = super().request(method, path, body)
+        if method == 'GET':
+            args = parse_qs(urlsplit(path).query)
+            if 'status' in args:
+                return {'total_count': 2, 'workflow_runs': [row(100, 100, status='in_progress')]}
+            if self.snapshot is not None:
+                return self.snapshot
+        return result
+
+
+class CompletePrefixTests(unittest.TestCase):
+    def run_dispatch(self, client, mode='continuation'):
+        return dispatch(client, DAY, 100, 100, mode, sleep=lambda _: None)
+
+    def test_observed_two_reported_one_returned_requires_independent_complete_proof(self):
+        client = DriftingStatusClient(before=[row(100, 100, status='in_progress')])
+        self.assertEqual(self.run_dispatch(client)['status'], 'DISPATCH_ACCEPTED')
+        self.assertEqual(client.post_count, 1)
+        self.assertEqual(len([x for x in client.calls if x[0] == 'GET']), 4)
+
+    def test_every_active_successor_in_complete_prefix_blocks_post(self):
+        for status in ACTIVE:
+            with self.subTest(status=status):
+                client = DriftingStatusClient(before=[row(status=status), row(100, 100)])
+                self.assertEqual(self.run_dispatch(client)['status'], 'EXISTING_ACTIVE')
+                self.assertEqual(client.post_count, 0)
+
+    def test_complete_proof_is_required_even_when_a_candidate_is_visible(self):
+        values = [
+            {'total_count': 2, 'workflow_runs': [row()]},
+            {'total_count': 1, 'workflow_runs': [row()]},
+            {'total_count': 2, 'workflow_runs': [row(), row(99, 100)]},
+            {'total_count': 2, 'workflow_runs': [row(), row(100, 99)]},
+            {'total_count': 3, 'workflow_runs': [row(), row(), row(100, 100)]},
+            {'total_count': 3, 'workflow_runs': [row(102, 101), row(101, 102), row(100, 100)]},
+            {'total_count': 1, 'workflow_runs': [dict(row(100, 100), head_branch='fork')]},
+            {'total_count': 1, 'workflow_runs': [dict(row(100, 100), status='unknown')]},
+            {'total_count': True, 'workflow_runs': []},
+        ]
+        for value in values:
+            with self.subTest(value=value):
+                client = DriftingStatusClient(snapshot=value)
+                with self.assertRaises(DispatchError):
+                    self.run_dispatch(client)
+                self.assertEqual(client.post_count, 0)
+
+    def test_anchor_can_be_a_scheduled_run_but_never_blocks_itself(self):
+        anchor = dict(row(100, 100, status='in_progress'), event='schedule', display_title='runtime sync')
+        client = DriftingStatusClient(before=[anchor])
+        self.assertEqual(self.run_dispatch(client)['status'], 'DISPATCH_ACCEPTED')
+
+    def test_complete_second_page_finds_exact_anchor_and_newer_successor(self):
+        rows = [row(i, i, day='2026-11-05') for i in range(205, 100, -1)]
+        rows[0]['display_title'] = 'LIVE-predeadline-' + DAY
+        client = DriftingStatusClient(before=rows + [row(100, 100)])
+        self.assertEqual(self.run_dispatch(client)['status'], 'EXISTING_ACTIVE')
+        self.assertEqual(client.post_count, 0)
+        self.assertEqual(len([x for x in client.calls if x[0] == 'GET']), 5)
+
+    def test_bootstrap_and_rerun_do_not_use_a_newer_only_proof(self):
+        for mode in ('bootstrap', 'rerun'):
+            client = DriftingStatusClient(before=[row(100, 100)])
+            with self.assertRaisesRegex(DispatchError, 'RUN_LIST_INCOMPLETE'):
+                self.run_dispatch(client, mode)
+            self.assertEqual(client.post_count, 0)
+            self.assertEqual(len(client.calls), 3)
+
+    def test_ambiguous_post_reconciles_complete_index_before_any_replay(self):
+        client = DriftingStatusClient(posts=[0], before=[row(100, 100)],
+                                      after=[row(), row(100, 100)])
+        self.assertEqual(self.run_dispatch(client)['status'], 'ACCEPTED_AFTER_AMBIGUOUS_RESPONSE')
+        self.assertEqual(client.post_count, 1)
+
+    def test_missing_anchor_and_page_limit_never_authorize_post(self):
+        client = DriftingStatusClient(before=[row(i, i) for i in range(601, 100, -1)])
+        with self.assertRaisesRegex(DispatchError, 'RUN_LIST_PAGE_LIMIT'):
+            self.run_dispatch(client)
+        self.assertEqual(client.post_count, 0)
 
 
 if __name__=='__main__':

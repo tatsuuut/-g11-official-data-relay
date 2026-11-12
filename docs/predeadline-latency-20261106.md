@@ -53,3 +53,62 @@ These changes reduce avoidable work and prioritize publication. They do not
 prove universal T-5 delivery: GitHub runner queues, official content, remaining
 runtime work and Goripan's separate inference/publication must be measured on
 new races. Do not replay historical races or rewrite LOCKs to create evidence.
+
+## November 12 continuation outage and recovery
+
+Run [43186192542](https://github.com/tatsuuut/-g11-official-data-relay/actions/runs/43186192542)
+saved and published its critical checkpoint, then at 17:54:40-44 JST received
+three `in_progress` index responses reporting two runs but returning one.
+`RUN_LIST_INCOMPLETE` correctly prevented an unverified dispatch. The final
+failure was reported at 17:56:36. No successor appeared until run
+43206088425 at 20:05:27. The independent cron supervisor did not close this gap;
+failure-driven recovery must not depend solely on a delayed cron or on a
+workflow-name completion event.
+
+The status-filtered index still requires complete pages and bounded rereads.
+For continuation only, a persistent count mismatch now permits an independent
+proof using the main-branch index without a status filter: complete pages,
+strict descending unique run numbers, stable page totals, and the exact
+current run ID/number as the lower boundary. Every newer active same-day LIVE
+run blocks dispatch. Missing identity, malformed or incomplete pages, moving
+pagination, or an absent boundary still prevents POST. Bootstrap/rerun retain
+their original all-active-run requirement. Ambiguous POST responses still
+require fresh reconciliation before any retry. The workflow calls this shared
+guard directly, replacing a redundant shell/API precheck with the same newer
+active-run protection, including runs without allocated jobs.
+
+A separate public-only job now follows a failed first-attempt PREDEADLINE
+runtime. It verifies the exact current-day main-branch run, completed failed
+runtime, successful encrypted critical checkpoint and explicit continuation
+failure. A still-running job, unrelated failure, user cancellation, another
+active run, previous day, completed NIGHT or last-race cutoff cannot authorize
+recovery. It rereads the accepted feed and active runs, then requests a fresh
+normal invocation through the bounded dispatcher. It never reruns the old
+identity, decrypts/restores state, invokes a model, or publishes predictions.
+Existing runtime concurrency, cutoff, immutable LOCK, exact persistence and
+normal publication/NIGHT checks remain in force. The recovery job has only
+contents-read/actions-write permission and a three-minute timeout.
+
+The accepted app feed, generated at 20:59:27 JST and read back after 21:40,
+contains 154 official results and 142 READY PREDEADLINE observations. Twelve
+races in the outage window have no retained odds/READY observation:
+
+| Venue | Races | Deadlines JST |
+| --- | --- | --- |
+| Gamagori | 8-11 | 18:23, 18:54, 19:25, 19:58 |
+| Shimonoseki | 7-10 | 18:04, 18:33, 19:04, 19:36 |
+| Omura | 7-10 | 18:13, 18:43, 19:14, 19:47 |
+
+These are retained gaps, not reconstructed predictions or formal LIVE
+successes. Existing MORNING records and official NIGHT results remain usable
+under their own eligibility rules. NIGHT publication is not proof that the
+twelve missing PREDEADLINE observations existed.
+
+Regression coverage reproduces the observed count mismatch, incomplete and
+unordered independent indexes, missing boundaries, every active state,
+multi-page reconciliation, an ambiguous accepted POST, failed-job identity,
+parallel successor arrival, old dates, NIGHT/cutoff gates, original immutable
+inputs and the actual dependency/permission wiring. Existing public-surface,
+workflow lint, private regression and saved-state contracts remain required.
+Production rollout and prospective recovery observations are recorded below;
+fault-injection success alone is not a new live-operation observation.

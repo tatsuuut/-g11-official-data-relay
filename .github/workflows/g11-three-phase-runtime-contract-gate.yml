@@ -383,6 +383,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p test_scheduled_phase_routing.py -v
           python3 -m unittest discover -s scripts -p test_predeadline_dispatch_v1.py -v
+          python3 -m unittest discover -s scripts -p test_predeadline_watchdog_v1.py -q
 
       - name: Verify rescue transport with distinct stored and display responses
         run: python3 -m unittest discover -s scripts -p test_rescue_transport_contract_v1.py -q
