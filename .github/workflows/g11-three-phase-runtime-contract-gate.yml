@@ -373,6 +373,9 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Verify encrypted MORNING research persistence and missing-data boundaries
+        run: python3 -m unittest discover -s scripts -p test_morning_footprint_persistence_v1.py -v
+
       - name: Audit public surface before private checkout
         run: python3 scripts/audit_public_surface.py
 
@@ -597,6 +600,7 @@ jobs:
       - name: Verify retained history and all three current research cohorts
         working-directory: .g11-thirty-budget/g11/canonical
         run: python3 -m unittest -v test_deme_discovery_checkpoint test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget test_deme_discovery_yotsuba test_deme_discovery_standard_preview test_deme_discovery_v5 test_deme_discovery_adoptions
+
 
 
 

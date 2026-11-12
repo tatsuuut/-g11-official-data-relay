@@ -11,13 +11,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: capture/settle footprint or observe/settle WILD4 research
+        description: capture/settle/audit footprint or observe/settle WILD4 research
         required: true
         default: capture
         type: choice
         options:
           - capture
           - settle
+          - audit
           - wild4
           - wild4-settle
           - wild4-recover-20261013
@@ -53,7 +54,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-recover-20261013' || inputs.mode == 'wild4-republish-20261103')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
+  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ ((github.event_name == 'push' && !contains(github.event.head_commit.message, '[footprint-storage-check]')) || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-recover-20261013' || inputs.mode == 'wild4-republish-20261103')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
   cancel-in-progress: false
 
 jobs:
@@ -63,11 +64,11 @@ jobs:
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
       github.event_name != 'workflow_run' &&
-      github.event_name != 'push' &&
+      (github.event_name != 'push' || contains(github.event.head_commit.message, '[footprint-storage-check]')) &&
       !(github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-republish-20261103')) &&
       !(github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 9
+    timeout-minutes: 12
     env:
       TZ: Asia/Tokyo
       PYTHONPATH: ${{ github.workspace }}/.g11-private
@@ -75,6 +76,8 @@ jobs:
     steps:
       - name: Checkout public relay
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
 
       - name: Resolve research mode and operational date
         if: inputs.mode != 'wild4-recover-20261013'
@@ -91,7 +94,9 @@ jobs:
           if [ -n "${REQUESTED_DATE:-}" ]; then
             operational_date="${REQUESTED_DATE}"
           fi
-          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+          if [ "${EVENT_NAME}" = "push" ]; then
+            mode="audit"
+          elif [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
             mode="${REQUESTED_MODE:-capture}"
           else
             case "${SCHEDULE_EXPRESSION}" in
@@ -105,7 +110,7 @@ jobs:
           if re.fullmatch(r"\d{4}-\d{2}-\d{2}", sys.argv[1]) is None:
               raise SystemExit("DATE_FORMAT")
           datetime.date.fromisoformat(sys.argv[1])
-          if sys.argv[2] not in {"capture", "settle"}:
+          if sys.argv[2] not in {"capture", "settle", "audit"}:
               raise SystemExit("MODE")
           PY
           echo "operational_date=${operational_date}" >> "${GITHUB_OUTPUT}"
@@ -126,6 +131,7 @@ jobs:
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Checkout private append-only research history
         if: inputs.mode != 'wild4-recover-20261013'
@@ -136,6 +142,19 @@ jobs:
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-history
           fetch-depth: 1
+          persist-credentials: false
+
+      - name: Restore verified encrypted MORNING research history
+        id: research-restore
+        if: inputs.mode != 'wild4-recover-20261013'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: >-
+          python3 scripts/morning_footprint_persistence_v1.py restore
+          --history .g11-history/g11/morning-odds-footprint/v1
+          --work .shadow-work --day '${{ steps.mode.outputs.operational_date }}'
+          --mode '${{ steps.mode.outputs.mode }}'
 
       - name: Install pinned official HTML parser dependency
         if: inputs.mode != 'wild4-recover-20261013'
@@ -220,14 +239,9 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
         run: |
           set -euo pipefail
-          python3 -m g11.morning_odds_footprint.v1.runtime_v1 capture \
-            --feed "${GITHUB_WORKSPACE}/.shadow-work/feed.json" \
-            --history-root "${GITHUB_WORKSPACE}/.g11-history/g11/morning-odds-footprint/v1" \
-            --operational-date "${OPERATIONAL_DATE}" \
-            --max-requests 24 \
-            --interval-seconds 10 \
-            --summary-out "${GITHUB_WORKSPACE}/.shadow-work/run-summary.json"
-          jq -c . .shadow-work/run-summary.json
+          python3 scripts/morning_footprint_persistence_v1.py capture \
+            --history .g11-history/g11/morning-odds-footprint/v1 \
+            --work .shadow-work --day "${OPERATIONAL_DATE}" --mode capture
 
       - name: Settle only already-locked footprint research
         if: inputs.mode != 'wild4-recover-20261013' && (steps.mode.outputs.mode == 'settle' && steps.feed.outputs.ready == 'true')
@@ -236,17 +250,17 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
         run: |
           set -euo pipefail
-          day_path="g11/morning-odds-footprint/v1/${OPERATIONAL_DATE:0:4}/${OPERATIONAL_DATE:5:2}/${OPERATIONAL_DATE:8:2}"
-          if [ ! -f ".g11-history/${day_path}/scope.json" ]; then
-            echo "No MORNING footprint scope for ${OPERATIONAL_DATE}; settlement is a no-op."
+          python3 scripts/morning_footprint_persistence_v1.py preflight \
+            --history .g11-history/g11/morning-odds-footprint/v1 \
+            --work .shadow-work --day "${OPERATIONAL_DATE}" --mode settle
+          if jq -e '.status == "NOT_APPLICABLE_EXCLUDED"' .shadow-work/research-status.json >/dev/null; then
             exit 0
           fi
           python3 -m g11.morning_odds_footprint.v1.runtime_v1 settle \
             --feed "${GITHUB_WORKSPACE}/.shadow-work/feed.json" \
             --history-root "${GITHUB_WORKSPACE}/.g11-history/g11/morning-odds-footprint/v1" \
             --operational-date "${OPERATIONAL_DATE}" \
-            --summary-out "${GITHUB_WORKSPACE}/.shadow-work/run-summary.json"
-          jq -c . .shadow-work/run-summary.json
+            --summary-out "${GITHUB_WORKSPACE}/.shadow-work/runtime-summary.json"
 
       - name: Assert production isolation
         if: inputs.mode != 'wild4-recover-20261013'
@@ -270,31 +284,61 @@ jobs:
             ' "${day_path}/daily-summary.json" >/dev/null
           fi
 
-      - name: Persist only research-history path
-        if: inputs.mode != 'wild4-recover-20261013'
-        working-directory: .g11-history
-        shell: bash
+      - name: Audit expected MORNING coverage even after a research failure
+        if: always() && !cancelled() && steps.research-restore.outcome == 'success'
+        run: >-
+          python3 scripts/morning_footprint_persistence_v1.py report
+          --history .g11-history/g11/morning-odds-footprint/v1
+          --work .shadow-work --day '${{ steps.mode.outputs.operational_date }}'
+          --mode '${{ steps.mode.outputs.mode }}'
+
+      - name: Encrypt research history before the runner disappears
+        id: research-encrypt
+        if: always() && !cancelled() && steps.research-restore.outcome == 'success'
         env:
-          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
-          OPERATIONAL_DATE: ${{ steps.mode.outputs.operational_date }}
-          MODE: ${{ steps.mode.outputs.mode }}
-        run: |
-          set -euo pipefail
-          git config user.name "g11-research-bot"
-          git config user.email "g11-research-bot@users.noreply.github.com"
-          if [ ! -e g11/morning-odds-footprint/v1 ]; then
-            echo "No morning-odds-footprint history exists yet; persistence is a clean no-op."
-            exit 0
-          fi
-          git add g11/morning-odds-footprint/v1
-          if git diff --cached --quiet; then
-            echo "No research changes to persist."
-            exit 0
-          fi
-          git commit -m "morning-odds-footprint: ${MODE} ${OPERATIONAL_DATE}"
-          git fetch origin g11-runtime
-          git rebase origin/g11-runtime
-          git push origin HEAD:g11-runtime
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: >-
+          python3 scripts/morning_footprint_persistence_v1.py seal
+          --history .g11-history/g11/morning-odds-footprint/v1
+          --work .shadow-work --day '${{ steps.mode.outputs.operational_date }}'
+          --mode '${{ steps.mode.outputs.mode }}'
+
+      - name: Retain only the encrypted research checkpoint
+        id: research-save
+        if: always() && !cancelled() && steps.research-encrypt.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: g11-morning-footprint-history-encrypted
+          path: .shadow-work/history.tgz.gpg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Read back this run's remote encrypted checkpoint
+        id: research-readback
+        if: always() && !cancelled() && steps.research-save.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-morning-footprint-history-encrypted
+          path: .shadow-readback
+
+      - name: Verify exact remote bytes and every retained research file
+        if: always() && !cancelled() && steps.research-readback.outcome == 'success'
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: >-
+          python3 scripts/morning_footprint_persistence_v1.py verify
+          --cipher .shadow-readback/history.tgz.gpg
+          --history .g11-history/g11/morning-odds-footprint/v1
+          --work .shadow-work --day '${{ steps.mode.outputs.operational_date }}'
+          --mode '${{ steps.mode.outputs.mode }}'
+
+      - name: Require persisted and complete research before reporting completion
+        if: always() && !cancelled() && steps.research-restore.outcome == 'success'
+        run: >-
+          python3 scripts/morning_footprint_persistence_v1.py finish
+          --history .g11-history/g11/morning-odds-footprint/v1
+          --work .shadow-work --day '${{ steps.mode.outputs.operational_date }}'
+          --mode '${{ steps.mode.outputs.mode }}'
 
       # One-time 2026-10-13 recovery inside the existing job. The normal
       # WILD4 reusable workflow, date gate and model pins remain unchanged.
@@ -407,7 +451,7 @@ jobs:
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
       (
-        github.event_name == 'push' ||
+        (github.event_name == 'push' && !contains(github.event.head_commit.message, '[footprint-storage-check]')) ||
         (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle')) ||
         (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *')) ||
         (
@@ -483,3 +527,4 @@ jobs:
           python3 scripts/wild4_republish_20261103.py publish \
             --work "${RUNNER_TEMP}/saved-night" \
             --saved-archive .saved-night-readback/future-locks.tgz.gpg
+
