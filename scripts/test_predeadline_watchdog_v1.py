@@ -265,6 +265,152 @@ class MorningPredeadlineHandoffTests(unittest.TestCase):
             self.assertEqual(post.call_args.args[2]["inputs"]["phase"], "morning")
 
 
+class FailedLiveRecoveryTests(unittest.TestCase):
+    """Reproduce Nov 12 after the main job failed; all dispatch I/O is fake."""
+    def setUp(self):
+        self.now = datetime.fromisoformat('2026-11-12T17:57:00+09:00')
+        self.run_id = 43186192542
+        self.run = {
+            'id': self.run_id, 'run_number': 15058, 'run_attempt': 1,
+            'head_branch': 'main', 'head_repository': {'full_name': 'tatsuuut/-g11-official-data-relay'},
+            'path': '.github/workflows/g11-free-runner.yml', 'event': 'workflow_dispatch',
+            'display_title': 'LIVE-predeadline-2026-11-12',
+            'created_at': '2026-11-12T08:50:03Z', 'status': 'in_progress',
+        }
+        self.jobs = {'total_count': 1, 'jobs': [{
+            'name': self.run['display_title'], 'status': 'completed', 'conclusion': 'failure',
+            'steps': [
+                {'name': 'Save early encrypted critical checkpoint', 'conclusion': 'success'},
+                {'name': 'Report failed continuation', 'conclusion': 'failure'},
+            ],
+        }]}
+        self.feed = {
+            'operational_date_jst': '2026-11-12', 'stage': 'PREDEADLINE', 'status': 'PASS',
+            'counts': {'races': 1}, 'canonical_authorities': {'growth_p3': {'status': 'LOCKED'}},
+            'races': [{'deadline_jst': '2026-11-12T20:45:00+09:00'}],
+        }
+        self.env = {
+            'GH_TOKEN': 'test', 'GITHUB_REPOSITORY': 'tatsuuut/-g11-official-data-relay',
+            'G11_APP_ORIGIN': 'https://example.invalid', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+            'GITHUB_REF': 'refs/heads/main', 'GITHUB_RUN_ID': str(self.run_id),
+            'G11_FAILED_LIVE_RUN_ID': str(self.run_id),
+        }
+
+    def exercise(self, feeds=None, runs=None, client=None, at=None):
+        import copy
+        from test_predeadline_dispatch_v1 import FakeClient
+        feeds = iter(feeds or [self.feed, self.feed])
+        runs = iter(runs or [[self.run], [self.run]])
+        client = client or FakeClient()
+        original = copy.deepcopy((self.run, self.jobs, self.feed))
+        def get(url, token=None):
+            if '/api/g11-feed?' in url:
+                return next(feeds)
+            if '/jobs?' in url:
+                return self.jobs
+            if '/actions/runs/' in url:
+                return self.run
+            return {'workflow_runs': next(runs)}
+        with mock.patch.dict('os.environ', self.env), \
+             mock.patch('predeadline_watchdog_v1._get', side_effect=get), \
+             mock.patch('predeadline_dispatch_v1.Client', return_value=client):
+            main(at or self.now)
+        self.assertEqual((self.run, self.jobs, self.feed), original)
+        return client
+
+    def test_verified_failed_main_is_not_its_own_active_successor(self):
+        client = self.exercise()
+        self.assertEqual(client.post_count, 1)
+        self.assertEqual(client.calls[-1][2], {
+            'ref': 'main', 'inputs': {'phase': 'predeadline', 'operational_date': '2026-11-12'}})
+        self.assertTrue(all('/rerun' not in call[1] for call in client.calls))
+
+    def test_observed_persistent_filtered_mismatch_recovers_from_verified_complete_index(self):
+        from test_predeadline_dispatch_v1 import DriftingStatusClient
+        client = DriftingStatusClient(before=[self.run])
+        self.assertEqual(self.exercise(client=client).post_count, 1)
+
+    def test_an_incomplete_independent_index_still_never_dispatches(self):
+        from predeadline_dispatch_v1 import DispatchError
+        from test_predeadline_dispatch_v1 import DriftingStatusClient
+        client = DriftingStatusClient(snapshot={'total_count': 2, 'workflow_runs': [self.run]})
+        with self.assertRaisesRegex(DispatchError, 'RUN_LIST_INCOMPLETE'):
+            self.exercise(client=client)
+        self.assertEqual(client.post_count, 0)
+
+    def test_all_other_active_states_on_either_read_block_recovery(self):
+        for status in ('queued', 'in_progress', 'requested', 'waiting', 'pending'):
+            for on_second_read in (False, True):
+                active = {'id': self.run_id + 1, 'status': status}
+                reads = [[self.run], [self.run, active]] if on_second_read else [[self.run, active]]
+                self.assertEqual(self.exercise(runs=reads).post_count, 0)
+
+    def test_late_or_night_feed_on_either_read_cannot_regenerate_predictions(self):
+        import copy
+        night = dict(self.feed, stage='NIGHT')
+        self.assertEqual(self.exercise(feeds=[night]).post_count, 0)
+        self.assertEqual(self.exercise(feeds=[self.feed, night]).post_count, 0)
+        created = self.run['created_at']
+        self.run['created_at'] = '2026-11-12T11:40:00Z'
+        self.assertEqual(self.exercise(at=self.now.replace(hour=20, minute=45)).post_count, 0)
+        self.run['created_at'] = created
+        for at in (self.now.replace(hour=7), self.now.replace(hour=22)):
+            self.assertEqual(self.exercise(at=at).post_count, 0)
+        bad = copy.deepcopy(self.feed)
+        bad['counts']['races'] = 2
+        with self.assertRaisesRegex(ValueError, 'RACE_COVERAGE'):
+            self.exercise(feeds=[bad])
+
+    def test_bad_runtime_identity_running_or_unrelated_failure_cannot_schedule(self):
+        import copy
+        original_run, original_jobs = copy.deepcopy((self.run, self.jobs))
+        mutations = (
+            lambda: self.run.update(head_branch='fork'),
+            lambda: self.run.update(event='push'),
+            lambda: self.run.update(run_attempt=2),
+            lambda: self.run.update(display_title='LIVE-night-2026-11-12'),
+            lambda: self.run.update(created_at='2026-11-11T08:50:03Z'),
+            lambda: self.run.update(path='.github/workflows/other.yml'),
+            lambda: self.run['head_repository'].update(full_name='someone/fork'),
+            lambda: self.jobs['jobs'][0].update(status='in_progress'),
+            lambda: self.jobs['jobs'][0].update(conclusion='success'),
+            lambda: self.jobs['jobs'][0].update(steps=[]),
+            lambda: self.jobs['jobs'][0]['steps'][0].update(conclusion='failure'),
+            lambda: self.jobs['jobs'][0]['steps'][1].update(conclusion='success'),
+        )
+        for mutate in mutations:
+            self.run, self.jobs = copy.deepcopy((original_run, original_jobs))
+            mutate()
+            self.assertEqual(self.exercise().post_count, 0)
+
+    def test_wrong_workflow_context_and_incomplete_jobs_fail_closed(self):
+        self.env['GITHUB_RUN_ID'] = str(self.run_id + 1)
+        with self.assertRaisesRegex(ValueError, 'FAILED_LIVE_CONTEXT'):
+            self.exercise()
+        self.env['GITHUB_RUN_ID'] = str(self.run_id)
+        self.jobs['total_count'] = 2
+        with self.assertRaisesRegex(ValueError, 'FAILED_LIVE_JOBS_INCOMPLETE'):
+            self.exercise()
+
+    def test_actual_workflow_recovers_only_failed_first_attempt_live_after_dependency(self):
+        from pathlib import Path
+        import yaml
+        workflow = yaml.safe_load((Path(__file__).resolve().parents[1] /
+                                  '.github/workflows/g11-free-runner.yml').read_text())
+        job = workflow['jobs']['recover-failed-live-continuation']
+        self.assertEqual(job['needs'], 'run-private-runtime')
+        for guard in ("always()", "!cancelled()", "needs.run-private-runtime.result == 'failure'",
+                      "inputs.phase == 'predeadline'", "github.run_attempt == '1'",
+                      "github.ref == 'refs/heads/main'", "github.event_name == 'workflow_dispatch'"):
+            self.assertIn(guard, job['if'])
+        self.assertEqual(job['permissions'], {'contents': 'read', 'actions': 'write'})
+        self.assertLessEqual(job['timeout-minutes'], 3)
+        text = str(job['steps'])
+        self.assertNotIn('PRIVATE_SOURCE_REPO', text)
+        self.assertNotIn('actions/cache', text)
+        self.assertNotIn('g11-sync', text)
+
+
 class SiteTransportTests(unittest.TestCase):
     def test_site_uses_existing_hash_verified_readback(self):
         import predeadline_watchdog_v1 as watchdog
@@ -456,12 +602,12 @@ curl() {
         result, posts = self.exercise([self.run_row(201)], [self.job()])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(posts, 0)
-        self.assertIn('DEFER_ACTIVE_LIVE', result.stdout)
+        self.assertIn('EXISTING_ACTIVE', result.stdout)
 
     def test_newer_successor_before_job_allocation_prevents_duplicate(self):
         result, posts = self.exercise([self.run_row(201)])
         self.assertEqual(posts, 0)
-        self.assertIn('DEFER_QUEUED_LIVE', result.stdout)
+        self.assertIn('EXISTING_ACTIVE', result.stdout)
 
     def test_wrong_day_or_branch_cannot_own_current_continuation(self):
         for row, jobs in [(self.run_row(201, '2026-10-22'), [self.job('2026-10-22')]),

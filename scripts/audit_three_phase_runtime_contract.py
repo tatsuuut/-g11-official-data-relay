@@ -133,11 +133,6 @@ def audit_public() -> dict[str, object]:
             "PREDEADLINE_OPTIONAL_RUNTIME_CHAIN_AUTHORITY")
     require_text(
         continuation,
-        '.event == "workflow_dispatch"',
-        "PREDEADLINE_CHAIN_DISPATCH_ONLY_DEDUPE",
-    )
-    require_text(
-        continuation,
         "--continuation-delay",
         "PREDEADLINE_CHAIN_SPACING",
     )
@@ -149,6 +144,23 @@ def audit_public() -> dict[str, object]:
         "PREDEADLINE_CHAIN_DISPATCH_TARGET",
     )
     dispatch_source = (ROOT / "scripts/predeadline_dispatch_v1.py").read_text(encoding="utf-8")
+    # The shell delegates its duplicate guard to the bounded dispatcher.
+    # Preserve the same event/status/newer-run checks at that actual boundary.
+    require_text(dispatch_source,
+                 "row.get('event') != 'workflow_dispatch' or row.get('status') not in ACTIVE",
+                 "PREDEADLINE_CHAIN_DISPATCH_ONLY_DEDUPE")
+    require_text(dispatch_source, "mode == 'continuation' and number <= current_number",
+                 "PREDEADLINE_CHAIN_NEWER_RUN_DEDUPE")
+    for needle, code in (
+        ("if len(rows) == expected:", "PREDEADLINE_FILTERED_INDEX_COMPLETENESS"),
+        ("len(rows) == min(100, max(0, total - 100 * (page - 1)))", "PREDEADLINE_PREFIX_COMPLETENESS"),
+        ("if run_id == current_id:", "PREDEADLINE_PREFIX_CURRENT_BOUNDARY"),
+        ("if number != current_number:", "PREDEADLINE_PREFIX_BOUNDARY_IDENTITY"),
+        ("raise DispatchError('RUN_LIST_ORDER')", "PREDEADLINE_PREFIX_ORDER"),
+        ("raise DispatchError('RUN_LIST_MOVED')", "PREDEADLINE_PREFIX_STABILITY"),
+        ("raise DispatchError('RUN_ANCHOR_MISSING')", "PREDEADLINE_PREFIX_MISSING_BOUNDARY"),
+    ):
+        require_text(dispatch_source, needle, code)
     require_text(dispatch_source, "WORKFLOW = 'g11-free-runner.yml'",
                  "PREDEADLINE_DISPATCH_WORKFLOW")
     require_text(dispatch_source, "REPOSITORY = 'tatsuuut/-g11-official-data-relay'",

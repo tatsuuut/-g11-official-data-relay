@@ -258,11 +258,90 @@ def decide(runs: list[dict], jobs_for_run, now: datetime, day: str) -> str:
     return "NO_CRITICAL_RUN"
 
 
+def failed_live_identity(run: dict, jobs: dict, now: datetime, run_id: int,
+                         repository: str) -> bool:
+    """Only a finished failed runtime job may release its own recovery job."""
+    day = now.date().isoformat()
+    if (repository != "tatsuuut/-g11-official-data-relay"
+            or run.get("id") != run_id or run.get("head_branch") != "main"
+            or run.get("head_repository", {}).get("full_name") != repository
+            or run.get("path") != ".github/workflows/g11-free-runner.yml"
+            or run.get("event") != "workflow_dispatch" or run.get("run_attempt") != 1
+            or run.get("display_title") not in {"LIVE-predeadline-" + day, "LIVE-predeadline-"}
+            or type(run.get("run_number")) is not int or run["run_number"] <= 0):
+        return False
+    created = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+    if (created.tzinfo is None or created.astimezone(JST).date() != now.date()
+            or not timedelta(0) <= now - created <= timedelta(hours=2)):
+        return False
+    rows = jobs.get("jobs")
+    if not isinstance(rows, list) or type(jobs.get("total_count")) is not int or jobs["total_count"] != len(rows):
+        raise ValueError("FAILED_LIVE_JOBS_INCOMPLETE")
+    runtime = [job for job in rows if job.get("name") == run["display_title"]]
+    if (len(runtime) != 1 or runtime[0].get("status") != "completed"
+            or runtime[0].get("conclusion") != "failure"):
+        return False
+    steps = runtime[0].get("steps") or []
+    return (any(step.get("name") == "Report failed continuation"
+                and step.get("conclusion") == "failure" for step in steps)
+            and any(step.get("name") == "Save early encrypted critical checkpoint"
+                    and step.get("conclusion") == "success" for step in steps))
+
+
+def recover_failed_live(now: datetime, token: str, repository: str, origin: str) -> None:
+    """Failure-driven scheduling, independent of delayed cron/workflow_run events.
+
+    Never rerun the failed identity or restore private state here. The fresh
+    normal invocation owns all capture, cutoff, LOCK and persistence checks.
+    """
+    from predeadline_dispatch_v1 import Client, dispatch
+    run_id = int(os.environ["G11_FAILED_LIVE_RUN_ID"])
+    if (run_id <= 0 or str(run_id) != os.environ.get("GITHUB_RUN_ID")
+            or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+            or os.environ.get("GITHUB_REF") != "refs/heads/main"):
+        raise ValueError("FAILED_LIVE_CONTEXT")
+    if now.utcoffset() != timedelta(hours=9) or not 8 <= now.hour < 22:
+        print("G11_FAILED_LIVE_RECOVERY=OUTSIDE_WINDOW")
+        return
+    day = now.date().isoformat()
+    api = f"https://api.github.com/repos/{repository}"
+    run = _get(f"{api}/actions/runs/{run_id}", token)
+    jobs = _get(f"{api}/actions/runs/{run_id}/jobs?per_page=100", token)
+    if not failed_live_identity(run, jobs, now, run_id, repository):
+        print("G11_FAILED_LIVE_RECOVERY=FAILED_RUNTIME_NOT_VERIFIED")
+        return
+    for _ in range(2):
+        feed = day_feed(origin, day)
+        if feed.get("stage") == "NIGHT" and feed.get("operational_date_jst") == day:
+            print("G11_FAILED_LIVE_RECOVERY=NIGHT_ALREADY_PUBLISHED")
+            return
+        if not feed:
+            raise ValueError("FAILED_LIVE_FEED_MISSING")
+        if now >= _last_deadline(feed, day):
+            print("G11_FAILED_LIVE_RECOVERY=NIGHT_HANDOFF")
+            return
+        data = _get(f"{api}/actions/workflows/g11-free-runner.yml/runs?branch=main&per_page=100", token)
+        rows = data.get("workflow_runs")
+        if not isinstance(rows, list):
+            raise ValueError("FAILED_LIVE_RUN_LIST_SHAPE")
+        # The workflow itself is still in_progress while this separate job
+        # runs. Exclude only its verified completed failed runtime, never a
+        # different active run or a still-running runtime job.
+        if any(row.get("id") != run_id and row.get("status") in ACTIVE for row in rows):
+            print("G11_FAILED_LIVE_RECOVERY=ACTIVE_RUNTIME")
+            return
+    result = dispatch(Client(token), day, run_id, run["run_number"], "continuation")
+    print("G11_FAILED_LIVE_RECOVERY=" + json.dumps(result, sort_keys=True))
+
+
 def main(now: datetime | None = None) -> None:
     now = now or datetime.now(JST)
     day = now.date().isoformat()
     token = os.environ["GH_TOKEN"]
     repository = os.environ["GITHUB_REPOSITORY"]
+    if os.environ.get("G11_FAILED_LIVE_RUN_ID"):
+        recover_failed_live(now, token, repository, os.environ["G11_APP_ORIGIN"].rstrip("/"))
+        return
     if recover_runner_event(now, token, repository):
         return
     origin = os.environ["G11_APP_ORIGIN"].rstrip("/")
