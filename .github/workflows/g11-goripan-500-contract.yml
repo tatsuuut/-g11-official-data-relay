@@ -1,7 +1,7 @@
 name: Goripan backend candidate pool contract
 on:
   push:
-    branches: [codex/goripan-multi-rollout-20261112]
+    branches: [codex/goripan-multiday-rollout-20261114]
     paths:
       - .github/workflows/g11-goripan-500-contract.yml
       - .github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml
@@ -14,14 +14,14 @@ permissions:
   actions: read
 jobs:
   contract:
-    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/goripan-multi-rollout-20261112')
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/goripan-multiday-rollout-20261114')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 894cabd72cc2dbc124115098ccc43c0a4c76f9fd
+          ref: 1ccc60dfa34a1dad8ebd6aec1fcaa30534570262
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: candidate
           persist-credentials: false
@@ -31,7 +31,7 @@ jobs:
       - name: Verify real pinned backend and source identity
         working-directory: candidate
         run: |
-          test "$(git rev-parse HEAD)" = 894cabd72cc2dbc124115098ccc43c0a4c76f9fd
+          test "$(git rev-parse HEAD)" = 1ccc60dfa34a1dad8ebd6aec1fcaa30534570262
           python3 -c 'import catboost; assert catboost.__version__ == "1.2.8"'
       - name: Check all old gates and new pool isolation
         working-directory: candidate
@@ -47,7 +47,8 @@ jobs:
             g11.wild_pack.v1.test_wild_bet_training_v1 \
             g11.wild_pack.v1.test_wild_bet_bootstrap_v1 \
             g11.wild_pack.v1.test_goripan_candidate_pool_v1 \
-            g11.wild_pack.v1.test_goripan_pool_training_smoke_v1
+            g11.wild_pack.v1.test_goripan_pool_training_smoke_v1 \
+            g11.wild_pack.v1.test_goripan_multiday_v1
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
@@ -60,6 +61,7 @@ jobs:
         run: |
           cp ../candidate/g11/wild_pack/v1/wild4_lifecycle_v1.py g11/wild_pack/v1/wild4_lifecycle_v1.py
           cp ../candidate/g11/wild_pack/v1/goripan_candidate_pool_v1.py g11/wild_pack/v1/goripan_candidate_pool_v1.py
+          cp ../candidate/g11/wild_pack/v1/goripan_multiday_v1.py g11/wild_pack/v1/goripan_multiday_v1.py
           cmp ../candidate/g11/wild_pack/v1/wild4_lifecycle_v1.py g11/wild_pack/v1/wild4_lifecycle_v1.py
           python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1
       - name: Read exact completed November 11 checkpoint
@@ -128,3 +130,28 @@ jobs:
           python3 -m g11.wild_pack.v1.goripan_saved_cohort_review_v1 \
             --original-ledger "${RUNNER_TEMP}/held-locks/g11-wild4-future-locks" \
             --public-night-projection --day 2026-11-09
+
+      - name: Retrieve original November 13 frozen three-candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: g11-wild4-20261113-future-oos-locks-encrypted
+          run-id: 43444226250
+          github-token: ${{ github.token }}
+          path: .nov13-frozen
+      - name: Verify real pairs and two registry-only rollovers without operational writes
+        working-directory: candidate
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/nov13-frozen.tgz" ../.nov13-frozen/future-locks.tgz.gpg
+          exec 3<&-
+          python3 - <<'PYEXTRACT13'
+          import os,pathlib,sys
+          sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
+          from extract_runtime_state_v1 import extract_complete_state
+          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
+          extract_complete_state(temp/'nov13-frozen.tgz',temp/'nov13-original')
+          PYEXTRACT13
+          python3 scripts/audit_goripan_multiday_rollover_20261114.py --original-ledger "${RUNNER_TEMP}/nov13-original/g11-wild4-future-locks"
