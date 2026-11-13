@@ -16,7 +16,9 @@ BUDGET = 900_000
 NIGHT_TARGET_CHUNK_BYTES = 295_000  # JSON envelope keeps wire chunks below 300 KB.
 NIGHT_HARD_CHUNK_BYTES = 500_000
 NIGHT_TRANSACTION_SCHEMA = "G11_NIGHT_TRANSACTION_V1"
-BASE_BUDGET = 1_700_000
+# The deployed receiver accepts 2_100_000 decoded bytes. Keep 100 KB of
+# headroom while retaining every saved MORNING ticket and snapshot verbatim.
+BASE_BUDGET = 2_000_000
 BASE_TOP_FIELDS = {
     "schema", "status", "stage", "operational_date_jst", "generated_at_jst",
     "source", "counts", "research", "research_db", "integrity", "capabilities",
@@ -809,11 +811,3 @@ if __name__ == "__main__":
     except Exception as error:
         print("G11_HOT_DELTA_FAIL=" + str(error), file=sys.stderr)
         raise SystemExit(1)
-
-
-
-
-
-
-
-
