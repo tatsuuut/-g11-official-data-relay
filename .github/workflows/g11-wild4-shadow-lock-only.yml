@@ -115,8 +115,11 @@ jobs:
               output.write('day='+day+'\n')
               output.write('night_rollover='+str(night_rollover or historical_night_repair).lower()+'\n')
               output.write('lifecycle_enabled='+str(day>='2026-10-13').lower()+'\n')
+              # User hold: retain the three candidates until comparison-period review.
+              output.write('candidate_review_held='+str(day>='2026-11-13').lower()+'\n')
               output.write('artifact_name=g11-wild4-'+day.replace('-','')+'-future-oos-locks-encrypted\n')
           print('WILD4_SHADOW_OPERATIONAL_DATE='+day)
+          print('WILD4_CANDIDATE_REVIEW_HELD='+str(day>='2026-11-13').lower())
           print('WILD4_HISTORICAL_NIGHT_REPAIR='+str(historical_night_repair).lower())
           PY
       - name: Restore current encrypted canonical state
@@ -1333,7 +1336,7 @@ jobs:
           PY
       - name: Continue existing BET learning after completed NIGHT
         id: growth
-        if: steps.settlement.outputs.complete == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && steps.day.outputs.lifecycle_enabled == 'true'
+        if: steps.settlement.outputs.complete == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && steps.day.outputs.lifecycle_enabled == 'true' && steps.day.outputs.candidate_review_held != 'true'
         continue-on-error: true
         timeout-minutes: 17
         working-directory: .g11-private
@@ -1431,7 +1434,7 @@ jobs:
           PYRESEARCH
       - name: Recheck retained incomplete NIGHT without generating predictions
         id: coverage-recheck
-        if: inputs.lineage_readback_date == '' && steps.decrypted.outputs.canonical_ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.growth.outcome != 'success'
+        if: inputs.lineage_readback_date == '' && steps.decrypted.outputs.canonical_ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && steps.growth.outcome != 'success' && steps.day.outputs.candidate_review_held != 'true'
         continue-on-error: true
         working-directory: .g11-private
         env:
