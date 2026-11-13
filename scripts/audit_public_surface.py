@@ -55,6 +55,7 @@ ALLOWED_FILES = {
     "scripts/test_racer_period_source_v1.py",
     "docs/racer-period-source-20261101.md",
     "scripts/test_night_transport_utf8_v1.py",
+    "scripts/test_hot_morning_budget_v1.py",
     "scripts/test_published_checkpoint_continuity_v1.py",
     "scripts/test_wild4_retained_lock_v1.py",
     "scripts/test_wild4_public_feed_budget_v1.py",

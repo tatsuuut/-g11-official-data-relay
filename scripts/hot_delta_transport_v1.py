@@ -18,6 +18,7 @@ NIGHT_HARD_CHUNK_BYTES = 500_000
 NIGHT_TRANSACTION_SCHEMA = "G11_NIGHT_TRANSACTION_V1"
 # The deployed receiver accepts 2_100_000 decoded bytes. Keep 100 KB of
 # headroom while retaining every saved MORNING ticket and snapshot verbatim.
+# Regression: test_hot_morning_budget_v1.py covers retention and hard rejection.
 BASE_BUDGET = 2_000_000
 BASE_TOP_FIELDS = {
     "schema", "status", "stage", "operational_date_jst", "generated_at_jst",
