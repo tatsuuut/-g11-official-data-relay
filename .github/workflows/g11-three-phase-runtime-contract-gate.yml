@@ -25,6 +25,81 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  saved-checkpoint-compression-nov14:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/checkpoint-compression-20261114'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    timeout-minutes: 15
+    outputs:
+      ocb_fixture: ${{steps.checkpoint-benchmark.outputs.ocb_fixture}}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Record available compression before optional acceleration
+        run: |
+          echo "G11_BENCHMARK_ORIGINAL_COMPRESSOR=$(command -v pigz || command -v gzip)"
+          python3 -c 'import os; print("G11_BENCHMARK_CPUS=" + str(len(os.sched_getaffinity(0))))'
+      - name: Prepare standard gzip-compatible parallel compression
+        run: |
+          sudo -n apt-get install -y --no-install-recommends pigz isal
+          python3 -m unittest discover -s scripts -p test_runtime_preparation_v1.py -q
+      - name: Select a current saved November 14 checkpoint for the read-only benchmark
+        id: benchmark-checkpoint
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: python3 scripts/critical_saved_publication_v1.py --day 2026-11-14 --select-restore
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.benchmark-checkpoint.outputs.cache_key}}
+          fail-on-cache-miss: true
+      - name: Extract a disposable authenticated saved-state copy
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/checkpoint-benchmark.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - <<'PYBENCH'
+          import os,pathlib,sys
+          sys.path.insert(0,'scripts')
+          from extract_runtime_state_v1 import extract_complete_state
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          extract_complete_state(root/'checkpoint-benchmark.tgz',root/'checkpoint-benchmark-state')
+          (root/'checkpoint-benchmark.tgz').unlink()
+          PYBENCH
+          rm -f .relay-cache/state.tgz.gpg
+      - name: Benchmark complete encrypted archives and verify every restored byte
+        id: checkpoint-benchmark
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 scripts/benchmark_checkpoint_compression_v1.py --state-root "${RUNNER_TEMP}/checkpoint-benchmark-state" --scratch "${RUNNER_TEMP}"
+          exec 3<&-
+  authenticated-checkpoint-reader-compatibility:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/checkpoint-compression-20261114'
+    needs: saved-checkpoint-compression-nov14
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{matrix.os}}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify both retained reader generations and reject corruption
+        env:
+          G11_OCB_SYNTHETIC_FIXTURE: ${{needs.saved-checkpoint-compression-nov14.outputs.ocb_fixture}}
+        run: |
+          gpg --version | head -1
+          python3 scripts/benchmark_checkpoint_compression_v1.py --verify-fixture
   saved-miyajima-nov11:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov11-delivery-and-missing-race'
     runs-on: ubuntu-24.04
@@ -152,6 +227,10 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Prepare and test standard gzip-compatible acceleration
+        run: |
+          sudo -n apt-get install -y --no-install-recommends isal pigz
+          G11_REQUIRE_ENCRYPTION_TESTS=1 python3 -m unittest discover -s scripts -p test_predeadline_latency_v1.py -v
       - name: Verify complete restoration and public cache failure boundaries
         run: python3 -m unittest discover -s scripts -p test_runtime_preparation_v1.py -v
       - name: Prepare public packages on the real runner

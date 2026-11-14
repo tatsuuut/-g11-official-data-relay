@@ -6,15 +6,43 @@ the existing authority, source and LOCK hash checks still run after restoration.
 from __future__ import annotations
 
 import gzip
+from contextlib import contextmanager
 import os
 from pathlib import Path, PurePosixPath
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import time
 
 
-def extract_complete_state(archive: Path, destination: Path) -> None:
+@contextmanager
+def gzip_stream(archive, decompressor):
+    if decompressor not in ('auto', 'python', 'igzip'):
+        raise ValueError('G11_STATE_DECOMPRESSOR')
+    native = shutil.which('igzip') if decompressor != 'python' else None
+    if decompressor == 'igzip' and not native:
+        raise ValueError('G11_STATE_NATIVE_GZIP_UNAVAILABLE')
+    if not native:
+        with gzip.open(archive, 'rb') as stream:
+            yield stream
+        return
+    child = subprocess.Popen([native, '-d', '-c', '--', str(archive.absolute())],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        yield child.stdout
+        # The caller has drained past the tar end. CRC/truncation failure must
+        # still prevent exposure even when every tar member looked valid.
+        if child.wait() != 0:
+            raise gzip.BadGzipFile('G11_STATE_GZIP_STREAM_INVALID')
+    finally:
+        child.stdout.close()
+        if child.poll() is None:
+            child.terminate()
+            child.wait()
+
+
+def extract_complete_state(archive: Path, destination: Path, *, decompressor='auto') -> None:
     archive, destination = Path(archive), Path(destination).absolute()
     if destination.is_symlink() or (destination.exists() and
             (not destination.is_dir() or any(destination.iterdir()))):
@@ -42,7 +70,7 @@ def extract_complete_state(archive: Path, destination: Path) -> None:
             yield member
 
     try:
-        with gzip.open(archive, 'rb') as compressed:
+        with gzip_stream(archive, decompressor) as compressed:
             with tarfile.open(fileobj=compressed, mode='r|') as handle:
                 handle.extractall(staging, members=checked_members(handle), filter='data')
             # tar stops at its end marker; also consume the gzip footer/CRC.

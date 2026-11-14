@@ -147,3 +147,70 @@ fault-injection success alone is not a new live-operation observation.
   The next natural LIVE chain and a natural failure-driven recovery remain
   prospective operation checks. Do not mark the historical gap or an
   unobserved future full cycle as a completed normal-operation success.
+
+
+## November 14: authenticated full-checkpoint acceleration
+
+The post-reservation pipeline still encrypts and reads back every complete
+checkpoint. Observed same-day archives were approximately 1.45 GB, with 4.27 GB
+of source files and 58,108 members. A read-only comparison on an authenticated
+saved November 14 state found gzip encryption at 47.346 seconds, two-worker
+pigz at 22.021 seconds, and four-worker pigz at 21.144 seconds. Every restored
+file/directory matched, and source state remained identical. The CPU-only
+change is not adopted: less than one second per checkpoint is insufficient.
+
+The revised candidate combines supported authenticated OCB with available CPU
+affinity bounded to four pigz workers (standard gzip fallback). A legacy writer
+keeps two workers. It retains complete tar contents, AES256, passphrase handling,
+exact encrypted readbacks and
+GPG-authenticated restoration before extraction. It selects the writer's
+supported authenticated OCB option, preferring --use-ocb-sym, then --force-ocb,
+then the older --force-aead alias. A writer without these capabilities retains
+its existing authenticated CFB+MDC mode. An encryption failure never triggers
+a downgrade/retry under a different mode.
+
+GnuPG documents OCB symmetric decryption support since version 2.2.21:
+https://www.gnupg.org/documentation/manuals/gnupg/OpenPGP-Options.html
+The main relay and pinned WILD4 reader run on Ubuntu 24.04. Separate CI jobs
+verify a public synthetic OCB fixture with ordinary GPG readers on both Ubuntu
+22.04 and 24.04, including rejection of truncation, tampering and wrong passwords.
+Only the synthetic fixture is passed between these jobs; private state is never
+exported as an artifact or job output.
+
+A read-only branch-scoped benchmark compares full AES256 CFB+MDC and AES256 OCB
+archives using a disposable saved checkpoint. Both are decrypted and fully
+restored, and every file/directory is compared using size and SHA256. Only
+aggregate timings and success/failure codes are logged. No prediction is
+published or regenerated, and no saved source, LOCK, or accounting is changed.
+Measured results and production timing must be checked before rollout.
+
+
+The full-state cipher-only comparison also passed both reader generations and
+all byte comparisons, but reduced 25.983 seconds to 22.759 seconds; that alone
+is not a sufficient improvement. The next comparison includes ISA-L igzip's
+standard gzip-compatible level 0 stream and native decompression. The native
+reader retains all existing tar member checks and data filters, drains past
+the tar end, requires successful gzip CRC/footer completion, and exposes the
+staged state atomically only after the decompressor exits successfully. Python
+gzip remains the fallback. The system package is optional with a bounded setup
+attempt; no private runtime package, model or source is changed.
+
+The three paired variants are legacy pigz/Python gzip, ISA-L with the legacy
+cipher, and ISA-L with OCB. Tests cover a late native decompressor failure,
+concatenated gzip members, late CRC corruption, traversal, special files,
+nonempty destinations and byte-identical roundtrips. The benchmark compares
+all saved-state bytes after each candidate and reports archive size as well as
+encryption and extraction time. Production timing must include setup and cache
+transfer, rather than treating CPU-only improvements as end-to-end gains.
+
+ISA-L igzip's standard gzip interface is documented by its upstream:
+https://github.com/intel/isa-l/blob/master/programs/igzip.1
+
+
+Level 0 ISA-L/OCB reduced full encryption from 23.257 to 13.219 seconds and
+extraction from 18.918 to 16.746 seconds, with every file unchanged. Its archive
+increased from 1,447,935,823 to 1,771,584,034 bytes (about 22%), so it is not
+adopted on CPU timing alone. The final comparison evaluates standard-compatible
+ISA-L levels 1 and 2 to account for cache transfer cost. Native corruption and
+full real encryption roundtrip tests are required by the public-runtime gate
+on future PRs, independent from the one-off saved-state benchmark.

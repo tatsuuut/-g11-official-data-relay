@@ -146,6 +146,42 @@ class ResearchTests(unittest.TestCase):
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_accelerated_writer_bounds_workers_and_preserves_legacy_default(self):
+        for cpus, expected in [(1,1), (2,2), (4,4), (16,4)]:
+            with patch.object(archive.os, 'sched_getaffinity', return_value=set(range(cpus))), \
+                    patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
+                self.assertEqual(f'pigz -1 -p {expected}', archive.compression_command(accelerated=True, codec='pigz'))
+                self.assertEqual('pigz -1 -p 2', archive.compression_command(codec='pigz'))
+        with patch.object(archive.os, 'sched_getaffinity', side_effect=OSError), \
+                patch.object(archive.os, 'cpu_count', return_value=2), \
+                patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
+            self.assertEqual('pigz -1 -p 2', archive.compression_command(accelerated=True, codec='pigz'))
+
+    def test_supported_authenticated_mode_and_legacy_capability_fallback(self):
+        for available, expected in [('--use-ocb-sym\n--force-aead', '--use-ocb-sym'),
+                ('--force-ocb\n--force-aead', '--force-ocb'), ('--force-aead', '--force-aead')]:
+            with self.subTest(available=available), patch.object(archive.subprocess, 'run',
+                    return_value=Mock(returncode=0, stdout=available)):
+                self.assertEqual([expected], archive.authenticated_encryption_options())
+        with patch.object(archive.subprocess, 'run', return_value=Mock(returncode=0, stdout='--symmetric')):
+            self.assertEqual([], archive.authenticated_encryption_options())
+            with self.assertRaises(ValueError): archive.authenticated_encryption_options('ocb')
+        with patch.object(archive.subprocess, 'run') as child:
+            self.assertEqual([], archive.authenticated_encryption_options('legacy'))
+            with self.assertRaises(ValueError): archive.authenticated_encryption_options('--disable-mdc')
+            child.assert_not_called()
+        with patch.object(archive.subprocess, 'run', return_value=Mock(returncode=1, stdout='--force-aead')):
+            self.assertEqual([], archive.authenticated_encryption_options())
+
+    def test_standard_gzip_fallback_and_invalid_compression_never_run_shell(self):
+        with patch.object(archive.shutil, 'which', return_value=None):
+            self.assertEqual('gzip -1', archive.compression_command())
+            with self.assertRaises(ValueError): archive.compression_command(codec='pigz')
+        for workers in (0, 5, True, '4', -1):
+            with self.subTest(workers=workers), self.assertRaises(ValueError):
+                archive.compression_command(workers)
+        with self.assertRaises(ValueError): archive.compression_command(codec='gzip;false')
+
     def test_failed_archive_keeps_prior_checkpoint_and_removes_partial(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); state = root/'state'; state.mkdir(); output = root/'state.gpg'
@@ -154,7 +190,8 @@ class ArchiveTests(unittest.TestCase):
             def fail(*a, **kw):
                 output.with_name('state.gpg.tmp').write_bytes(b'incomplete')
                 return Mock(returncode=2)
-            with patch.object(archive.os, 'fstat'), patch.object(archive.subprocess, 'Popen', return_value=tar), \
+            with patch.object(archive.os, 'fstat'), patch.object(archive, 'authenticated_encryption_options', return_value=[]), \
+                    patch.object(archive.subprocess, 'Popen', return_value=tar), \
                     patch.object(archive.subprocess, 'run', side_effect=fail):
                 with self.assertRaisesRegex(RuntimeError, 'ENCRYPTION_FAILED'):
                     archive.encrypt(state, output)
@@ -183,17 +220,17 @@ class ArchiveTests(unittest.TestCase):
                     self.fail('Real GPG roundtrip required: ' + probe.stderr.decode(errors='replace'))
                 self.skipTest('local gpg-agent unavailable; mandatory in contract CI')
             try:
-                for compressor in ['gzip', 'pigz']:
+                for compressor, workers in [('gzip', 1), ('pigz', 2), ('igzip', 1)]:
                     if not shutil.which(compressor): continue
-                    output = root/(compressor+'.gpg')
+                    output = root/(compressor+str(workers)+'.gpg')
                     with tempfile.TemporaryFile() as secret:
                         secret.write(b'synthetic-test-only\n'); secret.seek(0)
                         with patch.dict(os.environ, {'GNUPGHOME': str(home)}), \
                                 patch.object(archive.shutil, 'which', return_value=None if compressor=='gzip' else '/usr/bin/pigz'):
-                            archive.encrypt(state, output, passphrase_fd=secret.fileno())
+                            archive.encrypt(state, output, passphrase_fd=secret.fileno(), workers=workers, codec=compressor)
                     plaintext = subprocess.run(['gpg', '--homedir', str(home), '--batch', '--yes', '--pinentry-mode', 'loopback',
                         '--passphrase-fd', '0', '--decrypt', str(output)], input=b'synthetic-test-only\n', capture_output=True, check=True).stdout
-                    restored = root/('restored-'+compressor); restored.mkdir()
+                    restored = root/('restored-'+compressor+str(workers)); restored.mkdir()
                     subprocess.run(['tar', '-xzf', '-', '-C', str(restored)], input=plaintext, check=True)
                     self.assertEqual(files, {p.relative_to(restored).as_posix(): p.read_bytes() for p in restored.rglob('*') if p.is_file()})
                     self.assertEqual(files, {p.relative_to(state).as_posix(): p.read_bytes() for p in state.rglob('*') if p.is_file()})

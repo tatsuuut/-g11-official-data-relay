@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-    paths: [.github/workflows/g11-free-runner.yml,scripts/daily_runtime_bootstrap_v1.py,scripts/hot_delta_transport_v1.py]
+    paths: [.github/workflows/g11-free-runner.yml,scripts/daily_runtime_bootstrap_v1.py,scripts/hot_delta_transport_v1.py,scripts/encrypt_runtime_state_v1.py,scripts/extract_runtime_state_v1.py]
   workflow_dispatch:
     inputs:
       phase:
@@ -181,6 +181,8 @@ jobs:
         run: |
           echo 'G11_PREDEADLINE_RERUN_REQUIRES_FRESH_DISPATCH' >&2
           exit 1
+      - name: Prepare optional standard gzip acceleration
+        run: python3 -S scripts/encrypt_runtime_state_v1.py --prepare-gzip
       - name: Select newest same-day persisted checkpoint
         if: steps.scheduled.outputs.phase=='predeadline'||steps.scheduled.outputs.phase=='night'
         id: checkpoint-choice
