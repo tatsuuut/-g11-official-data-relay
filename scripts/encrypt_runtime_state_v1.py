@@ -9,6 +9,21 @@ import subprocess
 import time
 
 
+def prepare_gzip_acceleration():
+    """Optional signed OS package only; a slow/unavailable mirror is nonfatal."""
+    if not shutil.which('igzip'):
+        try:
+            subprocess.run(['sudo', '-n', 'env', 'DEBIAN_FRONTEND=noninteractive',
+                'apt-get', 'install', '-y', '--no-install-recommends', 'isal'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    available = bool(shutil.which('igzip'))
+    print('G11_GZIP_ACCELERATOR=' + ('ISAL' if available else 'EXISTING_GZIP_FALLBACK'), flush=True)
+    return available
+
+
 def compression_command(workers=None, *, codec='auto', accelerated=False):
     """Use available CPUs with OCB; retain the legacy two-worker writer."""
     if codec not in ('auto', 'gzip', 'pigz', 'igzip'):
@@ -101,9 +116,15 @@ def encrypt(state, output, *, passphrase_fd=3, workers=None, codec='auto', mode=
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--state-root', type=Path, required=True)
-    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--state-root', type=Path)
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--prepare-gzip', action='store_true')
     args = parser.parse_args()
+    if args.prepare_gzip:
+        prepare_gzip_acceleration()
+        return
+    if args.state_root is None or args.output is None:
+        parser.error('--state-root and --output are required for encryption')
     encrypt(args.state_root, args.output)
 
 
