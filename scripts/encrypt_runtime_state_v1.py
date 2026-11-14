@@ -9,7 +9,25 @@ import subprocess
 import time
 
 
-def encrypt(state, output, *, passphrase_fd=3):
+def compression_command(workers=None, *, codec='auto'):
+    """Use at most four available CPUs; retain the standard gzip wire format."""
+    if codec not in ('auto', 'gzip', 'pigz'):
+        raise ValueError('CHECKPOINT_COMPRESSION_CODEC')
+    if workers is None:
+        try:
+            available = len(os.sched_getaffinity(0))
+        except (AttributeError, OSError):
+            available = os.cpu_count() or 1
+        workers = min(4, max(1, available))
+    if type(workers) is not int or not 1 <= workers <= 4:
+        raise ValueError('CHECKPOINT_COMPRESSION_WORKERS')
+    parallel = bool(shutil.which('pigz'))
+    if codec == 'pigz' and not parallel:
+        raise ValueError('CHECKPOINT_PARALLEL_GZIP_UNAVAILABLE')
+    return (f'pigz -1 -p {workers}' if parallel and codec != 'gzip' else 'gzip -1')
+
+
+def encrypt(state, output, *, passphrase_fd=3, workers=None, codec='auto'):
     state, output = Path(state).resolve(), Path(output).absolute()
     if not state.is_dir() or output.is_relative_to(state):
         raise ValueError('CHECKPOINT_ARCHIVE_PATH')
@@ -19,8 +37,8 @@ def encrypt(state, output, *, passphrase_fd=3):
     if temporary.exists() or temporary.is_symlink():
         raise ValueError('CHECKPOINT_TEMP_EXISTS')
     # Both produce the same gzip stream format consumed by every retained
-    # reader. Bound CPU use; gzip remains the dependency-free fallback.
-    compressor = 'pigz -1 -p 2' if shutil.which('pigz') else 'gzip -1'
+    # reader. The public runner may have four CPUs; do not leave half idle.
+    compressor = compression_command(workers, codec=codec)
     started = time.monotonic()
     tar = subprocess.Popen(['tar', '-I', compressor, '-cf', '-', '-C', str(state), '.'],
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -46,6 +64,7 @@ def encrypt(state, output, *, passphrase_fd=3):
             tar.wait()
         temporary.unlink(missing_ok=True)
     print('G11_CHECKPOINT_ENCRYPTION_SECONDS=' + str(round(time.monotonic() - started, 3)), flush=True)
+    print('G11_CHECKPOINT_COMPRESSOR=' + compressor, flush=True)
 
 
 def main():

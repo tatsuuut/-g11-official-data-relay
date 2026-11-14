@@ -147,3 +147,24 @@ fault-injection success alone is not a new live-operation observation.
   The next natural LIVE chain and a natural failure-driven recovery remain
   prospective operation checks. Do not mark the historical gap or an
   unobserved future full cycle as a completed normal-operation success.
+
+
+## November 14: gzip-compatible CPU acceleration
+
+The post-reservation pipeline still encrypts and reads back every complete
+checkpoint. Observed same-day archives were approximately 1.45 GB and contained
+58,000 members. Full encryption/compression took 21-31 seconds per checkpoint,
+and full restoration took 22-28 seconds. Two archives are produced in a normal
+LIVE cycle, making this a useful target without changing forecast logic.
+
+The candidate uses available CPU affinity up to four pigz workers, retains the
+standard gzip tar/AES256 format and falls back to gzip if the optional parallel
+compressor cannot be prepared within fifteen seconds. All encrypted saves,
+exact readbacks and authenticated extraction remain required. A branch-scoped
+read-only CI benchmark compares gzip and two/four pigz workers on a disposable
+saved November 14 checkpoint; every restored file and directory is compared to
+the original by size and SHA256. No benchmark publishes predictions, modifies
+saved evidence, or prints private state contents.
+
+Measured results and production timing must be checked before concluding this
+candidate provides additional deadline margin.

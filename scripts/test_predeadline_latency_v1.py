@@ -146,6 +146,25 @@ class ResearchTests(unittest.TestCase):
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_parallel_compression_uses_available_cpus_up_to_four(self):
+        for cpus, expected in [(1, 1), (2, 2), (4, 4), (16, 4)]:
+            with self.subTest(cpus=cpus), patch.object(archive.os, 'sched_getaffinity', return_value=set(range(cpus))), \
+                    patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
+                self.assertEqual(f'pigz -1 -p {expected}', archive.compression_command())
+        with patch.object(archive.os, 'sched_getaffinity', side_effect=OSError), \
+                patch.object(archive.os, 'cpu_count', return_value=2), \
+                patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
+            self.assertEqual('pigz -1 -p 2', archive.compression_command())
+
+    def test_standard_gzip_fallback_and_invalid_compression_never_run_shell(self):
+        with patch.object(archive.shutil, 'which', return_value=None):
+            self.assertEqual('gzip -1', archive.compression_command())
+            with self.assertRaises(ValueError): archive.compression_command(codec='pigz')
+        for workers in (0, 5, True, '4', -1):
+            with self.subTest(workers=workers), self.assertRaises(ValueError):
+                archive.compression_command(workers)
+        with self.assertRaises(ValueError): archive.compression_command(codec='gzip;false')
+
     def test_failed_archive_keeps_prior_checkpoint_and_removes_partial(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); state = root/'state'; state.mkdir(); output = root/'state.gpg'
@@ -183,17 +202,17 @@ class ArchiveTests(unittest.TestCase):
                     self.fail('Real GPG roundtrip required: ' + probe.stderr.decode(errors='replace'))
                 self.skipTest('local gpg-agent unavailable; mandatory in contract CI')
             try:
-                for compressor in ['gzip', 'pigz']:
+                for compressor, workers in [('gzip', 1), ('pigz', 2), ('pigz', 4)]:
                     if not shutil.which(compressor): continue
-                    output = root/(compressor+'.gpg')
+                    output = root/(compressor+str(workers)+'.gpg')
                     with tempfile.TemporaryFile() as secret:
                         secret.write(b'synthetic-test-only\n'); secret.seek(0)
                         with patch.dict(os.environ, {'GNUPGHOME': str(home)}), \
                                 patch.object(archive.shutil, 'which', return_value=None if compressor=='gzip' else '/usr/bin/pigz'):
-                            archive.encrypt(state, output, passphrase_fd=secret.fileno())
+                            archive.encrypt(state, output, passphrase_fd=secret.fileno(), workers=workers)
                     plaintext = subprocess.run(['gpg', '--homedir', str(home), '--batch', '--yes', '--pinentry-mode', 'loopback',
                         '--passphrase-fd', '0', '--decrypt', str(output)], input=b'synthetic-test-only\n', capture_output=True, check=True).stdout
-                    restored = root/('restored-'+compressor); restored.mkdir()
+                    restored = root/('restored-'+compressor+str(workers)); restored.mkdir()
                     subprocess.run(['tar', '-xzf', '-', '-C', str(restored)], input=plaintext, check=True)
                     self.assertEqual(files, {p.relative_to(restored).as_posix(): p.read_bytes() for p in restored.rglob('*') if p.is_file()})
                     self.assertEqual(files, {p.relative_to(state).as_posix(): p.read_bytes() for p in state.rglob('*') if p.is_file()})
