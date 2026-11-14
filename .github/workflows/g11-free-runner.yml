@@ -435,8 +435,6 @@ jobs:
             echo "G11_PREDEADLINE_CHAIN=${heartbeat}"
             exit 0
           fi
-          # The bounded dispatcher verifies newer active runs before every POST,
-          # including successors whose runner/job has not been allocated yet.
           python3 scripts/predeadline_dispatch_v1.py --day "${OPERATIONAL_DATE}" --mode continuation
 
       - name: Checkout hash-locked research runtime
@@ -1849,12 +1847,13 @@ jobs:
         run: python3 scripts/deme_research_delivery_v1.py --state-root .relay-state --feed .relay-output/feed.json
       - name: Publish coalesced LIVE research from the verified complete checkpoint
         if: >-
-          steps.fast-deme-live.outcome=='success' && steps.publication-state-verified.outputs.ready=='true' &&
+          (steps.fast-deme-live.outcome=='success'||steps.research-isolation.outputs.active=='true') && steps.publication-state-verified.outputs.ready=='true' &&
           (steps.critical-publish.outcome=='success'||steps.critical-retry.outcome=='success')
         continue-on-error: true
         env:
+          GH_TOKEN: ${{github.token}}
           RESEARCH_CHECKPOINT_VERIFIED: ${{steps.publication-state-verified.outputs.ready}}
-        run: python3 scripts/deme_research_delivery_v1.py --state-root .relay-state --feed .relay-output/feed.json
+        run: python3 scripts/isolated_research_runner_v1.py handoff --feed .relay-output/feed.json
       - name: Verify source identity and projected app readback
         id: readback
         if: steps.publish.outcome=='success'&&steps.publish.outputs.immutable_night!='true'
