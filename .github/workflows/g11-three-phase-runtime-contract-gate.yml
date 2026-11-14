@@ -28,6 +28,9 @@ jobs:
   saved-checkpoint-compression-nov14:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/checkpoint-compression-20261114'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 15
     outputs:
       ocb_fixture: ${{steps.checkpoint-benchmark.outputs.ocb_fixture}}
@@ -41,10 +44,15 @@ jobs:
           python3 -c 'import os; print("G11_BENCHMARK_CPUS=" + str(len(os.sched_getaffinity(0))))'
       - name: Prepare standard gzip-compatible parallel compression
         run: command -v pigz || sudo -n apt-get install -y --no-install-recommends pigz
+      - name: Select a current saved November 14 checkpoint for the read-only benchmark
+        id: benchmark-checkpoint
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: python3 scripts/critical_saved_publication_v1.py --day 2026-11-14 --select-restore
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: g11-state-v4-published-2026-11-14-43561755081-1-checkpoint
+          key: ${{steps.benchmark-checkpoint.outputs.cache_key}}
           fail-on-cache-miss: true
       - name: Extract a disposable authenticated saved-state copy
         env:
