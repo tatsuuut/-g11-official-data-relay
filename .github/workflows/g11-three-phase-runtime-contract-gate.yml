@@ -29,6 +29,8 @@ jobs:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/checkpoint-compression-20261114'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      ocb_fixture: ${{steps.checkpoint-benchmark.outputs.ocb_fixture}}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -62,6 +64,7 @@ jobs:
           PYBENCH
           rm -f .relay-cache/state.tgz.gpg
       - name: Benchmark complete encrypted archives and verify every restored byte
+        id: checkpoint-benchmark
         env:
           G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
         run: |
@@ -69,6 +72,24 @@ jobs:
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
           python3 scripts/benchmark_checkpoint_compression_v1.py --state-root "${RUNNER_TEMP}/checkpoint-benchmark-state" --scratch "${RUNNER_TEMP}"
           exec 3<&-
+  authenticated-checkpoint-reader-compatibility:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/checkpoint-compression-20261114'
+    needs: saved-checkpoint-compression-nov14
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{matrix.os}}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify both retained reader generations and reject corruption
+        env:
+          G11_OCB_SYNTHETIC_FIXTURE: ${{needs.saved-checkpoint-compression-nov14.outputs.ocb_fixture}}
+        run: |
+          gpg --version | head -1
+          python3 scripts/benchmark_checkpoint_compression_v1.py --verify-fixture
   saved-miyajima-nov11:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/nov11-delivery-and-missing-race'
     runs-on: ubuntu-24.04

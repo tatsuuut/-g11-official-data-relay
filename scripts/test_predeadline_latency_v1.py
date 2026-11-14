@@ -146,15 +146,21 @@ class ResearchTests(unittest.TestCase):
 
 
 class ArchiveTests(unittest.TestCase):
-    def test_parallel_compression_uses_available_cpus_up_to_four(self):
-        for cpus, expected in [(1, 1), (2, 2), (4, 4), (16, 4)]:
-            with self.subTest(cpus=cpus), patch.object(archive.os, 'sched_getaffinity', return_value=set(range(cpus))), \
-                    patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
-                self.assertEqual(f'pigz -1 -p {expected}', archive.compression_command())
-        with patch.object(archive.os, 'sched_getaffinity', side_effect=OSError), \
-                patch.object(archive.os, 'cpu_count', return_value=2), \
-                patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
-            self.assertEqual('pigz -1 -p 2', archive.compression_command())
+    def test_supported_authenticated_mode_and_legacy_capability_fallback(self):
+        for available, expected in [('--use-ocb-sym\n--force-aead', '--use-ocb-sym'),
+                ('--force-ocb\n--force-aead', '--force-ocb'), ('--force-aead', '--force-aead')]:
+            with self.subTest(available=available), patch.object(archive.subprocess, 'run',
+                    return_value=Mock(returncode=0, stdout=available)):
+                self.assertEqual([expected], archive.authenticated_encryption_options())
+        with patch.object(archive.subprocess, 'run', return_value=Mock(returncode=0, stdout='--symmetric')):
+            self.assertEqual([], archive.authenticated_encryption_options())
+            with self.assertRaises(ValueError): archive.authenticated_encryption_options('ocb')
+        with patch.object(archive.subprocess, 'run') as child:
+            self.assertEqual([], archive.authenticated_encryption_options('legacy'))
+            with self.assertRaises(ValueError): archive.authenticated_encryption_options('--disable-mdc')
+            child.assert_not_called()
+        with patch.object(archive.subprocess, 'run', return_value=Mock(returncode=1, stdout='--force-aead')):
+            self.assertEqual([], archive.authenticated_encryption_options())
 
     def test_standard_gzip_fallback_and_invalid_compression_never_run_shell(self):
         with patch.object(archive.shutil, 'which', return_value=None):
@@ -173,7 +179,8 @@ class ArchiveTests(unittest.TestCase):
             def fail(*a, **kw):
                 output.with_name('state.gpg.tmp').write_bytes(b'incomplete')
                 return Mock(returncode=2)
-            with patch.object(archive.os, 'fstat'), patch.object(archive.subprocess, 'Popen', return_value=tar), \
+            with patch.object(archive.os, 'fstat'), patch.object(archive, 'authenticated_encryption_options', return_value=[]), \
+                    patch.object(archive.subprocess, 'Popen', return_value=tar), \
                     patch.object(archive.subprocess, 'run', side_effect=fail):
                 with self.assertRaisesRegex(RuntimeError, 'ENCRYPTION_FAILED'):
                     archive.encrypt(state, output)

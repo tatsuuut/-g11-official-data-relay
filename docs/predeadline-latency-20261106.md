@@ -149,22 +149,35 @@ fault-injection success alone is not a new live-operation observation.
   unobserved future full cycle as a completed normal-operation success.
 
 
-## November 14: gzip-compatible CPU acceleration
+## November 14: authenticated full-checkpoint acceleration
 
 The post-reservation pipeline still encrypts and reads back every complete
-checkpoint. Observed same-day archives were approximately 1.45 GB and contained
-58,000 members. Full encryption/compression took 21-31 seconds per checkpoint,
-and full restoration took 22-28 seconds. Two archives are produced in a normal
-LIVE cycle, making this a useful target without changing forecast logic.
+checkpoint. Observed same-day archives were approximately 1.45 GB, with 4.27 GB
+of source files and 58,108 members. A read-only comparison on an authenticated
+saved November 14 state found gzip encryption at 47.346 seconds, two-worker
+pigz at 22.021 seconds, and four-worker pigz at 21.144 seconds. Every restored
+file/directory matched, and source state remained identical. The CPU-only
+change is not adopted: less than one second per checkpoint is insufficient.
 
-The candidate uses available CPU affinity up to four pigz workers, retains the
-standard gzip tar/AES256 format and falls back to gzip if the optional parallel
-compressor cannot be prepared within fifteen seconds. All encrypted saves,
-exact readbacks and authenticated extraction remain required. A branch-scoped
-read-only CI benchmark compares gzip and two/four pigz workers on a disposable
-saved November 14 checkpoint; every restored file and directory is compared to
-the original by size and SHA256. No benchmark publishes predictions, modifies
-saved evidence, or prints private state contents.
+The revised candidate retains two-worker pigz (standard gzip fallback), complete
+tar contents, AES256, passphrase handling, exact encrypted readbacks and
+GPG-authenticated restoration before extraction. It selects the writer's
+supported authenticated OCB option, preferring --use-ocb-sym, then --force-ocb,
+then the older --force-aead alias. A writer without these capabilities retains
+its existing authenticated CFB+MDC mode. An encryption failure never triggers
+a downgrade/retry under a different mode.
 
-Measured results and production timing must be checked before concluding this
-candidate provides additional deadline margin.
+GnuPG documents OCB symmetric decryption support since version 2.2.21:
+https://www.gnupg.org/documentation/manuals/gnupg/OpenPGP-Options.html
+The main relay and pinned WILD4 reader run on Ubuntu 24.04. Separate CI jobs
+verify a public synthetic OCB fixture with ordinary GPG readers on both Ubuntu
+22.04 and 24.04, including rejection of truncation, tampering and wrong passwords.
+Only the synthetic fixture is passed between these jobs; private state is never
+exported as an artifact or job output.
+
+A read-only branch-scoped benchmark compares full AES256 CFB+MDC and AES256 OCB
+archives using a disposable saved checkpoint. Both are decrypted and fully
+restored, and every file/directory is compared using size and SHA256. Only
+aggregate timings and success/failure codes are logged. No prediction is
+published or regenerated, and no saved source, LOCK, or accounting is changed.
+Measured results and production timing must be checked before rollout.

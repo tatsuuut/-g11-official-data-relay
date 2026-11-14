@@ -9,16 +9,10 @@ import subprocess
 import time
 
 
-def compression_command(workers=None, *, codec='auto'):
-    """Use at most four available CPUs; retain the standard gzip wire format."""
+def compression_command(workers=2, *, codec='auto'):
+    """Retain the existing two-worker gzip format; overrides are for audits."""
     if codec not in ('auto', 'gzip', 'pigz'):
         raise ValueError('CHECKPOINT_COMPRESSION_CODEC')
-    if workers is None:
-        try:
-            available = len(os.sched_getaffinity(0))
-        except (AttributeError, OSError):
-            available = os.cpu_count() or 1
-        workers = min(4, max(1, available))
     if type(workers) is not int or not 1 <= workers <= 4:
         raise ValueError('CHECKPOINT_COMPRESSION_WORKERS')
     parallel = bool(shutil.which('pigz'))
@@ -27,7 +21,29 @@ def compression_command(workers=None, *, codec='auto'):
     return (f'pigz -1 -p {workers}' if parallel and codec != 'gzip' else 'gzip -1')
 
 
-def encrypt(state, output, *, passphrase_fd=3, workers=None, codec='auto'):
+def authenticated_encryption_options(mode='auto'):
+    """Prefer supported AES256-OCB; older writers retain authenticated CFB.
+
+    Ordinary GPG decrypt readers support OCB from 2.2.21 onward. Both retained
+    Ubuntu reader generations are verified by the checkpoint contract CI.
+    Never fall back after an encryption failure; only absent capability permits
+    the existing CFB+MDC writer.
+    """
+    if mode not in ('auto', 'legacy', 'ocb'):
+        raise ValueError('CHECKPOINT_AUTHENTICATED_MODE')
+    if mode == 'legacy':
+        return []
+    probe = subprocess.run(['gpg', '--dump-options'], capture_output=True, text=True, check=False)
+    supported = set(probe.stdout.splitlines()) if probe.returncode == 0 else set()
+    for option in ('--use-ocb-sym', '--force-ocb', '--force-aead'):
+        if option in supported:
+            return [option]
+    if mode == 'ocb':
+        raise ValueError('CHECKPOINT_OCB_UNAVAILABLE')
+    return []
+
+
+def encrypt(state, output, *, passphrase_fd=3, workers=2, codec='auto', mode='auto'):
     state, output = Path(state).resolve(), Path(output).absolute()
     if not state.is_dir() or output.is_relative_to(state):
         raise ValueError('CHECKPOINT_ARCHIVE_PATH')
@@ -36,9 +52,10 @@ def encrypt(state, output, *, passphrase_fd=3, workers=None, codec='auto'):
     temporary = output.with_name(output.name + '.tmp')
     if temporary.exists() or temporary.is_symlink():
         raise ValueError('CHECKPOINT_TEMP_EXISTS')
-    # Both produce the same gzip stream format consumed by every retained
-    # reader. The public runner may have four CPUs; do not leave half idle.
+    # Complete standard gzip tar, AES256 and authenticated GPG decryption are
+    # retained. Do not trade source coverage or integrity for latency.
     compressor = compression_command(workers, codec=codec)
+    encryption_options = authenticated_encryption_options(mode)
     started = time.monotonic()
     tar = subprocess.Popen(['tar', '-I', compressor, '-cf', '-', '-C', str(state), '.'],
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -47,6 +64,7 @@ def encrypt(state, output, *, passphrase_fd=3, workers=None, codec='auto'):
             'gpg', '--batch', '--yes', '--pinentry-mode', 'loopback',
             '--passphrase-fd', str(passphrase_fd), '--symmetric',
             '--cipher-algo', 'AES256', '--compress-algo', 'none',
+            *encryption_options,
             '--output', str(temporary),
         ], stdin=tar.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             pass_fds=(passphrase_fd,), check=False)
@@ -65,6 +83,7 @@ def encrypt(state, output, *, passphrase_fd=3, workers=None, codec='auto'):
         temporary.unlink(missing_ok=True)
     print('G11_CHECKPOINT_ENCRYPTION_SECONDS=' + str(round(time.monotonic() - started, 3)), flush=True)
     print('G11_CHECKPOINT_COMPRESSOR=' + compressor, flush=True)
+    print('G11_CHECKPOINT_AUTHENTICATED_MODE=' + ('AES256_OCB' if encryption_options else 'AES256_CFB_MDC'), flush=True)
 
 
 def main():

@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-    paths: [.github/workflows/g11-free-runner.yml,scripts/daily_runtime_bootstrap_v1.py,scripts/hot_delta_transport_v1.py]
+    paths: [.github/workflows/g11-free-runner.yml,scripts/daily_runtime_bootstrap_v1.py,scripts/hot_delta_transport_v1.py,scripts/encrypt_runtime_state_v1.py]
   workflow_dispatch:
     inputs:
       phase:
@@ -181,16 +181,6 @@ jobs:
         run: |
           echo 'G11_PREDEADLINE_RERUN_REQUIRES_FRESH_DISPATCH' >&2
           exit 1
-      - name: Prepare optional parallel gzip acceleration
-        run: |
-          set -euo pipefail
-          if ! command -v pigz >/dev/null 2>&1; then
-            if ! timeout 15s sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pigz >/dev/null 2>&1; then
-              echo 'G11_PARALLEL_GZIP=STANDARD_GZIP_FALLBACK'
-              exit 0
-            fi
-          fi
-          echo 'G11_PARALLEL_GZIP=AVAILABLE'
       - name: Select newest same-day persisted checkpoint
         if: steps.scheduled.outputs.phase=='predeadline'||steps.scheduled.outputs.phase=='night'
         id: checkpoint-choice
