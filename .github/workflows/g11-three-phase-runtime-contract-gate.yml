@@ -25,6 +25,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ten-minute-frozen-collector:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/predeadline-ten-minute-start-20261114'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 2a946d6403a9154d8aeb9bee20f014fa91b0802f
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-capture-frozen
+          persist-credentials: false
+          sparse-checkout: |
+            g11/canonical/official_pipeline.py
+            g11/canonical/daily_runtime_boundary_v1.py
+            g11/relay/predeadline_nowait_v1.py
+          sparse-checkout-cone-mode: false
+      - name: Exercise the exact retained collector without network or inference
+        env:
+          G11_RETRY_SOURCE_ROOT: .g11-capture-frozen
+          PYTHONPATH: scripts
+        run: python3 -m unittest test_predeadline_capture_window_v1 test_predeadline_content_retry_v1 -v
   saved-research-isolation-nov14:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/research-operation-isolation-20261114'
     runs-on: ubuntu-24.04
@@ -580,7 +605,9 @@ jobs:
         run: python3 -m unittest discover -s scripts -p test_racer_period_source_v1.py -v
 
       - name: Verify bounded content retry with the reviewed collector
-        run: python3 -m unittest discover -s scripts -p test_predeadline_content_retry_v1.py -v
+        run: |
+          python3 -m unittest discover -s scripts -p test_predeadline_content_retry_v1.py -v
+          python3 -m unittest discover -s scripts -p test_predeadline_capture_window_v1.py -v
 
       - name: Verify excluded rows cannot block the frozen critical lane
         env:

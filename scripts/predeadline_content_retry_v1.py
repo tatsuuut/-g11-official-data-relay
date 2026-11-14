@@ -32,7 +32,7 @@ def _report(status, **fields):
         {'status': status, **fields}, sort_keys=True), flush=True)
 
 
-def select_retry(first, plan, now):
+def select_retry(first, plan, now, *, early_capture=False):
     """Select existing, same-day content pauses; do not retry HTTP failures."""
     if now.utcoffset() != timedelta(hours=9):
         raise ValueError('CONTENT_RETRY_TIMEZONE')
@@ -61,8 +61,13 @@ def select_retry(first, plan, now):
                 or task['RACE_KEY'][:8] != now.strftime('%Y%m%d')
                 or any(t.utcoffset() != timedelta(hours=9)
                        or t.date() != now.date() for t in (due, deadline, retry_at))
-                or due > now or deadline - due != timedelta(minutes=7)
+                or deadline - due != timedelta(minutes=7)
                 or sid in selected):
+            raise ValueError('CONTENT_RETRY_SOURCE_BINDING')
+        if early_capture:
+            from predeadline_capture_window_v1 import effective_due
+            due = effective_due(due, deadline)
+        if due > now:
             raise ValueError('CONTENT_RETRY_SOURCE_BINDING')
         delay = max(0, (retry_at - now).total_seconds())
         if delay > MAX_WAIT_SECONDS or (deadline - now).total_seconds() < MIN_REMAINING_SECONDS:
@@ -72,7 +77,7 @@ def select_retry(first, plan, now):
     return selected, max(delays), 'READY'
 
 
-def _restricted_collector(original, selected, stop_at):
+def _restricted_collector(original, selected, stop_at, *, early_capture=False):
     collector = inspect.unwrap(original)
     source = inspect.getsource(collector)
     if hashlib.sha256(source.encode()).hexdigest() not in COLLECTOR_SHAS:
@@ -80,14 +85,22 @@ def _restricted_collector(original, selected, stop_at):
     anchor = '            task = plan[task_index]\n'
     if source.count(anchor) != 1:
         raise ValueError('CONTENT_RETRY_SOURCE_CONTRACT')
-    source = source.replace(anchor, anchor +
-        '            if task["SOURCE_ID"] not in _retry_source_ids:\n'
-        '                task_index += 1\n'
-        '                continue\n'
-        '            if self.client.clock() >= _retry_stop_at:\n'
-        '                break\n', 1)
+    if selected is not None:
+        source = source.replace(anchor, anchor +
+            '            if task["SOURCE_ID"] not in _retry_source_ids:\n'
+            '                task_index += 1\n'
+            '                continue\n'
+            '            if self.client.clock() >= _retry_stop_at:\n'
+            '                break\n', 1)
     namespace = dict(collector.__globals__)
-    namespace.update(_retry_source_ids=frozenset(selected), _retry_stop_at=stop_at)
+    namespace.update(_retry_source_ids=frozenset(selected or []), _retry_stop_at=stop_at)
+    if early_capture:
+        from predeadline_capture_window_v1 import effective_due
+        anchor = '            deadline = _parse_jst(task["MUST_FINISH_BEFORE_JST"])\n'
+        if source.count(anchor) != 1:
+            raise ValueError('EARLY_CAPTURE_COLLECTOR_CONTRACT')
+        source = source.replace(anchor, anchor+'            due = _capture_due(due, deadline)\n', 1)
+        namespace['_capture_due'] = effective_due
     exec(compile(textwrap.dedent(source), collector.__code__.co_filename,
                  'exec'), namespace)
     restricted = namespace[collector.__name__]
@@ -143,8 +156,9 @@ def merge_attempts(first, second):
     return result
 
 
-def collect_with_retry(original, runner, *, max_requests, early_wait_seconds):
-    first = original(runner, max_requests=max_requests,
+def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, early_capture=False):
+    capture = _restricted_collector(original,None,None,early_capture=True) if early_capture else original
+    first = capture(runner, max_requests=max_requests,
                      early_wait_seconds=early_wait_seconds)
     # The existing nowait caller must opt in. Other callers retain their policy.
     if early_wait_seconds != 0:
@@ -155,7 +169,7 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds):
             return first
         morning = runner.store.load_verified_snapshot('morning', 'official-day-input')
         plan = morning['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN']
-        selected, delay, status = select_retry(first, plan, runner.client.clock())
+        selected, delay, status = select_retry(first, plan, runner.client.clock(),early_capture=early_capture)
     except (KeyError, TypeError, ValueError) as exc:
         _report('SELECTION_SKIPPED', error_type=type(exc).__name__)
         return first
@@ -167,12 +181,12 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds):
         runner.sleeper(delay)
     now = runner.client.clock()
     # A delayed wake-up must not turn the bounded retry into a last-second run.
-    selected_after_wait, _, status = select_retry(first, plan, now)
+    selected_after_wait, _, status = select_retry(first, plan, now,early_capture=early_capture)
     if selected_after_wait != selected:
         _report('WAKEUP_SKIPPED', reason=status)
         return first
     restricted = _restricted_collector(original, selected,
-        now + timedelta(seconds=RETRY_START_WINDOW_SECONDS))
+        now + timedelta(seconds=RETRY_START_WINDOW_SECONDS),early_capture=early_capture)
     second = restricted(runner, max_requests=min(max_requests, MAX_RETRY_SOURCES),
                         early_wait_seconds=0)
     _report('ATTEMPTED_ONCE', source_ids=selected, acquired=second['ACQUIRED'],
@@ -182,7 +196,7 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds):
 
 
 @contextmanager
-def bounded_content_retry():
+def bounded_content_retry(*, early_capture=False):
     from g11.canonical.official_pipeline import CanonicalRunner
     original = CanonicalRunner.run_due_predeadline
     source = inspect.getsource(original)
@@ -193,8 +207,15 @@ def bounded_content_retry():
 
     @wraps(original)
     def bounded(self, *, max_requests=48, early_wait_seconds=300):
+        from predeadline_capture_window_v1 import enabled
+        advance = (early_capture and early_wait_seconds == 0
+            and enabled(self.client.clock())
+            and getattr(CanonicalRunner,'_g11_ten_minute_odds_window',False))
+        if advance:
+            _report('TEN_MINUTE_CAPTURE',capture_lead_minutes=10,
+                    saved_plan_rewritten=False,clock_shift_seconds=0)
         return collect_with_retry(original, self, max_requests=max_requests,
-                                  early_wait_seconds=early_wait_seconds)
+                                  early_wait_seconds=early_wait_seconds,early_capture=advance)
 
     CanonicalRunner.run_due_predeadline = bounded
     _report('ADAPTER_APPLIED')
