@@ -41,3 +41,32 @@ saved-only retries, independent sidecar failures and workflow persistence routin
 are covered by the required runtime contract gate. Production timing still needs
 November 8 observations. Keep reporting per-race server readback remaining time
 and five-minute-target misses; do not label a green job as timely device arrival.
+
+
+## November 14 capture-window reservation
+
+The observed 13:00 JST Toda 6R and Biwako 6R forecasts were LOCKed before
+cutoff, but the audited server readback finished at 13:00:31.674. This is
+server evidence, not a device-arrival timestamp or proof of first visibility.
+The previous run dispatched its successor at 12:54:18 but kept the shared
+LIVE slot until 12:56:40 while performing optional research and persistence.
+
+After successful critical publication, the short LIVE path now reads the
+verified morning plan and formal scope. If an unsaved, unexpired source is
+already due or due within 300 seconds, it defers optional dependency setup,
+WILD/P3 research sidecars and the research-source checkout. An unreadable or
+invalid schedule also defers only optional work. Expired and already saved
+sources do not prevent research during an otherwise clear window.
+
+The complete encrypted post-delivery checkpoint still runs and is read back,
+so delivery receipts remain durable. The early encrypted checkpoint, OIDC
+publication, next-cycle dispatch, WILD4 handoff, frozen runtime, prediction
+cutoff guards, MORNING/NIGHT routing and saved LOCK bytes retain their existing
+authority. Deferred research is explicitly reported and is not counted as
+completed. Prospective research may have fewer timely samples during busy
+windows; no post-cutoff prediction is promoted to a timely one.
+
+The reservation removes optional contention; it does not guarantee runner
+startup latency, a five-minute publication margin, or device receipt. Validate
+new production runs using G11_PREDEADLINE_PUBLICATION_TIMING and the explicit
+G11_FAST_RESEARCH_BUDGET log, preserving observed late deliveries as evidence.
