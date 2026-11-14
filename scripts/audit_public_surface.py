@@ -9,6 +9,13 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    '.github/actions/g11-research-night-input/action.yml',
+    '.github/workflows/g11-isolated-live-research.yml',
+    'scripts/research_state_isolation_v1.py',
+    'scripts/isolated_research_runner_v1.py',
+    'scripts/audit_research_isolation_v1.py',
+    'scripts/test_research_state_isolation_v1.py',
+    'docs/research-operation-isolation-20261114.md',
     "scripts/benchmark_checkpoint_compression_v1.py",
     "scripts/morning_footprint_persistence_v1.py",
     "scripts/test_morning_footprint_persistence_v1.py",

@@ -320,13 +320,23 @@ jobs:
           printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
       - name: Verify scoped PREDEADLINE authority recovery regression
         if: steps.due.outputs.phase=='predeadline'
-        run: |
-          python3 -m py_compile scripts/daily_predeadline_authority_recovery_v1.py
-          python3 -m unittest discover -s scripts -p test_daily_predeadline_authority_recovery_v1.py -q
-          python3 -m unittest discover -s scripts -p test_predeadline_race_isolation_v1.py -q
+        run: PYTHONPATH=scripts python3 -m unittest test_daily_predeadline_authority_recovery_v1 test_predeadline_race_isolation_v1 -q
       - name: Select short LIVE cycle from November 8
         id: fast-lane
         run: python3 scripts/predeadline_fast_lane_v1.py select --day '${{steps.due.outputs.operational_date}}' --phase '${{steps.due.outputs.phase}}' --frozen '${{steps.authority.outputs.frozen}}' --rescue '${{steps.authority.outputs.rescue_bootstrap}}'
+      - name: Activate separate saved-input research
+        if: steps.fast-lane.outputs.enabled=='true'
+        id: research-isolation
+        run: python3 scripts/isolated_research_runner_v1.py activate --day '${{steps.due.outputs.operational_date}}'
+      - name: Import closed research only at NIGHT
+        if: steps.due.outputs.phase=='night'&&steps.authority.outputs.frozen=='true'&&steps.authority.outputs.rescue_bootstrap!='true'&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&env.G11_R13!='true'
+        id: research-night
+        uses: ./.github/actions/g11-research-night-input
+        env:
+          GH_TOKEN: ${{github.token}}
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        with:
+          operational-date: ${{steps.due.outputs.operational_date}}
       - name: Capture and lock dependency-free PREDEADLINE critical lane
         if: steps.due.outputs.phase=='predeadline'
         id: critical
@@ -575,15 +585,8 @@ jobs:
               'EXCLUDED_PAST_DEADLINE':past,'PREVIOUS_NIGHT_UNCHANGED':'PASS',
               'PREVIOUS_NIGHT_CANONICAL_SHA256':checkpoint['feed_sha256']},sort_keys=True))
           PYREAD
-      - name: Reserve the next capture window before optional research
-        id: research-budget
-        if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&steps.critical-publish.outcome=='success'
-        working-directory: .g11-private
-        env:
-          G11_PRIVATE_REPO_TOKEN: ""
-        run: python3 -S ../scripts/predeadline_fast_lane_v1.py budget --day '${{steps.due.outputs.operational_date}}' --state-root '${{github.workspace}}/.relay-state'
       - name: Install pinned private runtime dependencies
-        if: env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true' && steps.research-budget.outputs.deferred!='true'
+        if: env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true' && steps.research-isolation.outputs.active!='true' && steps.research-night.outputs.waiting!='true'
         uses: ./.github/actions/g11-public-python
         with:
           profile: ${{ steps.due.outputs.phase == 'dry-run' && 'parser' || 'runtime' }}
@@ -699,7 +702,7 @@ jobs:
           done
       - name: Retain saved-input research without another official capture
         id: fast-sidecars
-        if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&steps.research-budget.outputs.deferred!='true'
+        if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&steps.research-isolation.outputs.active!='true'
         continue-on-error: true
         working-directory: .g11-private
         env:
@@ -707,7 +710,7 @@ jobs:
         run: python3 ../scripts/predeadline_fast_lane_v1.py sidecars --day '${{steps.due.outputs.operational_date}}' --state-root '${{github.workspace}}/.relay-state'
       - name: Run the private fail-closed relay
         id: runtime
-        if: steps.fast-lane.outputs.enabled!='true'
+        if: steps.fast-lane.outputs.enabled!='true'&&steps.research-night.outputs.waiting!='true'
         continue-on-error: true
         working-directory: .g11-private
         env:
@@ -889,7 +892,7 @@ jobs:
           }, sort_keys=True))
           PY
       - name: P3 research source
-        if: steps.research-budget.outputs.deferred!='true'&&((steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'))&&steps.due.outputs.phase!='dry-run'&&env.G11_R13!='true'&&!contains('2026-10-16,2026-10-18',steps.due.outputs.operational_date)
+        if: steps.research-isolation.outputs.active!='true'&&steps.research-night.outputs.waiting!='true'&&((steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'))&&steps.due.outputs.phase!='dry-run'&&env.G11_R13!='true'&&!contains('2026-10-16,2026-10-18',steps.due.outputs.operational_date)
         id: deme-source
         continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -930,7 +933,7 @@ jobs:
           timeout 90 python3 scripts/saved_deme_recovery_v1.py --day '${{steps.due.outputs.operational_date}}' \
             --state-root .relay-state --source-root .g11-deme-research --feed .relay-output/feed.json
       - name: Encrypt changed state before persistence
-        if: always()&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.due.outputs.phase!='dry-run'
+        if: always()&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.due.outputs.phase!='dry-run'&&steps.research-night.outputs.waiting!='true'
         id: encrypt-state
         env:
           G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
@@ -959,7 +962,7 @@ jobs:
           key: g11-state-v3-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       - name: Gate NIGHT publication on fully settled research
         id: night-ready
-        if: (steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&(steps.fast-sidecars.outcome=='success'||(steps.research-budget.outputs.deferred=='true'&&steps.critical-publish.outcome=='success')))
+        if: (steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&(steps.fast-sidecars.outcome=='success'||steps.research-isolation.outputs.active=='true'))
         env:
           FEED: .relay-output/feed.json
           OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
@@ -1807,7 +1810,7 @@ jobs:
           fi
       - name: Persist delivery receipts
         if: >-
-          always() && !cancelled() && steps.due.outputs.phase != 'dry-run' &&
+          always() && !cancelled() && steps.due.outputs.phase != 'dry-run' && steps.research-night.outputs.waiting!='true' &&
           (steps.due.outputs.phase != 'predeadline' || steps.publish.outcome == 'success' || steps.deme-live.outcome == 'success')
         id: delivery-state
         env:
@@ -1838,7 +1841,6 @@ jobs:
         uses: ./.github/actions/g11-publication-checkpoint
         with:
           cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}
-      # Before the first due race, a verified idle LIVE run keeps its MORNING feed.
       - name: Publish persisted LIVE research after predictions
         if: steps.deme-live.outcome=='success'&&steps.delivery-checkpoint.outputs.ready=='true'&&(steps.publish.outcome=='success'||(steps.fast-lane.outputs.enabled=='true'&&(steps.critical-publish.outcome=='success'||steps.critical-retry.outcome=='success')))
         continue-on-error: true
@@ -2064,9 +2066,9 @@ jobs:
           EARLY_PUBLICATION: ${{steps.critical-publish.outcome}}
           RETRY_PUBLICATION: ${{steps.critical-retry.outcome}}
           RESEARCH_SIDECARS: ${{steps.fast-sidecars.outcome}}
-          RESEARCH_DEFERRED: ${{steps.research-budget.outputs.deferred}}
+          RESEARCH_DEFERRED: ${{steps.research-isolation.outputs.active}}
         run: |
-          echo "G11_SHORT_CYCLE_DELIVERY=${EARLY_PUBLICATION} RETRY=${RETRY_PUBLICATION} RESEARCH=${RESEARCH_SIDECARS} DEFERRED=${RESEARCH_DEFERRED}"
+          echo "G11_SHORT_CYCLE_DELIVERY=${EARLY_PUBLICATION} RETRY=${RETRY_PUBLICATION} RESEARCH=${RESEARCH_SIDECARS} SEPARATE_WORKFLOW=${RESEARCH_DEFERRED}"
           test "${EARLY_PUBLICATION}" = success || test "${RETRY_PUBLICATION}" = success
           test "${RESEARCH_SIDECARS}" = success || test "${RESEARCH_DEFERRED}" = true
       - name: Bootstrap PREDEADLINE after a verified public MORNING
@@ -2249,7 +2251,6 @@ jobs:
           CHECK
 
 
-# Verified paths
 
 
 

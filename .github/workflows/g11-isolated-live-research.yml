@@ -1,0 +1,125 @@
+name: independent saved-input research
+run-name: RESEARCH-${{github.event.workflow_run.id}}
+on:
+  workflow_run:
+    workflows: [runtime sync]
+    types: [in_progress]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+# This group never shares the canonical LIVE/NIGHT writer's serialized slot.
+concurrency:
+  group: g11-isolated-saved-input-research
+  cancel-in-progress: false
+
+jobs:
+  saved-research:
+    if: vars.G11_RELAY_ENABLED == 'true' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Tokyo
+      G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
+      G11_OIDC_AUDIENCE: g11-race-lab
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Select an activated canonical input checkpoint
+        id: input
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: python3 scripts/isolated_research_runner_v1.py select-event
+      - name: Prepare optional standard gzip acceleration
+        if: steps.input.outputs.active=='true'
+        run: python3 -S scripts/encrypt_runtime_state_v1.py --prepare-gzip
+      - name: Restore exact canonical input without acquiring official data
+        if: steps.input.outputs.active=='true'
+        id: canonical-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.input.outputs.source_key}}
+          fail-on-cache-miss: true
+      - name: Authenticate the input before exposing its disposable copy
+        if: steps.input.outputs.active=='true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          test '${{steps.canonical-cache.outputs.cache-matched-key}}' = '${{steps.input.outputs.source_key}}'
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 scripts/isolated_research_runner_v1.py decode --destination .research-state
+          exec 3<&-
+          rm -f .relay-cache/state.tgz.gpg
+      - name: Require activated normal operation and decide the capture window
+        if: steps.input.outputs.active=='true'
+        id: window
+        run: python3 scripts/isolated_research_runner_v1.py prepare-input --state-root .research-state --day '${{steps.input.outputs.day}}'
+      - name: Restore the same frozen source for read-only research
+        if: steps.window.outputs.active=='true'
+        run: python3 scripts/daily_runtime_bootstrap_v1.py prepare --state-root .research-state --operational-date '${{steps.input.outputs.day}}' --phase predeadline --source-root .g11-private
+      - name: Restore only the separate research output namespace
+        if: steps.window.outputs.active=='true' && steps.input.outputs.research_key!=''
+        id: research-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.input.outputs.research_key}}
+          fail-on-cache-miss: true
+      - name: Authenticate prior research outputs
+        if: steps.research-cache.outputs.cache-hit=='true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          test '${{steps.research-cache.outputs.cache-matched-key}}' = '${{steps.input.outputs.research_key}}'
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 scripts/isolated_research_runner_v1.py decode --destination .research-previous
+          exec 3<&-
+      - name: Prepare dependencies only for an open research window
+        if: steps.window.outputs.active=='true' && steps.window.outputs.closing!='true'
+        uses: ./.github/actions/g11-public-python
+      - name: Checkout the pinned observation-only research source
+        if: steps.window.outputs.active=='true' && steps.window.outputs.closing!='true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 80f17be765f135d85e4b0efd7aa0b4d8c9417c14
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-deme-research
+          persist-credentials: false
+          fetch-depth: 1
+          sparse-checkout: g11/canonical/deme_discovery*
+          sparse-checkout-cone-mode: false
+      - name: Run research only and export an allowlisted bundle
+        if: steps.window.outputs.active=='true'
+        id: research
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: python3 scripts/isolated_research_runner_v1.py run --state-root .research-state --day '${{steps.input.outputs.day}}' --source-key '${{steps.input.outputs.source_key}}'
+      - name: Encrypt separate research outputs
+        if: steps.research.outcome=='success' && steps.research.outputs.no_change!='true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          mkdir -p .relay-cache .relay-output
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 scripts/encrypt_runtime_state_v1.py --state-root .research-export --output .relay-cache/state.tgz.gpg
+          exec 3<&-
+      - name: Persist and read back only the isolated research namespace
+        if: steps.research.outcome=='success' && steps.research.outputs.no_change!='true'
+        id: persisted
+        uses: ./.github/actions/g11-publication-checkpoint
+        with:
+          cache-key: g11-research-v1-${{steps.input.outputs.day}}-${{github.run_id}}-${{github.run_attempt}}
+      - name: Publish only the separate research display
+        if: steps.persisted.outputs.ready=='true' && steps.research.outputs.closing!='true'
+        env:
+          RESEARCH_CHECKPOINT_VERIFIED: ${{steps.persisted.outputs.ready}}
+        run: python3 scripts/isolated_research_runner_v1.py publish --state-root .research-state --day '${{steps.input.outputs.day}}'

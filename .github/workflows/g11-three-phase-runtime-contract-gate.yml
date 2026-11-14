@@ -25,6 +25,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  saved-research-isolation-nov14:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/research-operation-isolation-20261114'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Select a current canonical checkpoint without collecting official data
+        id: input
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: python3 scripts/critical_saved_publication_v1.py --day 2026-11-14 --select-restore
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.input.outputs.cache_key}}
+          fail-on-cache-miss: true
+      - name: Authenticate a disposable saved-state copy
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 scripts/isolated_research_runner_v1.py decode --destination .research-audit-state
+          exec 3<&-
+          rm -f .relay-cache/state.tgz.gpg
+      - name: Restore the retained frozen source without production writes
+        run: python3 scripts/daily_runtime_bootstrap_v1.py prepare --state-root .research-audit-state --operational-date 2026-11-14 --phase predeadline --source-root .g11-private
+      - uses: ./.github/actions/g11-public-python
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 80f17be765f135d85e4b0efd7aa0b4d8c9417c14
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-deme-research
+          persist-credentials: false
+          sparse-checkout: g11/canonical/deme_discovery*
+          sparse-checkout-cone-mode: false
+      - name: Verify research-only writes, repeated overlay, and the real frozen NIGHT seal
+        env:
+          G11_APP_ORIGIN: https://g11-race-lab.higatatsunori2.chatgpt.site
+          G11_PRIVATE_REPO_TOKEN: ""
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: >-
+          python3 scripts/audit_research_isolation_v1.py --state .research-audit-state
+          --source .g11-private --deme-source .g11-deme-research --day 2026-11-14
+          --source-key '${{steps.input.outputs.cache_key}}'
   saved-checkpoint-compression-nov14:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/checkpoint-compression-20261114'
     runs-on: ubuntu-24.04
@@ -496,6 +547,7 @@ jobs:
           set -euo pipefail
           "$(go env GOPATH)/bin/actionlint" \
             .github/workflows/g11-free-runner.yml \
+            .github/workflows/g11-isolated-live-research.yml \
             .github/workflows/g11-explicit-night-dispatcher.yml \
             .github/workflows/g11-three-phase-runtime-contract-gate.yml
 
@@ -506,6 +558,9 @@ jobs:
 
       - name: Verify November 8 short LIVE cycle and saved-only retries
         run: python3 -m unittest discover -s scripts -p test_predeadline_fast_lane_v1.py -v
+
+      - name: Verify isolated research bundles and NIGHT-only handover
+        run: python3 -m unittest discover -s scripts -p test_research_state_isolation_v1.py -v
 
       - name: Audit three runtime phases
         run: python3 scripts/audit_three_phase_runtime_contract.py --private-root .g11-private

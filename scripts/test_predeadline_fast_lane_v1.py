@@ -218,20 +218,19 @@ class ResearchBudgetTests(TestCase):
         self.assertFalse(result['deferred'])
         self.assertEqual([], active)
 
-    def test_workflow_defers_optional_tail_but_keeps_verified_receipt_checkpoint(self):
+    def test_workflow_isolates_research_but_keeps_verified_receipt_checkpoint(self):
         text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
         def step(name): return text.split('      - name: '+name+'\n', 1)[1].split('      - name:', 1)[0]
-        guard = step('Reserve the next capture window before optional research')
+        guard = step('Activate separate saved-input research')
         self.assertIn("steps.fast-lane.outputs.enabled=='true'", guard)
-        self.assertIn("steps.critical-publish.outcome=='success'", guard)
-        self.assertLess(text.index('      - name: Reserve the next capture'), text.index('      - name: Install pinned'))
+        self.assertLess(text.index('      - name: Activate separate saved-input research'), text.index('      - name: Capture and lock'))
         for name in ('Install pinned private runtime dependencies',
                      'Retain saved-input research without another official capture', 'P3 research source'):
-            self.assertIn("steps.research-budget.outputs.deferred!='true'", step(name))
+            self.assertIn("steps.research-isolation.outputs.active!='true'", step(name))
         # The second encrypted checkpoint persists the successful delivery
         # receipt even when no optional research ran. No durability shortcut.
         self.assertNotIn('research-budget', step('Encrypt changed state before persistence'))
-        self.assertIn("steps.research-budget.outputs.deferred=='true'&&steps.critical-publish.outcome=='success'",
+        self.assertIn("steps.research-isolation.outputs.active=='true'",
                       step('Gate NIGHT publication on fully settled research'))
         self.assertIn("steps.encrypt-state.outputs.ready=='true'&&steps.night-ready.outputs.allowed=='true'",
                       step('Persist complete state before publication'))
