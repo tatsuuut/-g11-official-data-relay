@@ -70,3 +70,14 @@ The reservation removes optional contention; it does not guarantee runner
 startup latency, a five-minute publication margin, or device receipt. Validate
 new production runs using G11_PREDEADLINE_PUBLICATION_TIMING and the explicit
 G11_FAST_RESEARCH_BUDGET log, preserving observed late deliveries as evidence.
+
+
+The first revised production run (43559528617) verified Amagasaki 8R at
+14:06:49.328 JST, 130.672 seconds before its 14:09 cutoff, and preserved the
+post-delivery checkpoint. Its reservation used the conservative
+BUDGET_UNVERIFIED fallback: the scheduling reader had omitted the critical
+lane's reviewed official-input compatibility context. The reader now uses that
+same context when assessing the verified morning scope. A regression requires
+admitted scope to be read within that context and confirms its restoration.
+Unexpected read failures report only a fixed stage and exception type, never
+exception messages or credentials.

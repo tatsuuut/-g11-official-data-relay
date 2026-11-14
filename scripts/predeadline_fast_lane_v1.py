@@ -49,25 +49,37 @@ def research_budget(plan, saved_sources, now):
 
 def saved_research_budget(state, day, *, now=None, artifact_class=None, runner=None):
     """Read the verified morning scope. Uncertain scheduling defers research."""
+    stage = 'CLOCK'
     try:
         now = now or datetime.now(JST)
         if now.date().isoformat() != day:
             raise ValueError('RESEARCH_BUDGET_DAY')
         if artifact_class is None:
+            stage = 'OFFICIAL_INPUT_COMPATIBILITY'
             from g11.canonical.official_pipeline import CanonicalRunner, OfficialArtifactStore
-            artifact_class, runner = OfficialArtifactStore, CanonicalRunner
+            from rescue_night_result_parser_v1 import official_input_compatibility
+            # Use exactly the critical lane's admitted morning formats and
+            # receipt bounds. The original frozen gate can reject a snapshot
+            # that its reviewed compatibility adapter has already admitted.
+            with official_input_compatibility():
+                return saved_research_budget(state, day, now=now,
+                    artifact_class=OfficialArtifactStore, runner=CanonicalRunner)
+        stage = 'VERIFIED_MORNING'
         morning = artifact_class(state / 'store').load_verified_snapshot('morning', 'official-day-input')
+        stage = 'FORMAL_SCOPE'
         _, eligible, _ = runner._formal_prediction_scope(morning, failure_prefix='RESEARCH_BUDGET_SCOPE')
         eligible = set(eligible)
+        stage = 'CAPTURE_PLAN'
         plan = [row for row in morning['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN']
                 if row['RACE_KEY'] in eligible]
         saved = {path.stem for path in (state / 'store/snapshots/predeadline').glob('*.json')}
         return research_budget(plan, saved, now)
-    except Exception:
+    except Exception as exc:
         # Optional research must not hold up the next critical cycle if the
         # verified schedule cannot be read. Its own capture guards still apply.
         return {'deferred': True, 'reason': 'BUDGET_UNVERIFIED',
-                'pending_sources': None, 'next_due_at_jst': None}
+                'pending_sources': None, 'next_due_at_jst': None,
+                'error_stage': stage, 'error_type': type(exc).__name__}
 
 
 def saved_sidecars(state, day, source, *, authority=None, wild=None,
