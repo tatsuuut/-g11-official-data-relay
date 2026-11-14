@@ -1,0 +1,45 @@
+name: Import a closed isolated research bundle before NIGHT
+description: Never wait for research in LIVE; verify a completed handover at NIGHT only.
+inputs:
+  operational-date:
+    required: true
+    description: Current operational race day.
+outputs:
+  waiting:
+    value: ${{steps.import.outputs.waiting}}
+    description: True only when NIGHT must retry after the independent closing worker.
+runs:
+  using: composite
+  steps:
+    - name: Select closed research input
+      id: select
+      shell: bash
+      run: python3 scripts/isolated_research_runner_v1.py select-night --day '${{inputs.operational-date}}'
+    - name: Restore exact research handover
+      if: steps.select.outputs.required=='true' && steps.select.outputs.research_key!=''
+      id: cache
+      continue-on-error: true
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .relay-cache/state.tgz.gpg
+        key: ${{steps.select.outputs.research_key}}
+        fail-on-cache-miss: true
+    - name: Authenticate isolated research handover
+      if: steps.cache.outputs.cache-hit=='true'
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -euo pipefail
+        test '${{steps.cache.outputs.cache-matched-key}}' = '${{steps.select.outputs.research_key}}'
+        exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+        python3 scripts/isolated_research_runner_v1.py decode --destination .research-night-input
+        exec 3<&-
+    - name: Validate and import research files only
+      if: steps.select.outputs.required=='true'
+      id: import
+      shell: bash
+      run: python3 scripts/isolated_research_runner_v1.py import-night --previous .research-night-input --day '${{inputs.operational-date}}'
+    - name: Continue NIGHT after the independent close
+      if: always() && (steps.import.outputs.waiting=='true' || steps.import.outcome=='failure')
+      shell: bash
+      run: python3 scripts/isolated_research_runner_v1.py retry-night --day '${{inputs.operational-date}}'
