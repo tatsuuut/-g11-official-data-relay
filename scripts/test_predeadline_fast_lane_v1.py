@@ -1,7 +1,7 @@
 """Future activation, immutable state, failed delivery and cycle routing."""
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -138,6 +138,77 @@ class FastCycleTests(TestCase):
         # authoritative whenever the pre-checkpoint saved-only attempt fails.
         self.assertIn("steps.deme-live.outcome == 'success'",step('Persist delivery receipts'))
         self.assertIn("steps.delivery-checkpoint.outputs.ready=='true'",step('Publish persisted LIVE research after predictions'))
+
+
+class ResearchBudgetTests(TestCase):
+    def task(self, source='odds', due=NOW, race='formal'):
+        return {'SOURCE_ID': source, 'RACE_KEY': race, 'DUE_AT_JST': due.isoformat(),
+                'MUST_FINISH_BEFORE_JST': (due + timedelta(minutes=7)).isoformat()}
+
+    def test_overdue_capture_and_five_minute_boundary_defer_tail(self):
+        for seconds in (-360, 0, 299, 300):
+            with self.subTest(seconds=seconds):
+                result = fast.research_budget([self.task(due=NOW+timedelta(seconds=seconds))], set(), NOW)
+                self.assertTrue(result['deferred'])
+                self.assertEqual('CAPTURE_DUE_SOON', result['reason'])
+        self.assertFalse(fast.research_budget([self.task(due=NOW+timedelta(seconds=301))], set(), NOW)['deferred'])
+
+    def test_expired_or_saved_inputs_do_not_starve_idle_research(self):
+        tasks = [self.task('expired', NOW-timedelta(minutes=7)), self.task('saved')]
+        self.assertFalse(fast.research_budget(tasks, {'saved'}, NOW)['deferred'])
+        self.assertFalse(fast.research_budget([], set(), NOW)['deferred'])
+
+    def test_incident_previous_cycle_yields_before_toda_and_biwako_capture(self):
+        now = datetime.fromisoformat('2026-11-14T12:54:18+09:00')
+        due = now.replace(minute=53, second=0)
+        tasks = [self.task('toda-input', due), self.task('biwako-input', due)]
+        self.assertTrue(fast.research_budget(tasks, set(), now)['deferred'])
+
+    def test_reads_verified_formal_scope_without_mutating_saved_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshots = root/'store/snapshots/predeadline'
+            snapshots.mkdir(parents=True)
+            (snapshots/'saved.json').write_text('synthetic immutable evidence')
+            morning = {'SNAPSHOT': {'PAYLOAD': {'PREDEADLINE_PLAN': [
+                self.task('saved'), self.task('excluded', race='excluded'),
+                self.task('later', NOW+timedelta(minutes=6))]}}}
+            artifact = Mock(return_value=SimpleNamespace(load_verified_snapshot=Mock(return_value=morning)))
+            runner = SimpleNamespace(_formal_prediction_scope=Mock(return_value=(None, ['formal'], None)))
+            result = fast.saved_research_budget(root, DAY, now=NOW, artifact_class=artifact, runner=runner)
+            self.assertFalse(result['deferred'])
+            self.assertEqual(1, result['pending_sources'])
+            artifact.return_value.load_verified_snapshot.assert_called_once_with('morning', 'official-day-input')
+            self.assertEqual('synthetic immutable evidence', (snapshots/'saved.json').read_text())
+
+    def test_invalid_or_unavailable_plan_defers_optional_work_only(self):
+        for change in ({'DUE_AT_JST': 'bad'}, {'SOURCE_ID': ''},
+                       {'MUST_FINISH_BEFORE_JST': NOW.isoformat()}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                fast.research_budget([{**self.task(), **change}], set(), NOW)
+        result = fast.saved_research_budget(Path('/unused'), DAY, now=NOW,
+            artifact_class=Mock(side_effect=ValueError('unverified snapshot')))
+        self.assertEqual('BUDGET_UNVERIFIED', result['reason'])
+        self.assertTrue(result['deferred'])
+
+    def test_workflow_defers_optional_tail_but_keeps_verified_receipt_checkpoint(self):
+        text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
+        def step(name): return text.split('      - name: '+name+'\n', 1)[1].split('      - name:', 1)[0]
+        guard = step('Reserve the next capture window before optional research')
+        self.assertIn("steps.fast-lane.outputs.enabled=='true'", guard)
+        self.assertIn("steps.critical-publish.outcome=='success'", guard)
+        self.assertLess(text.index('      - name: Reserve the next capture'), text.index('      - name: Install pinned'))
+        for name in ('Install pinned private runtime dependencies',
+                     'Retain saved-input research without another official capture', 'P3 research source'):
+            self.assertIn("steps.research-budget.outputs.deferred!='true'", step(name))
+        # The second encrypted checkpoint persists the successful delivery
+        # receipt even when no optional research ran. No durability shortcut.
+        self.assertNotIn('research-budget', step('Encrypt changed state before persistence'))
+        self.assertIn("steps.research-budget.outputs.deferred=='true'&&steps.critical-publish.outcome=='success'",
+                      step('Gate NIGHT publication on fully settled research'))
+        self.assertIn("steps.encrypt-state.outputs.ready=='true'&&steps.night-ready.outputs.allowed=='true'",
+                      step('Persist complete state before publication'))
+        self.assertIn('test "${RESEARCH_DEFERRED}" = true', step('Report short LIVE delivery failures after continuation'))
 
 
 if __name__ == '__main__': main()

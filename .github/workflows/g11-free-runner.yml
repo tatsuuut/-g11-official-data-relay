@@ -573,8 +573,15 @@ jobs:
               'EXCLUDED_PAST_DEADLINE':past,'PREVIOUS_NIGHT_UNCHANGED':'PASS',
               'PREVIOUS_NIGHT_CANONICAL_SHA256':checkpoint['feed_sha256']},sort_keys=True))
           PYREAD
+      - name: Reserve the next capture window before optional research
+        id: research-budget
+        if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&steps.critical-publish.outcome=='success'
+        working-directory: .g11-private
+        env:
+          G11_PRIVATE_REPO_TOKEN: ""
+        run: python3 -S ../scripts/predeadline_fast_lane_v1.py budget --day '${{steps.due.outputs.operational_date}}' --state-root '${{github.workspace}}/.relay-state'
       - name: Install pinned private runtime dependencies
-        if: env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true'
+        if: env.G11_NIGHT_TRANSPORT_ONLY != 'true' && env.G11_R13 != 'true' && steps.research-budget.outputs.deferred!='true'
         uses: ./.github/actions/g11-public-python
         with:
           profile: ${{ steps.due.outputs.phase == 'dry-run' && 'parser' || 'runtime' }}
@@ -690,7 +697,7 @@ jobs:
           done
       - name: Retain saved-input research without another official capture
         id: fast-sidecars
-        if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'
+        if: steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&steps.research-budget.outputs.deferred!='true'
         continue-on-error: true
         working-directory: .g11-private
         env:
@@ -880,7 +887,7 @@ jobs:
           }, sort_keys=True))
           PY
       - name: P3 research source
-        if: ((steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'))&&steps.due.outputs.phase!='dry-run'&&env.G11_R13!='true'&&!contains('2026-10-16,2026-10-18',steps.due.outputs.operational_date)
+        if: steps.research-budget.outputs.deferred!='true'&&((steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'))&&steps.due.outputs.phase!='dry-run'&&env.G11_R13!='true'&&!contains('2026-10-16,2026-10-18',steps.due.outputs.operational_date)
         id: deme-source
         continue-on-error: true
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -950,7 +957,7 @@ jobs:
           key: g11-state-v3-${{steps.due.outputs.operational_date}}-${{github.run_id}}
       - name: Gate NIGHT publication on fully settled research
         id: night-ready
-        if: (steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&steps.fast-sidecars.outcome=='success')
+        if: (steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!='')||(steps.fast-lane.outputs.enabled=='true'&&steps.critical-save.outputs.ready=='true'&&(steps.fast-sidecars.outcome=='success'||(steps.research-budget.outputs.deferred=='true'&&steps.critical-publish.outcome=='success')))
         env:
           FEED: .relay-output/feed.json
           OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
@@ -2055,10 +2062,11 @@ jobs:
           EARLY_PUBLICATION: ${{steps.critical-publish.outcome}}
           RETRY_PUBLICATION: ${{steps.critical-retry.outcome}}
           RESEARCH_SIDECARS: ${{steps.fast-sidecars.outcome}}
+          RESEARCH_DEFERRED: ${{steps.research-budget.outputs.deferred}}
         run: |
-          echo "G11_SHORT_CYCLE_DELIVERY=${EARLY_PUBLICATION} RETRY=${RETRY_PUBLICATION} RESEARCH=${RESEARCH_SIDECARS}"
+          echo "G11_SHORT_CYCLE_DELIVERY=${EARLY_PUBLICATION} RETRY=${RETRY_PUBLICATION} RESEARCH=${RESEARCH_SIDECARS} DEFERRED=${RESEARCH_DEFERRED}"
           test "${EARLY_PUBLICATION}" = success || test "${RETRY_PUBLICATION}" = success
-          test "${RESEARCH_SIDECARS}" = success
+          test "${RESEARCH_SIDECARS}" = success || test "${RESEARCH_DEFERRED}" = true
       - name: Bootstrap PREDEADLINE after a verified public MORNING
         if: >-
           always() && !cancelled() &&
