@@ -1,10 +1,12 @@
 """Future activation, immutable state, failed delivery and cycle routing."""
 import json
 import os
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+import sys
 import tempfile
-from types import SimpleNamespace
+from types import SimpleNamespace, ModuleType
 from unittest import TestCase, main
 from unittest.mock import Mock, patch
 
@@ -190,6 +192,31 @@ class ResearchBudgetTests(TestCase):
             artifact_class=Mock(side_effect=ValueError('unverified snapshot')))
         self.assertEqual('BUDGET_UNVERIFIED', result['reason'])
         self.assertTrue(result['deferred'])
+
+    def test_budget_uses_the_same_reviewed_admission_as_critical_capture(self):
+        active = []
+        @contextmanager
+        def compatibility():
+            active.append(True)
+            try:
+                yield
+            finally:
+                active.pop()
+        def scope(morning, **kwargs):
+            if not active:
+                raise RuntimeError('MORNING_REQUIRES_REVIEWED_ADMISSION')
+            return None, ['formal'], None
+        morning = {'SNAPSHOT': {'PAYLOAD': {'PREDEADLINE_PLAN': []}}}
+        official = ModuleType('g11.canonical.official_pipeline')
+        official.OfficialArtifactStore = Mock(return_value=SimpleNamespace(
+            load_verified_snapshot=Mock(return_value=morning)))
+        official.CanonicalRunner = SimpleNamespace(_formal_prediction_scope=scope)
+        with patch.dict(sys.modules, {'g11.canonical.official_pipeline': official}), \
+             patch('rescue_night_result_parser_v1.official_input_compatibility', compatibility):
+            result = fast.saved_research_budget(Path('/unused'), DAY, now=NOW)
+        self.assertEqual('CLEAR_WINDOW', result['reason'])
+        self.assertFalse(result['deferred'])
+        self.assertEqual([], active)
 
     def test_workflow_defers_optional_tail_but_keeps_verified_receipt_checkpoint(self):
         text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
