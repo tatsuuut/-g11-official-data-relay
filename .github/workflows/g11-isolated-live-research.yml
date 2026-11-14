@@ -1,6 +1,16 @@
 name: independent saved-input research
 run-name: RESEARCH-${{github.event.workflow_run.id}}
 on:
+  workflow_dispatch:
+    inputs:
+      operational_date:
+        description: Saved operational day, never a request to regenerate a forecast.
+        required: true
+        type: string
+      source_key:
+        description: Exact authenticated canonical checkpoint key.
+        required: true
+        type: string
   workflow_run:
     workflows: [runtime sync]
     types: [in_progress, completed]
@@ -18,7 +28,7 @@ concurrency:
 
 jobs:
   saved-research:
-    if: vars.G11_RELAY_ENABLED == 'true' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
+    if: vars.G11_RELAY_ENABLED == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:

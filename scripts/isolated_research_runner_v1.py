@@ -90,6 +90,15 @@ def select_event():
     isolation.require(os.environ.get('GITHUB_REPOSITORY') == REPOSITORY, 'RESEARCH_REPOSITORY')
     now = datetime.now(isolation.JST)
     event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_bytes())
+    if os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch':
+        values = event.get('inputs') or {}
+        day, source_key = values.get('operational_date',''), values.get('source_key','')
+        isolation.require(os.environ.get('GITHUB_REF') == 'refs/heads/main'
+            and isolation.EFFECTIVE_FROM <= day <= now.date().isoformat()
+            and re.fullmatch(r'g11-state-v4-(?:critical|published)-'+re.escape(day)
+                +r'-\d+(?:-\d+-checkpoint)?', source_key), 'RESEARCH_DISPATCH_BINDING')
+        outputs(active=True,day=day,source_key=source_key,research_key=latest_research(day))
+        print('G11_RESEARCH_INPUT_SELECTION=VERIFIED_CHECKPOINT_HANDOFF'); return
     selected = event_selection(event, now)
     if not selected:
         outputs(active=False); return
@@ -231,7 +240,40 @@ def select_night(state, day):
         outputs(required=False); return
     isolation.require(datetime.now(isolation.JST) >= max(isolation.plan_deadlines(state,day).values()),
                       'RESEARCH_NIGHT_WINDOW_OPEN')
+    # NIGHT may need closure even if workflow notifications were not delivered.
+    # Enqueue only; never wait for the independent worker's completion.
+    try:
+        dispatch_research(day,latest_canonical(day))
+    except Exception as exc:
+        print('G11_RESEARCH_CLOSE_ENQUEUE=RETRY_PRESERVED TYPE='+type(exc).__name__)
     outputs(required=True,research_key=latest_research(day))
+
+
+def dispatch_research(day, key):
+    isolation.require(re.fullmatch(r'g11-state-v4-(?:critical|published)-'+re.escape(day)
+        +r'-\d+(?:-\d+-checkpoint)?',key), 'RESEARCH_HANDOFF_CHECKPOINT')
+    subprocess.run(['gh','workflow','run',WORKFLOW,'--ref','main',
+        '-f','operational_date='+day,'-f','source_key='+key],timeout=8,check=True,
+        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    print('G11_RESEARCH_HANDOFF=ENQUEUED_WITHOUT_WAITING')
+
+
+def handoff(state, feed):
+    isolation.require(os.environ.get('RESEARCH_CHECKPOINT_VERIFIED') == 'true',
+                      'RESEARCH_HANDOFF_PERSISTENCE_REQUIRED')
+    metadata=json.loads((state/'relay-state.json').read_bytes())
+    day=metadata['OPERATIONAL_DATE_JST']
+    if (state/isolation.MARKER.format(day=day)).is_file():
+        isolation.require(os.environ.get('GITHUB_REPOSITORY') == REPOSITORY
+            and os.environ.get('GITHUB_REF') == 'refs/heads/main'
+            and re.fullmatch(r'\d+',os.environ.get('GITHUB_RUN_ID',''))
+            and re.fullmatch(r'\d+',os.environ.get('GITHUB_RUN_ATTEMPT','')),
+            'RESEARCH_HANDOFF_RUNTIME_IDENTITY')
+        key=f"g11-state-v4-published-{day}-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}-checkpoint"
+        return dispatch_research(day,key)
+    from deme_research_delivery_v1 import publish_persisted_live
+    result=publish_persisted_live(state,feed)
+    isolation.require(result.get('status') == 'PASS','RESEARCH_PUBLICATION_NOT_VERIFIED')
 
 
 def import_night(state, source, bundle_root, day, *, authority=None, now=None):
@@ -280,7 +322,7 @@ def import_night(state, source, bundle_root, day, *, authority=None, now=None):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('mode',choices=['select-event','activate','prepare-input','decode','run',
-                                  'select-night','import-night','retry-night','publish'])
+                                  'select-night','import-night','retry-night','publish','handoff'])
     p.add_argument('--state-root',type=Path,default=Path('.relay-state'))
     p.add_argument('--source-root',type=Path,default=Path('.g11-private'))
     p.add_argument('--deme-source',type=Path,default=Path('.g11-deme-research'))
@@ -292,6 +334,7 @@ def main():
     p.add_argument('--source-key',default='')
     a=p.parse_args();state=a.state_root.resolve();source=a.source_root.resolve()
     if a.mode=='select-event': return select_event()
+    if a.mode=='handoff': return handoff(state,a.feed.resolve())
     if a.mode=='decode': return decode(a.encrypted.resolve(),a.destination.resolve())
     if a.mode=='activate':
         isolation.activate(state,a.day);outputs(active=True);return

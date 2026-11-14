@@ -138,8 +138,50 @@ class BundleTests(unittest.TestCase):
         self.assertIn('waiting=true',self.output.read_text())
         self.assertFalse((self.state/PACKET).exists());self.assertEqual(before,data.core_sources(self.state,DAY))
 
+    def test_enqueue_requires_verified_delivery_and_never_waits_for_research(self):
+        self.write(self.state,'relay-state.json',{'OPERATIONAL_DATE_JST':DAY})
+        values={'GITHUB_REPOSITORY':runner.REPOSITORY,'GITHUB_REF':'refs/heads/main',
+                'GITHUB_RUN_ID':'42','GITHUB_RUN_ATTEMPT':'1'}
+        with patch.dict(os.environ,values),patch.object(runner.subprocess,'run') as send:
+            with patch.dict(os.environ,{'RESEARCH_CHECKPOINT_VERIFIED':'false'}):
+                with self.assertRaisesRegex(ValueError,'PERSISTENCE_REQUIRED'):
+                    runner.handoff(self.state,self.root/'unused-feed.json')
+                send.assert_not_called()
+            with patch.dict(os.environ,{'RESEARCH_CHECKPOINT_VERIFIED':'true'}):
+                runner.handoff(self.state,self.root/'unused-feed.json')
+            args=send.call_args.args[0]
+            self.assertEqual(['gh','workflow','run',runner.WORKFLOW,'--ref','main'],args[:6])
+            self.assertIn('source_key=g11-state-v4-published-'+DAY+'-42-1-checkpoint',args)
+            self.assertEqual(8,send.call_args.kwargs['timeout'])
+            self.assertNotIn('watch',args)
+
+    def test_night_enqueues_closure_independently_of_workflow_notifications(self):
+        before=data.core_sources(self.state,DAY)
+        with patch.object(runner,'latest_canonical',return_value=SOURCE), \
+             patch.object(runner,'latest_research',return_value=''), \
+             patch.object(runner,'dispatch_research') as send,patch.object(runner,'outputs') as out:
+            runner.select_night(self.state,DAY)
+        send.assert_called_once_with(DAY,SOURCE)
+        out.assert_called_once_with(required=True,research_key='')
+        self.assertFalse((self.state/PACKET).exists());self.assertEqual(before,data.core_sources(self.state,DAY))
+
 
 class RoutingTests(unittest.TestCase):
+    def test_explicit_handover_accepts_only_main_and_a_canonical_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'event'
+            path.write_text(json.dumps({'inputs':{'operational_date':DAY,'source_key':SOURCE}}))
+            values={'GITHUB_EVENT_PATH':str(path),'GITHUB_EVENT_NAME':'workflow_dispatch',
+                    'GITHUB_REF':'refs/heads/main','GITHUB_REPOSITORY':runner.REPOSITORY}
+            with patch.dict(os.environ,values),patch.object(runner,'latest_research',return_value=''), \
+                 patch.object(runner,'outputs') as out:
+                runner.select_event();self.assertEqual(SOURCE,out.call_args.kwargs['source_key'])
+                with patch.dict(os.environ,{'GITHUB_REF':'refs/heads/feature'}):
+                    with self.assertRaisesRegex(ValueError,'DISPATCH_BINDING'):runner.select_event()
+                path.write_text(json.dumps({'inputs':{'operational_date':DAY,
+                    'source_key':'g11-research-v1-'+DAY+'-42-1'}}))
+                with self.assertRaisesRegex(ValueError,'DISPATCH_BINDING'):runner.select_event()
+
     def test_only_owned_main_live_and_night_events_are_selected(self):
         parent={'id':42,'head_branch':'main','head_repository':{'full_name':runner.REPOSITORY},
                 'display_title':'LIVE-predeadline-'+DAY}

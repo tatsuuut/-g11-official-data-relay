@@ -4,11 +4,15 @@ Normal LIVE capture, frozen inference, immutable LOCKs, verified encrypted
 checkpoints, WILD4 handoff and canonical delivery remain in the operational
 writer. The writer activates an immutable daily separation marker before
 capture, then skips optional saved-input research and its dependencies. It
-never dispatches or waits for research in LIVE.
+never waits for research in LIVE. After verified delivery and a complete
+checkpoint it sends a bounded enqueue request, without waiting for research.
 
-The independent workflow observes owned main-branch runtime starts. It waits
-for the parent's exact verified critical checkpoint and restores a ready
-same-day superset into its own disposable copy. Frozen source and existing
+The independent workflow also observes owned main-branch runtime notifications.
+An explicit enqueue restores its exact verified complete checkpoint; a
+completion notification selects a ready canonical checkpoint. An in-progress
+notification waits for the parent's exact verified critical checkpoint and
+selects a ready same-day superset. All inputs enter its own disposable copy.
+Frozen source and existing
 MORNING/PREDEADLINE bindings are verified before research. It runs only WILD
 collection/BET evidence, confidence/MASHIRO evidence, and the pinned Deme
 observer. Research does not reacquire official inputs or run core forecasts.
