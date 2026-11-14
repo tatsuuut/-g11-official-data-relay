@@ -77,6 +77,32 @@ class StateRestoreTests(unittest.TestCase):
             restore.extract_complete_state(self.archive, self.dest)
         self.assertFalse(self.dest.exists())
 
+    def test_native_failure_after_valid_tar_never_exposes_state(self):
+        self.archive_members([self.member('good')])
+        child = Mock(stdout=io.BytesIO(gzip.decompress(self.archive.read_bytes())))
+        child.wait.return_value = 1; child.poll.return_value = 1
+        with patch.object(restore.shutil, 'which', return_value='/synthetic/igzip'), \
+                patch.object(restore.subprocess, 'Popen', return_value=child):
+            with self.assertRaises(gzip.BadGzipFile):
+                restore.extract_complete_state(self.archive, self.dest)
+        self.assertFalse(self.dest.exists())
+        self.assertFalse(list(self.root.glob('.g11-state-extract-*')))
+
+    def test_concatenated_gzip_and_late_crc_are_checked_by_both_readers(self):
+        self.archive_members([self.member('good')])
+        raw = gzip.decompress(self.archive.read_bytes()); middle = len(raw)//2
+        for reader in ['python'] + (['igzip'] if restore.shutil.which('igzip') else []):
+            with self.subTest(reader=reader):
+                self.archive.write_bytes(gzip.compress(raw[:middle])+gzip.compress(raw[middle:]))
+                restore.extract_complete_state(self.archive, self.dest, decompressor=reader)
+                self.assertEqual(b'immutable', (self.dest/'good').read_bytes())
+                restore.shutil.rmtree(self.dest)
+                damaged = bytearray(self.archive.read_bytes()); damaged[-8] ^= 1
+                self.archive.write_bytes(damaged)
+                with self.assertRaises((gzip.BadGzipFile, tarfile.ReadError)):
+                    restore.extract_complete_state(self.archive, self.dest, decompressor=reader)
+                self.assertFalse(self.dest.exists())
+
     def test_empty_truncated_duplicate_and_conflicting_archives_fail_closed(self):
         for members in [[], [self.member('good'), self.member('./good')],
                         [self.member('parent'), self.member('parent/child')]]:

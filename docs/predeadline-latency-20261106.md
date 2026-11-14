@@ -183,3 +183,25 @@ restored, and every file/directory is compared using size and SHA256. Only
 aggregate timings and success/failure codes are logged. No prediction is
 published or regenerated, and no saved source, LOCK, or accounting is changed.
 Measured results and production timing must be checked before rollout.
+
+
+The full-state cipher-only comparison also passed both reader generations and
+all byte comparisons, but reduced 25.983 seconds to 22.759 seconds; that alone
+is not a sufficient improvement. The next comparison includes ISA-L igzip's
+standard gzip-compatible level 0 stream and native decompression. The native
+reader retains all existing tar member checks and data filters, drains past
+the tar end, requires successful gzip CRC/footer completion, and exposes the
+staged state atomically only after the decompressor exits successfully. Python
+gzip remains the fallback. The system package is optional with a bounded setup
+attempt; no private runtime package, model or source is changed.
+
+The three paired variants are legacy pigz/Python gzip, ISA-L with the legacy
+cipher, and ISA-L with OCB. Tests cover a late native decompressor failure,
+concatenated gzip members, late CRC corruption, traversal, special files,
+nonempty destinations and byte-identical roundtrips. The benchmark compares
+all saved-state bytes after each candidate and reports archive size as well as
+encryption and extraction time. Production timing must include setup and cache
+transfer, rather than treating CPU-only improvements as end-to-end gains.
+
+ISA-L igzip's standard gzip interface is documented by its upstream:
+https://github.com/intel/isa-l/blob/master/programs/igzip.1

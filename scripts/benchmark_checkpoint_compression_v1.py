@@ -40,14 +40,14 @@ def inventory(root):
 def benchmark(state, scratch, secret):
     before = inventory(state)
     results = []
-    for mode in ('legacy', 'ocb'):
+    for mode, codec, reader in [('legacy','pigz','python'), ('legacy','igzip','igzip'), ('ocb','igzip','igzip')]:
         with tempfile.TemporaryDirectory(dir=scratch, prefix='checkpoint-benchmark-') as tmp:
             root = Path(tmp)
             encrypted, archive, restored = root/'state.gpg', root/'state.tgz', root/'restored'
             with tempfile.TemporaryFile() as passphrase:
                 passphrase.write(secret); passphrase.seek(0)
                 started = time.monotonic()
-                encrypt(state, encrypted, passphrase_fd=passphrase.fileno(), mode=mode)
+                encrypt(state, encrypted, passphrase_fd=passphrase.fileno(), mode=mode, codec=codec)
                 encryption_seconds = time.monotonic() - started
                 passphrase.seek(0)
                 subprocess.run(['gpg', '--batch', '--yes', '--pinentry-mode', 'loopback',
@@ -55,11 +55,11 @@ def benchmark(state, scratch, secret):
                     str(encrypted)], pass_fds=(passphrase.fileno(),),
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             started = time.monotonic()
-            extract_complete_state(archive, restored)
+            extract_complete_state(archive, restored, decompressor=reader)
             restore_seconds = time.monotonic() - started
             if inventory(restored) != before:
                 raise ValueError('BENCHMARK_COMPLETE_BYTES_CHANGED')
-            result = {'encryption_mode': mode, 'encrypt_seconds': round(encryption_seconds, 3),
+            result = {'encryption_mode': mode, 'codec': codec, 'reader': reader, 'encrypt_seconds': round(encryption_seconds, 3),
                 'extract_seconds': round(restore_seconds, 3), 'encrypted_bytes': encrypted.stat().st_size,
                 'all_files_and_directories_identical': True}
             results.append(result)

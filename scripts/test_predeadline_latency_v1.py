@@ -150,12 +150,12 @@ class ArchiveTests(unittest.TestCase):
         for cpus, expected in [(1,1), (2,2), (4,4), (16,4)]:
             with patch.object(archive.os, 'sched_getaffinity', return_value=set(range(cpus))), \
                     patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
-                self.assertEqual(f'pigz -1 -p {expected}', archive.compression_command(accelerated=True))
-                self.assertEqual('pigz -1 -p 2', archive.compression_command())
+                self.assertEqual(f'pigz -1 -p {expected}', archive.compression_command(accelerated=True, codec='pigz'))
+                self.assertEqual('pigz -1 -p 2', archive.compression_command(codec='pigz'))
         with patch.object(archive.os, 'sched_getaffinity', side_effect=OSError), \
                 patch.object(archive.os, 'cpu_count', return_value=2), \
                 patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
-            self.assertEqual('pigz -1 -p 2', archive.compression_command(accelerated=True))
+            self.assertEqual('pigz -1 -p 2', archive.compression_command(accelerated=True, codec='pigz'))
 
     def test_supported_authenticated_mode_and_legacy_capability_fallback(self):
         for available, expected in [('--use-ocb-sym\n--force-aead', '--use-ocb-sym'),
@@ -227,7 +227,7 @@ class ArchiveTests(unittest.TestCase):
                         secret.write(b'synthetic-test-only\n'); secret.seek(0)
                         with patch.dict(os.environ, {'GNUPGHOME': str(home)}), \
                                 patch.object(archive.shutil, 'which', return_value=None if compressor=='gzip' else '/usr/bin/pigz'):
-                            archive.encrypt(state, output, passphrase_fd=secret.fileno(), workers=workers)
+                            archive.encrypt(state, output, passphrase_fd=secret.fileno(), workers=workers, codec=compressor)
                     plaintext = subprocess.run(['gpg', '--homedir', str(home), '--batch', '--yes', '--pinentry-mode', 'loopback',
                         '--passphrase-fd', '0', '--decrypt', str(output)], input=b'synthetic-test-only\n', capture_output=True, check=True).stdout
                     restored = root/('restored-'+compressor+str(workers)); restored.mkdir()

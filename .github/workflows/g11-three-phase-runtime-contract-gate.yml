@@ -43,7 +43,9 @@ jobs:
           echo "G11_BENCHMARK_ORIGINAL_COMPRESSOR=$(command -v pigz || command -v gzip)"
           python3 -c 'import os; print("G11_BENCHMARK_CPUS=" + str(len(os.sched_getaffinity(0))))'
       - name: Prepare standard gzip-compatible parallel compression
-        run: command -v pigz || sudo -n apt-get install -y --no-install-recommends pigz
+        run: |
+          sudo -n apt-get install -y --no-install-recommends pigz isal
+          python3 -m unittest discover -s scripts -p test_runtime_preparation_v1.py -q
       - name: Select a current saved November 14 checkpoint for the read-only benchmark
         id: benchmark-checkpoint
         env:

@@ -11,7 +11,7 @@ import time
 
 def compression_command(workers=None, *, codec='auto', accelerated=False):
     """Use available CPUs with OCB; retain the legacy two-worker writer."""
-    if codec not in ('auto', 'gzip', 'pigz'):
+    if codec not in ('auto', 'gzip', 'pigz', 'igzip'):
         raise ValueError('CHECKPOINT_COMPRESSION_CODEC')
     if workers is None:
         if accelerated:
@@ -24,6 +24,10 @@ def compression_command(workers=None, *, codec='auto', accelerated=False):
             workers = 2
     if type(workers) is not int or not 1 <= workers <= 4:
         raise ValueError('CHECKPOINT_COMPRESSION_WORKERS')
+    if codec == 'igzip' or (codec == 'auto' and shutil.which('igzip')):
+        if not shutil.which('igzip'):
+            raise ValueError('CHECKPOINT_ISAL_GZIP_UNAVAILABLE')
+        return 'igzip -0'
     parallel = bool(shutil.which('pigz'))
     if codec == 'pigz' and not parallel:
         raise ValueError('CHECKPOINT_PARALLEL_GZIP_UNAVAILABLE')
