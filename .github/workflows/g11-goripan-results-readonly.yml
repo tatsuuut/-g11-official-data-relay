@@ -1,0 +1,138 @@
+name: Goripan saved candidate results read-only
+
+on:
+  push:
+    branches: [codex/goripan-results-readonly-20261114]
+    paths: [.github/workflows/g11-goripan-results-readonly.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  read-saved-results:
+    if: github.repository_id == '1367703708' && github.ref == 'refs/heads/codex/goripan-results-readonly-20261114'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Read the exact completed encrypted comparison evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: g11-wild4-20261114-future-oos-locks-encrypted
+          run-id: 43593109004
+          github-token: ${{ github.token }}
+          path: .saved
+      - name: Decrypt an isolated audit copy
+        env:
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt \
+            --output "${RUNNER_TEMP}/goripan-results-20261114.tgz" .saved/future-locks.tgz.gpg
+          exec 3<&-
+      - name: Verify and report already-saved comparisons without operational writes
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,math,os,pathlib,re,tarfile
+          from collections import Counter
+          from datetime import datetime
+
+          def require(ok, message):
+              if not ok: raise ValueError(message)
+          def sha(raw): return hashlib.sha256(raw).hexdigest()
+          def value_sha(value):
+              return sha((json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)+'\n').encode())
+
+          archive=pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-results-20261114.tgz'
+          original_sha=sha(archive.read_bytes())
+          prefix='g11-wild4-future-locks/'
+          baseline='06032b26d9aabc8a9c4eda6b91ea6ed6269944b001153f523f51649b36f5a1be'
+          expected={'seed0':'0fb2ffd42e4dc7dcc667252e7b5708b03dc60b52f0f480181550814c2c987467',
+              'seed1':'4ca22302d6545f9a8b0c8ce7e8d0c33393f86174791bf734017430ae00619ac0',
+              'seed2':'192390f56fd63e13efb239c93d983dfb194fc7656a40b3e5a9d5829688642840'}
+          key_re=re.compile(r'20261114-\d{2}-(?:0[1-9]|1[0-2])')
+          with tarfile.open(archive,'r:gz') as tar:
+              members={}
+              for member in tar.getmembers():
+                  path=pathlib.PurePosixPath(member.name)
+                  require(not path.is_absolute() and '..' not in path.parts and not member.issym() and not member.islnk(),'UNSAFE_ARCHIVE')
+                  require(member.name not in members,'DUPLICATE_ARCHIVE_MEMBER')
+                  members[member.name]=member
+              def raw(name):
+                  member=members[prefix+name]
+                  require(member.isfile() and member.size<=32*1024*1024,'EXPECTED_BOUNDED_FILE')
+                  return tar.extractfile(member).read()
+              def read(name):
+                  value=json.loads(raw(name))
+                  require(value.get('CONTENT_SHA256')==value_sha({k:v for k,v in value.items() if k!='CONTENT_SHA256'}),'SAVED_SELF_HASH:'+name)
+                  return value
+              state=read('model-registry/lifecycle.json')
+              protocol=state['candidate_pool']['multiday']
+              require(protocol['contract']=='G11_GORIPAN_MULTIDAY_5_5_800_V1','COMPARISON_CONTRACT')
+              require(protocol['baseline']==state['active']['identity']==baseline,'FROZEN_BASELINE')
+              require({m['variant']:m['model']['identity'] for m in protocol['members']}==expected,'FROZEN_MEMBERS')
+              require(protocol['members']==state['candidate_pool']['members'],'FROZEN_POOL')
+              require(state['last_completed_night']=='2026-11-14','COMPLETE_NIGHT')
+              day_binding=read('day-model-binding.json')
+              require(day_binding['date']=='2026-11-14' and day_binding['model']==state['active'],'DAY_BINDING')
+              daily=[]
+              for day in sorted(protocol['days']):
+                  report_path='model-registry/multiday-comparison/'+protocol['identity']+'/days/'+day+'.json'
+                  report=read(report_path)
+                  require(report['date']==day and report['baseline']==baseline and report['protocol_identity']==protocol['identity'],'DAY_REPORT_BINDING')
+                  require(report['predictions_regenerated'] is False and report['formal_mutated'] is False,'READ_ONLY_RECEIPT')
+                  require(set(report['evaluations'])==set(expected.values()) and report['technical_holds']=={},'ALL_THREE_EVALUATED')
+                  if day!='2026-11-14':
+                      daily.append({'date':day,'saved':len(report['race_keys']),'eligible':len(report['valid_keys']),
+                          'evaluations':{variant:report['evaluations'][identity]['metrics'] for variant,identity in expected.items()},
+                          'report_sha256':report['CONTENT_SHA256']})
+                      continue
+                  keys=report['race_keys']; valid=set(report['valid_keys'])
+                  require(len(keys)==len(set(keys)) and all(key_re.fullmatch(k) for k in keys),'SAVED_DAY_KEYS')
+                  require(valid.issubset(keys),'VALID_KEYS')
+                  for name,digest in report['source_proofs'].items():
+                      require(sha(raw(name))==digest,'FORMAL_SOURCE_PROOF:'+name)
+                  settled={k:read('settlements/'+k+'.json') for k in keys}
+                  formal={k:read(k+'.json') for k in keys}
+                  require(valid=={k for k,s in settled.items() if s.get('EVALUATION_STATUS')=='FIRST_CURRENT_VALID'},'VALID_RESULT_COHORT')
+                  exclusions=Counter(s.get('EVALUATION_STATUS',s.get('EXCLUSION_REASON','UNKNOWN')) for k,s in settled.items() if k not in valid)
+                  current_metrics=None; details={}
+                  for variant,identity in expected.items():
+                      evaluation=report['evaluations'][identity]
+                      require(evaluation['status']=='TECHNICALLY_VALID' and evaluation['failed_predictions']==0,'VALID_EVALUATION')
+                      require(evaluation['cohort']['official_source_sha256']==report['official_source_sha256'],'OFFICIAL_SOURCE_BINDING')
+                      require(evaluation['cohort']['saved_pairs']==len(keys),'WHOLE_SAVED_COHORT')
+                      require(current_metrics is None or current_metrics==evaluation['metrics']['current'],'SAME_CURRENT_METRICS')
+                      current_metrics=evaluation['metrics']['current']
+                      candidate={}
+                      for k in keys:
+                          folder='challenger/'+identity+'/'
+                          lock=read(folder+k+'.json'); admission=read(folder+k+'.admission.json'); receipt=read(folder+k+'.saved.json')
+                          require(receipt['race_key']==k and receipt['candidate_identity']==identity==lock['EFFECTIVE_MODEL_IDENTITY'],'CANDIDATE_BINDING')
+                          require(receipt['lock_sha256']==sha(raw(folder+k+'.json')),'CANDIDATE_FILE_SHA')
+                          require(receipt['input_hash']==admission['input_hash']==lock['INPUT_PACKET_SHA256']==formal[k]['INPUT_PACKET_SHA256'],'IDENTICAL_INPUT')
+                          require(lock['ODDS_SNAPSHOT_SHA256']==formal[k]['ODDS_SNAPSHOT_SHA256'] and lock['EVALUATION_CONTEXT_PACK_ID']==formal[k]['EVALUATION_CONTEXT_PACK_ID'],'IDENTICAL_SNAPSHOT')
+                          require(datetime.fromisoformat(admission['admitted_at'])<=datetime.fromisoformat(lock['LOCKED_AT'])<=datetime.fromisoformat(receipt['saved_at'])<datetime.fromisoformat(lock['RACE_DEADLINE_AT']),'BEFORE_DEADLINE_SAVE')
+                          require(settled[k]['SHADOW_LOCK_SHA256']==formal[k]['CONTENT_SHA256'],'SAVED_OFFICIAL_JOIN')
+                          candidate[k]=lock
+                      for label,locks in [('current',formal),('candidate',candidate)]:
+                          metrics=evaluation['metrics'][label]
+                          require(metrics['eligible']==len(valid),'ELIGIBLE_COUNT')
+                          for field,actual in [('bet',sum(bool(locks[k]['SELECTED_BETS']) for k in valid)),
+                              ('abstain',sum(not locks[k]['SELECTED_BETS'] for k in valid)),
+                              ('investment',100*sum(len(locks[k]['SELECTED_BETS']) for k in valid)),
+                              ('hits',sum(settled[k]['OFFICIAL_RESULT'] in locks[k]['SELECTED_BETS'] for k in valid))]:
+                              require(metrics[field]==actual,'METRIC_READBACK:'+label+':'+field)
+                      details[variant]={'identity':identity,'metrics':evaluation['metrics']['candidate'],
+                          'comparison':evaluation['performance'],'cohort':evaluation['cohort']}
+                  daily.append({'date':day,'saved':len(keys),'eligible':len(valid),'excluded':dict(exclusions),
+                      'current':current_metrics,'candidates':details,'report_sha256':report['CONTENT_SHA256'],
+                      'official_source_sha256':report['official_source_sha256']})
+              require(sha(archive.read_bytes())==original_sha,'ARCHIVE_UNCHANGED')
+              print('GORIPAN_SAVED_RESULTS_READBACK='+json.dumps({'status':'PASS','source_run_id':43593109004,
+                  'source_artifact_id':14113760182,'source_archive_sha256':original_sha,
+                  'protocol_identity':protocol['identity'],'stage':protocol['stage'],'dates':protocol['days'],
+                  'baseline':baseline,'pending':(state.get('pending') or {}).get('identity'),'results':daily,
+                  'predictions_generated':False,'operational_writes':False,'adoption_run':False},sort_keys=True))
+          PY
