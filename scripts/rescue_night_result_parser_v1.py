@@ -112,7 +112,8 @@ def official_input_compatibility():
         official.CanonicalRunner.run_morning=adapted_period_morning(official,adapted_morning(official,parser))
         official._night_sg_race_keys_from_saved_b=adapted_night_binding(official,parser)
         from optional_display_isolation_v1 import isolate_optional_display
-        with isolate_optional_display():
+        from predeadline_capture_window_v1 import verified_odds_window
+        with isolate_optional_display(), verified_odds_window(official):
             yield
     finally:
         official.parse_result_text=parser

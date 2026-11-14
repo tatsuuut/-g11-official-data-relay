@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    'scripts/predeadline_capture_window_v1.py',
+    'scripts/test_predeadline_capture_window_v1.py',
+    'docs/predeadline-ten-minute-start-20261114.md',
     '.github/actions/g11-research-night-input/action.yml',
     '.github/workflows/g11-isolated-live-research.yml',
     'scripts/research_state_isolation_v1.py',

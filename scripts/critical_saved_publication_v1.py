@@ -68,6 +68,8 @@ def capture_boundary_delay(plan, saved_sources, now, maximum=300):
         require(due.utcoffset() == deadline.utcoffset() == timedelta(hours=9)
                 and due.date() == deadline.date() == now.date()
                 and deadline - due == timedelta(minutes=7), 'CAPTURE_BOUNDARY_PLAN')
+        from predeadline_capture_window_v1 import effective_due
+        due = effective_due(due, deadline)
         if now >= deadline:
             continue
         if due <= now:
