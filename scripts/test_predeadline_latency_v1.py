@@ -146,6 +146,17 @@ class ResearchTests(unittest.TestCase):
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_accelerated_writer_bounds_workers_and_preserves_legacy_default(self):
+        for cpus, expected in [(1,1), (2,2), (4,4), (16,4)]:
+            with patch.object(archive.os, 'sched_getaffinity', return_value=set(range(cpus))), \
+                    patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
+                self.assertEqual(f'pigz -1 -p {expected}', archive.compression_command(accelerated=True))
+                self.assertEqual('pigz -1 -p 2', archive.compression_command())
+        with patch.object(archive.os, 'sched_getaffinity', side_effect=OSError), \
+                patch.object(archive.os, 'cpu_count', return_value=2), \
+                patch.object(archive.shutil, 'which', return_value='/usr/bin/pigz'):
+            self.assertEqual('pigz -1 -p 2', archive.compression_command(accelerated=True))
+
     def test_supported_authenticated_mode_and_legacy_capability_fallback(self):
         for available, expected in [('--use-ocb-sym\n--force-aead', '--use-ocb-sym'),
                 ('--force-ocb\n--force-aead', '--force-ocb'), ('--force-aead', '--force-aead')]:

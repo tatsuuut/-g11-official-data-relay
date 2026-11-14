@@ -159,8 +159,10 @@ pigz at 22.021 seconds, and four-worker pigz at 21.144 seconds. Every restored
 file/directory matched, and source state remained identical. The CPU-only
 change is not adopted: less than one second per checkpoint is insufficient.
 
-The revised candidate retains two-worker pigz (standard gzip fallback), complete
-tar contents, AES256, passphrase handling, exact encrypted readbacks and
+The revised candidate combines supported authenticated OCB with available CPU
+affinity bounded to four pigz workers (standard gzip fallback). A legacy writer
+keeps two workers. It retains complete tar contents, AES256, passphrase handling,
+exact encrypted readbacks and
 GPG-authenticated restoration before extraction. It selects the writer's
 supported authenticated OCB option, preferring --use-ocb-sym, then --force-ocb,
 then the older --force-aead alias. A writer without these capabilities retains

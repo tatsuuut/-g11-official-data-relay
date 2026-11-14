@@ -9,10 +9,19 @@ import subprocess
 import time
 
 
-def compression_command(workers=2, *, codec='auto'):
-    """Retain the existing two-worker gzip format; overrides are for audits."""
+def compression_command(workers=None, *, codec='auto', accelerated=False):
+    """Use available CPUs with OCB; retain the legacy two-worker writer."""
     if codec not in ('auto', 'gzip', 'pigz'):
         raise ValueError('CHECKPOINT_COMPRESSION_CODEC')
+    if workers is None:
+        if accelerated:
+            try:
+                available = len(os.sched_getaffinity(0))
+            except (AttributeError, OSError):
+                available = os.cpu_count() or 1
+            workers = min(4, max(1, available))
+        else:
+            workers = 2
     if type(workers) is not int or not 1 <= workers <= 4:
         raise ValueError('CHECKPOINT_COMPRESSION_WORKERS')
     parallel = bool(shutil.which('pigz'))
@@ -43,7 +52,7 @@ def authenticated_encryption_options(mode='auto'):
     return []
 
 
-def encrypt(state, output, *, passphrase_fd=3, workers=2, codec='auto', mode='auto'):
+def encrypt(state, output, *, passphrase_fd=3, workers=None, codec='auto', mode='auto'):
     state, output = Path(state).resolve(), Path(output).absolute()
     if not state.is_dir() or output.is_relative_to(state):
         raise ValueError('CHECKPOINT_ARCHIVE_PATH')
@@ -54,8 +63,8 @@ def encrypt(state, output, *, passphrase_fd=3, workers=2, codec='auto', mode='au
         raise ValueError('CHECKPOINT_TEMP_EXISTS')
     # Complete standard gzip tar, AES256 and authenticated GPG decryption are
     # retained. Do not trade source coverage or integrity for latency.
-    compressor = compression_command(workers, codec=codec)
     encryption_options = authenticated_encryption_options(mode)
+    compressor = compression_command(workers, codec=codec, accelerated=bool(encryption_options))
     started = time.monotonic()
     tar = subprocess.Popen(['tar', '-I', compressor, '-cf', '-', '-C', str(state), '.'],
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
