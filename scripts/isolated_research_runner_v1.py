@@ -89,12 +89,13 @@ def event_selection(event, now):
 def select_event():
     isolation.require(os.environ.get('GITHUB_REPOSITORY') == REPOSITORY, 'RESEARCH_REPOSITORY')
     now = datetime.now(isolation.JST)
-    selected = event_selection(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_bytes()), now)
+    event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_bytes())
+    selected = event_selection(event, now)
     if not selected:
         outputs(active=False); return
     day, parent = selected['day'], selected['parent']
     source_key = ''
-    if selected['phase'] == 'night':
+    if selected['phase'] == 'night' or event.get('action') == 'completed':
         source_key = latest_canonical(day)
     else:
         exact = f'g11-state-v4-critical-{day}-{parent}'

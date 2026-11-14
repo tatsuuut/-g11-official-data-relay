@@ -3,7 +3,8 @@ run-name: RESEARCH-${{github.event.workflow_run.id}}
 on:
   workflow_run:
     workflows: [runtime sync]
-    types: [in_progress]
+    types: [in_progress, completed]
+    branches: [main]
 
 permissions:
   contents: read

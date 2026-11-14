@@ -158,6 +158,7 @@ class RoutingTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1]
         text=(root/'.github/workflows/g11-isolated-live-research.yml').read_text()
         self.assertIn('group: g11-isolated-saved-input-research',text)
+        self.assertIn('types: [in_progress, completed]',text)
         self.assertNotIn('g11-free-official-data-runner',text)
         self.assertIn('cache-key: g11-research-v1-',text)
         self.assertNotIn('daily_runtime_delivery_v1.py',text)
