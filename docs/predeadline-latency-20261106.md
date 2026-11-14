@@ -205,3 +205,12 @@ transfer, rather than treating CPU-only improvements as end-to-end gains.
 
 ISA-L igzip's standard gzip interface is documented by its upstream:
 https://github.com/intel/isa-l/blob/master/programs/igzip.1
+
+
+Level 0 ISA-L/OCB reduced full encryption from 23.257 to 13.219 seconds and
+extraction from 18.918 to 16.746 seconds, with every file unchanged. Its archive
+increased from 1,447,935,823 to 1,771,584,034 bytes (about 22%), so it is not
+adopted on CPU timing alone. The final comparison evaluates standard-compatible
+ISA-L levels 1 and 2 to account for cache transfer cost. Native corruption and
+full real encryption roundtrip tests are required by the public-runtime gate
+on future PRs, independent from the one-off saved-state benchmark.

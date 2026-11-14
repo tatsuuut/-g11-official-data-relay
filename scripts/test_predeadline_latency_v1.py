@@ -220,7 +220,7 @@ class ArchiveTests(unittest.TestCase):
                     self.fail('Real GPG roundtrip required: ' + probe.stderr.decode(errors='replace'))
                 self.skipTest('local gpg-agent unavailable; mandatory in contract CI')
             try:
-                for compressor, workers in [('gzip', 1), ('pigz', 2), ('pigz', 4)]:
+                for compressor, workers in [('gzip', 1), ('pigz', 2), ('igzip', 1)]:
                     if not shutil.which(compressor): continue
                     output = root/(compressor+str(workers)+'.gpg')
                     with tempfile.TemporaryFile() as secret:

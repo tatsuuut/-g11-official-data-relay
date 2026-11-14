@@ -227,6 +227,10 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Prepare and test standard gzip-compatible acceleration
+        run: |
+          sudo -n apt-get install -y --no-install-recommends isal pigz
+          G11_REQUIRE_ENCRYPTION_TESTS=1 python3 -m unittest discover -s scripts -p test_predeadline_latency_v1.py -v
       - name: Verify complete restoration and public cache failure boundaries
         run: python3 -m unittest discover -s scripts -p test_runtime_preparation_v1.py -v
       - name: Prepare public packages on the real runner

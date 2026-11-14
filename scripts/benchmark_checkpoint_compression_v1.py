@@ -40,7 +40,7 @@ def inventory(root):
 def benchmark(state, scratch, secret):
     before = inventory(state)
     results = []
-    for mode, codec, reader in [('legacy','pigz','python'), ('legacy','igzip','igzip'), ('ocb','igzip','igzip')]:
+    for mode, codec, reader in [('legacy','pigz','python'), ('ocb','igzip','igzip'), ('ocb','igzip2','igzip')]:
         with tempfile.TemporaryDirectory(dir=scratch, prefix='checkpoint-benchmark-') as tmp:
             root = Path(tmp)
             encrypted, archive, restored = root/'state.gpg', root/'state.tgz', root/'restored'
