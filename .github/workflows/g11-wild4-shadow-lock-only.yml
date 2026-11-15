@@ -1596,7 +1596,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: da010812e0d4e94738161b1fe810c2fa4e21a268
+          ref: 7260ad5833722c2b803612507ea4fc7cc98ad91d
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-public-projection
           persist-credentials: false
@@ -1623,7 +1623,7 @@ jobs:
           cmp "${GITHUB_WORKSPACE}/.g11-private/g11/wild_pack/v1/goripan_candidate_pool_v1.py" g11/wild_pack/v1/goripan_candidate_pool_v1.py
           cmp "${GITHUB_WORKSPACE}/.g11-private/g11/wild_pack/v1/goripan_multiday_v1.py" g11/wild_pack/v1/goripan_multiday_v1.py
           cmp "${GITHUB_WORKSPACE}/.g11-private/g11/wild_pack/v1/goripan_competition_v1.py" g11/wild_pack/v1/goripan_competition_v1.py
-          python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1
+          python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1 g11.wild_pack.v1.test_goripan_daily_comparison_v1
           python3 - <<'PYPUBLISHEDLOCK'
           import os,pathlib,sys
           sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'scripts'))
