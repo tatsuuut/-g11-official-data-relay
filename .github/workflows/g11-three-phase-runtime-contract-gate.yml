@@ -25,6 +25,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  goripan-prepared-reserve-contract:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/goripan-prepared-reserves-20261115'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: b30031c6b9500a7e7bcf0391ced0d85df8575850
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .goripan-reserve-private
+          persist-credentials: false
+          sparse-checkout: g11/wild_pack/v1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: d0cd925bfa6e1708f9dd488aef773d772aade088
+          path: .goripan-reserve-workflow
+          persist-credentials: false
+          sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
+          sparse-checkout-cone-mode: false
+      - name: Verify exact private source fingerprints and completed-NIGHT-only reserve enablement
+        working-directory: .goripan-reserve-private
+        run: |
+          python3 - <<'PYRESERVEGUARD'
+          import pathlib,textwrap
+          caller=pathlib.Path('../.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
+          assert 'g11-wild4-shadow-lock-only.yml@d0cd925bfa6e1708f9dd488aef773d772aade088' in caller
+          workflow=pathlib.Path('../.goripan-reserve-workflow/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
+          source=workflow.split("<<'PYMULTIGUARD'\n",1)[1].split('\n          PYMULTIGUARD',1)[0]
+          exec(compile(textwrap.dedent(source),'<pinned-multiday-guard>','exec'))
+          growth=workflow.split('      - name: Continue existing BET learning after completed NIGHT',1)[1].split('      - name: Preserve new training evidence',1)[0]
+          assert "steps.settlement.outputs.complete == 'true'" in growth
+          assert "G11_GORIPAN_RESERVE_ENABLED: 'true'" in growth
+          assert 'timeout-minutes: 17' in growth
+          assert workflow.count("G11_GORIPAN_RESERVE_ENABLED: 'true'")==1
+          print('GORIPAN_PREPARED_RESERVE_RUNTIME_GUARD=PASS')
+          PYRESERVEGUARD
+      - name: Verify saved comparisons, immediate replacement and unchanged promotion rules
+        working-directory: .goripan-reserve-private
+        run: >-
+          python3 -S -m unittest
+          g11.wild_pack.v1.test_goripan_prepared_reserves_v1
+          g11.wild_pack.v1.test_goripan_candidate_pool_v1
+          g11.wild_pack.v1.test_goripan_competition_v1
+          g11.wild_pack.v1.test_goripan_multiday_v1
+          g11.wild_pack.v1.test_goripan_500_update_v1
+          g11.wild_pack.v1.test_wild4_lifecycle_v1 -q
   ten-minute-frozen-collector:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/predeadline-ten-minute-start-20261114'
     runs-on: ubuntu-24.04
