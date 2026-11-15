@@ -1695,7 +1695,7 @@ jobs:
           PYUNIONPUBLIC
           fi
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
-      - name: Deliver WILD4 public projection and verify exact Site GET readback
+      - name: Deliver WILD4 public projection
         id: public-delivery
         if: steps.public-projection.outputs.ready == 'true'
         continue-on-error: true
@@ -1724,28 +1724,6 @@ jobs:
           try: saved=json.loads(output.read_bytes())
           except ValueError: raise SystemExit('GORIPAN_DELIVERY_HTTP_'+sent.stdout+'_NON_JSON')
           if saved.get('status')!='PASS': raise SystemExit('GORIPAN_DELIVERY_HTTP_'+sent.stdout+':'+str(saved.get('error')))
-          query=urllib.parse.urlencode({'view':'v53-final','date':os.environ['OPERATIONAL_DATE']})
-          sys.path.insert(0,'scripts')
-          import hot_delta_transport_v1 as hot
-          pathlib.Path('.relay-output').mkdir(exist_ok=True)
-          feed,readback_headers,data=hot.fetch(base+'/api/g11-feed?'+query)
-          expected=readback_headers['x-g11-feed-sha256']
-          if hashlib.sha256(data).hexdigest()!=expected: raise SystemExit('SITE_GET_SHA')
-          feed=json.loads(data)
-          expected_status='VERIFIED_CANONICAL_PROJECTION' if '${{ steps.decrypted.outputs.canonical_ready }}' == 'true' else 'VERIFIED_RESCUE_PROSPECTIVE_SHADOW'
-          if feed.get('goripan',{}).get('status')!=expected_status: raise SystemExit('SITE_PROJECTION_STATUS')
-          races={r['key']:r for r in feed['races']}
-          for lock in projection['races']:
-              actual=races[lock['race_key']].get('wild_pack',{}).get('wild4',{}).get('goripan')
-              if actual!=lock: raise SystemExit('SITE_LOCK_READBACK_MISMATCH')
-          if feed.get('goripan',{}).get('observation',{}).get('lifecycle') != projection.get('observation',{}).get('lifecycle'): raise SystemExit('SITE_LIFECYCLE_READBACK_MISMATCH')
-          print('GORIPAN_LIFECYCLE_READBACK='+json.dumps(projection.get('observation',{}).get('lifecycle'),sort_keys=True))
-          print('GORIPAN_SITE_GET_READBACK=PASS')
-          print('GORIPAN_SAVED_LOCKS='+str(len(projection['races'])))
-          print('GORIPAN_ABSTAIN='+str(sum(r['abstain'] for r in projection['races'])))
-          print('GORIPAN_BET_COUNTS='+json.dumps(sorted({r['bet_count'] for r in projection['races']})))
-          print('GORIPAN_SOURCE_LOCK_MUTATION=0')
-          print('GORIPAN_UNVERIFIED_CANDIDATE_PROMOTION=false')
           PY
 
       - name: Checkout notification input reader only
@@ -1771,10 +1749,45 @@ jobs:
             --projection "${RUNNER_TEMP}/goripan-public-projection.json" \
             --odds-day "${RUNNER_TEMP}/wild4-verified-odds-day.json"
 
+      - name: Verify exact Site GET after priority notification input
+        id: public-readback
+        if: steps.public-projection.outputs.ready == 'true' && steps.public-delivery.outcome == 'success'
+        continue-on-error: true
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,sys,urllib.parse
+          base='https://g11-race-lab.higatatsunori2.chatgpt.site'
+          projection=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-public-projection.json').read_bytes())
+          query=urllib.parse.urlencode({'view':'v53-final','date':os.environ['OPERATIONAL_DATE']})
+          sys.path.insert(0,'scripts')
+          import hot_delta_transport_v1 as hot
+          pathlib.Path('.relay-output').mkdir(exist_ok=True)
+          feed,readback_headers,data=hot.fetch(base+'/api/g11-feed?'+query)
+          expected=readback_headers['x-g11-feed-sha256']
+          if hashlib.sha256(data).hexdigest()!=expected: raise SystemExit('SITE_GET_SHA')
+          feed=json.loads(data)
+          expected_status='VERIFIED_CANONICAL_PROJECTION' if '${{ steps.decrypted.outputs.canonical_ready }}' == 'true' else 'VERIFIED_RESCUE_PROSPECTIVE_SHADOW'
+          if feed.get('goripan',{}).get('status')!=expected_status: raise SystemExit('SITE_PROJECTION_STATUS')
+          races={r['key']:r for r in feed['races']}
+          for lock in projection['races']:
+              actual=races[lock['race_key']].get('wild_pack',{}).get('wild4',{}).get('goripan')
+              if actual!=lock: raise SystemExit('SITE_LOCK_READBACK_MISMATCH')
+          if feed.get('goripan',{}).get('observation',{}).get('lifecycle') != projection.get('observation',{}).get('lifecycle'): raise SystemExit('SITE_LIFECYCLE_READBACK_MISMATCH')
+          print('GORIPAN_LIFECYCLE_READBACK='+json.dumps(projection.get('observation',{}).get('lifecycle'),sort_keys=True))
+          print('GORIPAN_SITE_GET_READBACK=PASS')
+          print('GORIPAN_SAVED_LOCKS='+str(len(projection['races'])))
+          print('GORIPAN_ABSTAIN='+str(sum(r['abstain'] for r in projection['races'])))
+          print('GORIPAN_BET_COUNTS='+json.dumps(sorted({r['bet_count'] for r in projection['races']})))
+          print('GORIPAN_SOURCE_LOCK_MUTATION=0')
+          print('GORIPAN_UNVERIFIED_CANDIDATE_PROMOTION=false')
+          PY
+
       - name: Require successful attempted public projection and delivery
         if: always() && !cancelled() && (steps.public-source.outcome == 'failure' || steps.public-projection.outcome == 'failure' || steps.public-projection.outputs.ready == 'true')
         run: |
-          if [ '${{ steps.public-source.outcome }}' = 'failure' ] || [ '${{ steps.public-projection.outcome }}' = 'failure' ] || { [ '${{ steps.public-projection.outputs.ready }}' = 'true' ] && [ '${{ steps.public-delivery.outcome }}' != 'success' ]; }; then
+          if [ '${{ steps.public-source.outcome }}' = 'failure' ] || [ '${{ steps.public-projection.outcome }}' = 'failure' ] || { [ '${{ steps.public-projection.outputs.ready }}' = 'true' ] && { [ '${{ steps.public-delivery.outcome }}' != 'success' ] || [ '${{ steps.public-readback.outcome }}' != 'success' ]; }; }; then
             echo 'WILD4_ATTEMPTED_PUBLICATION_NOT_VERIFIED' >&2
             exit 1
           fi
