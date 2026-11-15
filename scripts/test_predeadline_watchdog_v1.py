@@ -325,6 +325,29 @@ class FailedLiveRecoveryTests(unittest.TestCase):
             'ref': 'main', 'inputs': {'phase': 'predeadline', 'operational_date': '2026-11-12'}})
         self.assertTrue(all('/rerun' not in call[1] for call in client.calls))
 
+    def short_capture_failure(self):
+        self.jobs['jobs'][0]['steps']=[
+            {'name':name,'conclusion':'success'} for name in (
+                'Select newest same-day persisted checkpoint',
+                'Require the selected checkpoint to be restored exactly',
+                'Decrypt and validate restored state','Restore frozen daily source',
+                'Resolve immutable private source identity')]
+        self.jobs['jobs'][0]['steps'] += [
+            {'name':'Capture and lock dependency-free PREDEADLINE critical lane','conclusion':'failure'},
+            {'name':'Report short LIVE delivery failures after continuation','conclusion':'failure'}]
+
+    def test_short_collector_failure_requests_one_fresh_verified_invocation_without_claiming_new_locks(self):
+        self.short_capture_failure()
+        self.assertEqual(self.exercise().post_count,1)
+
+    def test_short_collector_failure_requires_every_retained_source_and_checkpoint_guard(self):
+        import copy
+        self.short_capture_failure();original=copy.deepcopy(self.jobs)
+        for i in range(len(original['jobs'][0]['steps'])):
+            self.jobs=copy.deepcopy(original)
+            self.jobs['jobs'][0]['steps'][i]['conclusion']='skipped'
+            self.assertEqual(self.exercise().post_count,0)
+
     def test_observed_persistent_filtered_mismatch_recovers_from_verified_complete_index(self):
         from test_predeadline_dispatch_v1 import DriftingStatusClient
         client = DriftingStatusClient(before=[self.run])
@@ -682,3 +705,4 @@ date() {
         self.assertEqual(self.route(6, event='schedule', schedule='*/5 18-21 * * *')['phase'], 'morning')
         self.assertEqual(self.route(8, event='schedule', schedule='*/5 23 * * *')['phase'], 'predeadline')
         self.assertEqual(self.route(0, event='workflow_dispatch', phase='night')['phase'], 'night')
+

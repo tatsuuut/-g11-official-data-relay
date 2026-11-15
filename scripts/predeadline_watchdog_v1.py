@@ -282,10 +282,24 @@ def failed_live_identity(run: dict, jobs: dict, now: datetime, run_id: int,
             or runtime[0].get("conclusion") != "failure"):
         return False
     steps = runtime[0].get("steps") or []
-    return (any(step.get("name") == "Report failed continuation"
+    legacy = (any(step.get("name") == "Report failed continuation"
                 and step.get("conclusion") == "failure" for step in steps)
             and any(step.get("name") == "Save early encrypted critical checkpoint"
                     and step.get("conclusion") == "success" for step in steps))
+    # A short-cycle collector can fail before it can save a new critical
+    # checkpoint. A fresh normal invocation must restore and revalidate the
+    # prior accepted checkpoint itself; never treat the failed state as saved.
+    short_capture = (
+        any(step.get("name") == "Report short LIVE delivery failures after continuation"
+            and step.get("conclusion") == "failure" for step in steps)
+        and any(step.get("name") == "Capture and lock dependency-free PREDEADLINE critical lane"
+            and step.get("conclusion") == "failure" for step in steps)
+        and all(any(step.get("name") == name and step.get("conclusion") == "success" for step in steps)
+            for name in ("Select newest same-day persisted checkpoint",
+                "Require the selected checkpoint to be restored exactly",
+                "Decrypt and validate restored state", "Restore frozen daily source",
+                "Resolve immutable private source identity")))
+    return legacy or short_capture
 
 
 def recover_failed_live(now: datetime, token: str, repository: str, origin: str) -> None:
@@ -396,4 +410,5 @@ def main(now: datetime | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
 
