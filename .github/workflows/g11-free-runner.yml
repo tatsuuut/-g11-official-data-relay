@@ -1,4 +1,5 @@
 name: runtime sync # optional display research cannot gate saved prediction delivery
+# Operator NIGHT recovery 2026-11-15: retain saved daily authority and prediction LOCKs.
 run-name: ${{github.event_name == 'workflow_dispatch' && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
