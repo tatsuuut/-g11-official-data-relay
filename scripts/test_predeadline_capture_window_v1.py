@@ -354,5 +354,36 @@ class AvailabilityReceiptTests(unittest.TestCase):
                 self.assertFalse(getattr(self.official.CanonicalRunner,'_g11_ten_minute_odds_window',False))
                 with self.assertRaisesRegex(old.PipelineError,'AVAILABILITY_OFFICIAL_RECEIPT_BINDING'):self.payload()
 
+    def test_saved_t10_withdrawal_reopens_during_night_without_rewriting_evidence(self):
+        import tempfile
+        raw=b'synthetic official withdrawal response'
+        self.receipt['SHA256']=hashlib.sha256(raw).hexdigest()
+        morning={'SNAPSHOT':{'PAYLOAD':{'PREDEADLINE_PLAN':[self.task]}}}
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);writes=[]
+            def load(stage,name):
+                if stage=='morning':return morning
+                data=(root/'snapshots'/stage/(name+'.json')).read_bytes()
+                return {'SNAPSHOT':json.loads(data),'SNAPSHOT_SHA256':hashlib.sha256(data).hexdigest()}
+            def commit(stage,name,payload,receipts):
+                path=root/'snapshots'/stage/(name+'.json');path.parent.mkdir(parents=True,exist_ok=True)
+                with path.open('x') as output:
+                    json.dump({'STAGE':'PREDEADLINE','NAME':name,'PAYLOAD':payload,'SOURCE_RECEIPTS':receipts},output)
+                writes.append(path)
+            store=types.SimpleNamespace(root=root,response_bytes=lambda sid:raw,
+                commit_snapshot=commit,load_verified_snapshot=load)
+            with patch.object(self.helper,'parse_official_withdrawal',return_value=self.withdrawal), \
+                    patch.object(window,'datetime',wraps=datetime) as clock:
+                clock.now.return_value=NOW+timedelta(seconds=1)
+                with window.verified_odds_window(self.official):
+                    saved=self.helper.save(store,self.task,self.receipt,self.withdrawal,NOW+timedelta(seconds=1))
+                original_bytes=writes[0].read_bytes()
+                clock.now.return_value=DEADLINE+timedelta(hours=1)
+                with window.verified_odds_window(self.official):
+                    self.assertEqual(saved,self.helper.load_verified(store,KEY))
+                self.assertEqual(original_bytes,writes[0].read_bytes())
+                self.assertEqual(1,len(writes))
+
 
 if __name__=='__main__':unittest.main()
+
