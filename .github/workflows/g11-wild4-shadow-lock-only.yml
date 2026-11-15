@@ -246,7 +246,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 99692afa07977f9bd857ec90eadba642f79724bb
+          ref: b30031c6b9500a7e7bcf0391ced0d85df8575850
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -258,7 +258,7 @@ jobs:
           import hashlib,json,pathlib
           from g11.wild_pack.v1 import goripan_multiday_v1 as multi
           from g11.wild_pack.v1 import goripan_competition_v1 as competition
-          expected=json.loads('{"g11/wild_pack/v1/goripan_competition_v1.py":"229f5f11650332e8fe254dae38b81c72a7adfcf8eb703f19af4d124aa20aa3ce","g11/wild_pack/v1/goripan_multiday_v1.py":"25fea3a38a429d4ae5fc155d7e09000fb08dbc54da887e2ab6b978f036d41028","g11/wild_pack/v1/goripan_candidate_pool_v1.py":"cda6f8bde8a7d212f8aaa7cb9abe1c0feac30339d320ebe5227999db738beb59","g11/wild_pack/v1/wild4_lifecycle_v1.py":"b6ce4ad3d8475660316cf50f62d227d7b9cc137b4e49441ec215fb819c32ae1c"}')
+          expected=json.loads('{"g11/wild_pack/v1/goripan_competition_v1.py":"3ab4d769fd32ed98218866935008389d5a12472fb494ad66a1c6b417e849c17c","g11/wild_pack/v1/goripan_multiday_v1.py":"25fea3a38a429d4ae5fc155d7e09000fb08dbc54da887e2ab6b978f036d41028","g11/wild_pack/v1/goripan_candidate_pool_v1.py":"cda6f8bde8a7d212f8aaa7cb9abe1c0feac30339d320ebe5227999db738beb59","g11/wild_pack/v1/wild4_lifecycle_v1.py":"b6ce4ad3d8475660316cf50f62d227d7b9cc137b4e49441ec215fb819c32ae1c"}')
           assert multi.CONTRACT=='G11_GORIPAN_MULTIDAY_5_5_800_V1'
           assert (multi.POLICY['selection_days'],multi.POLICY['selection_races'],
                   multi.POLICY['confirmation_days'],multi.POLICY['confirmation_races'])==(5,500,5,300)
@@ -266,11 +266,14 @@ jobs:
           assert competition.CONTRACT=='G11_GORIPAN_CANDIDATE_COMPETITION_V1'
           assert competition.APPROVAL=='USER_20261114_CLOSE_RUNNER_UP_AND_DAY4_5_REPLACEMENT'
           assert competition.POLICY==json.loads('{"close_roi_gap_pp":5,"retirement_min_days":4,"retirement_min_paired_races":400,"retirement_roi_gap_pp":20,"retirement_losing_day_fraction":0.75,"selection_days":5,"selection_races":500,"confirmation_days":5,"confirmation_races":300}')
+          assert competition.RESERVE_CONTRACT=='G11_GORIPAN_PREPARED_REPLACEMENTS_V1'
+          assert competition.RESERVE_APPROVAL=='USER_20261115_PREPARE_SAME_METHOD_AND_IMMEDIATE_REFILL'
+          assert competition.RESERVE_POLICY==json.loads('{"ready_per_variant":1,"max_ready":3,"max_workers":2,"training_budget_seconds":900,"retrain_competing_models":false,"activation":"NEXT_OPERATIONAL_DAY","selection_by_results":false}')
           for path,sha in expected.items():
               assert hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()==sha, path
           print('WILD4_MULTIDAY_CONTRACT_READBACK='+json.dumps({'contract':multi.CONTRACT,
               'policy':multi.POLICY,'competition_contract':competition.CONTRACT,'competition_policy':competition.POLICY,
-              'source_sha':'99692afa07977f9bd857ec90eadba642f79724bb','status':'PASS'},sort_keys=True))
+              'source_sha':'b30031c6b9500a7e7bcf0391ced0d85df8575850','status':'PASS'},sort_keys=True))
           PYMULTIGUARD
       - name: Decrypt verified state and candidate
         id: decrypted
@@ -1381,9 +1384,10 @@ jobs:
         working-directory: .g11-private
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          G11_GORIPAN_RESERVE_ENABLED: 'true'
         run: |
           python3 - <<'PYGROW'
-          import os,pathlib
+          import json,os,pathlib
           from datetime import datetime,timezone
           from g11.canonical.official_pipeline import OfficialArtifactStore
           from g11.wild_pack.v1 import wild4_lifecycle_v1 as life
@@ -1393,6 +1397,12 @@ jobs:
               source.load_verified_snapshot('night','workbook-ledger-projection'),
               source.load_verified_snapshot('night','official-day-results'),now=datetime.now(timezone.utc))
           print('WILD4_LEARNING_STATE='+state['last_attempt']['state'])
+          bank=state.get('candidate_pool',{}).get('multiday',{}).get('competition',{}).get('replacement_reserves')
+          print('WILD4_REPLACEMENT_RESERVES='+json.dumps({'date':os.environ['OPERATIONAL_DATE'],
+              'contract':'G11_GORIPAN_PREPARED_REPLACEMENTS_V1',
+              'configured_max':3,'ready_count':len(bank['ready']) if bank else None,
+              'ready_variants':[r['member']['variant'] for r in bank['ready']] if bank else [],
+              'training_holds':bank['training_holds'] if bank else [],'formal_mutated':False},sort_keys=True))
           evidence=pathlib.Path(os.environ['RUNNER_TEMP'])/'wild4-trained-candidate-evidence'
           if (evidence/'registry-entry.json').is_file() or (evidence/'pool-manifest.json').is_file():
               with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write('evidence_ready=true\n')
