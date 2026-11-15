@@ -5,7 +5,7 @@ canonical writes. Invoked only after the existing verified Site delivery.
 """
 from __future__ import annotations
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 import json
 import math
@@ -24,6 +24,7 @@ PROBABILITY_PROOF_SCHEMA = "G11_WILD4_LOCK_PROBABILITY_PROOF_V1"
 ORIGIN = "https://g11-race-lab.higatatsunori2.chatgpt.site"
 WIRE_LIMIT = 240_000
 RESCUE_FROM_DAY = "2026-10-21"
+NOTIFICATION_TEN_MINUTE_FROM = "20261116"
 
 def rescue_source(source, day, is_gori):
     """Input transport scope only; the Site revalidates its accepted boundary."""
@@ -51,6 +52,59 @@ def canonical(value):
 def sha(value):
     return hashlib.sha256(canonical(value)).hexdigest()
 
+def notification_odds(morning, saved, race_key, raw, parser, receipt_schema):
+    """Read-only admission for the approved early capture, from Nov 16 only.
+
+    The original seven-minute plan and every source object stay unchanged.
+    This admits saved prices, not a fresh-price claim or a notification. The
+    Site still enforces odds age <=3 minutes and deadline lead >=2 minutes.
+    """
+    require(isinstance(race_key, str) and re.fullmatch(r'\d{8}-\d{2}-(?:0[1-9]|1[0-2])', race_key)
+            and 1 <= int(race_key[9:11]) <= 24, 'NOTIFICATION_ODDS_RACE')
+    require(race_key[:8] >= NOTIFICATION_TEN_MINUTE_FROM, 'NOTIFICATION_CAPTURE_WINDOW_NOT_ACTIVE')
+    def jst(value):
+        require(isinstance(value, str), 'NOTIFICATION_ODDS_TIME')
+        at = datetime.fromisoformat(value)
+        require(at.utcoffset() == timedelta(hours=9), 'NOTIFICATION_ODDS_TIME')
+        return at
+    plan = morning['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN']
+    tasks = [t for t in plan if t.get('RACE_KEY') == race_key and t.get('KIND') == 'ODDS3T']
+    require(len(tasks) == 1, 'NOTIFICATION_ODDS_PLAN')
+    task = tasks[0]
+    require(set(task) == {'SOURCE_ID','KIND','RACE_KEY','DUE_AT_JST','MUST_FINISH_BEFORE_JST','URL'}, 'NOTIFICATION_ODDS_PLAN')
+    source_id = 'odds3t-' + race_key
+    url = f'https://www.boatrace.jp/owpc/pc/race/odds3t?hd={race_key[:8]}&jcd={race_key[9:11]}&rno={int(race_key[-2:])}'
+    deadline = jst(task['MUST_FINISH_BEFORE_JST'])
+    require(task['SOURCE_ID'] == source_id and task['URL'] == url
+            and deadline.strftime('%Y%m%d') == race_key[:8]
+            and jst(task['DUE_AT_JST']) == deadline - timedelta(minutes=7), 'NOTIFICATION_ODDS_PLAN_BINDING')
+    snapshot = saved['SNAPSHOT']
+    require(snapshot.get('STAGE') == 'PREDEADLINE' and snapshot.get('NAME') == source_id, 'NOTIFICATION_ODDS_SNAPSHOT')
+    receipts = snapshot['SOURCE_RECEIPTS']
+    require(isinstance(receipts, list) and len(receipts) == 1, 'NOTIFICATION_ODDS_RECEIPT')
+    receipt = receipts[0]
+    require(receipt.get('SCHEMA') == receipt_schema and receipt.get('SOURCE_ID') == source_id
+            and receipt.get('HOST') == 'www.boatrace.jp' and receipt.get('URL') == url
+            and receipt.get('FINAL_URL') == url and receipt.get('STATUS') == 'HTTP_200_BYTE_EXACT_READBACK'
+            and hashlib.sha256(raw).hexdigest() == receipt.get('SHA256'), 'NOTIFICATION_ODDS_OFFICIAL_SOURCE')
+    captured = jst(receipt['CAPTURED_AT_JST'])
+    require(deadline - timedelta(minutes=10) <= captured < deadline, 'NOTIFICATION_ODDS_CAPTURE_WINDOW')
+    payload = snapshot['PAYLOAD']
+    require(set(payload) == {'STATUS','RACE_KEY','KIND','CAPTURED_AT_JST','PARSED'}
+            and payload['STATUS'] == 'PREDEADLINE_SOURCE_COMPLETE' and payload['RACE_KEY'] == race_key
+            and payload['KIND'] == 'ODDS3T' and payload['CAPTURED_AT_JST'] == receipt['CAPTURED_AT_JST'], 'NOTIFICATION_ODDS_PAYLOAD')
+    parsed = payload['PARSED']
+    require(set(parsed) == {'ODDS_ROWS'} and parsed['ODDS_ROWS'] == parser(raw), 'NOTIFICATION_ODDS_RAW_REPARSE')
+    odds = {}
+    for row in parsed['ODDS_ROWS']:
+        require(set(row) == {'COMBINATION','NORMALIZED_TEXT','MARKET_ODDS'} and row['COMBINATION'] not in odds
+                and type(row['MARKET_ODDS']) in (int, float) and math.isfinite(row['MARKET_ODDS'])
+                and row['MARKET_ODDS'] > 0, 'NOTIFICATION_ODDS_EXACT_120')
+        odds[row['COMBINATION']] = row['MARKET_ODDS']
+    expected = {f'{a}-{b}-{c}' for a in range(1,7) for b in range(1,7) for c in range(1,7) if len({a,b,c}) == 3}
+    require(len(odds) == 120 and set(odds) == expected, 'NOTIFICATION_ODDS_EXACT_120')
+    return odds
+
 def read_official(store_path, race_key):
     # Existing byte/receipt/RAW-reparse/120-combination/window verifier.
     from g11.canonical.official_pipeline import OfficialArtifactStore, CanonicalRunner
@@ -58,7 +112,12 @@ def read_official(store_path, race_key):
     store = OfficialArtifactStore(Path(os.path.abspath(store_path)))
     morning = store.load_verified_snapshot("morning", "official-day-input")
     saved = store.load_verified_snapshot("predeadline", "odds3t-" + race_key)
-    odds = CanonicalRunner._validated_odds_only_market(SimpleNamespace(store=store), morning, saved, race_key)
+    if race_key[:8] >= NOTIFICATION_TEN_MINUTE_FROM:
+        from g11.canonical.official_pipeline import RECEIPT_SCHEMA, parse_odds3t_html
+        odds = notification_odds(morning, saved, race_key, store.response_bytes('odds3t-' + race_key),
+                                 parse_odds3t_html, RECEIPT_SCHEMA)
+    else:
+        odds = CanonicalRunner._validated_odds_only_market(SimpleNamespace(store=store), morning, saved, race_key)
     receipt = saved["SNAPSHOT"]["SOURCE_RECEIPTS"][0]
     require(all(type(v) in (int, float) and math.isfinite(v) and v > 0 for v in odds.values()), "OFFICIAL_ODDS_VALUES")
     return saved, receipt, odds

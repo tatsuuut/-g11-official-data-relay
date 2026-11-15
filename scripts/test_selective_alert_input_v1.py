@@ -217,6 +217,82 @@ class ProbabilityTransportTest(unittest.TestCase):
             failed=m.deliver_probabilities_optional(root,self.source([row]),token="test-only",sender=lambda *_:(_ for _ in ()).throw(RuntimeError()))
             self.assertEqual(failed["status"],"HELD");self.assertEqual(failed["sources_sent"],0)
 
+class EarlyNotificationOddsTest(unittest.TestCase):
+    def fixture(self, day='2026-11-16', captured='10:36:00'):
+        key=day.replace('-','')+'-13-01';source='odds3t-'+key
+        url=f'https://www.boatrace.jp/owpc/pc/race/odds3t?hd={key[:8]}&jcd=13&rno=1'
+        raw=b'original verified response bytes'
+        rows=[{'COMBINATION':f'{a}-{b}-{c}','NORMALIZED_TEXT':'12.3','MARKET_ODDS':12.3}
+              for a in range(1,7) for b in range(1,7) for c in range(1,7) if len({a,b,c})==3]
+        task={'SOURCE_ID':source,'KIND':'ODDS3T','RACE_KEY':key,'URL':url,
+              'DUE_AT_JST':day+'T10:38:00+09:00','MUST_FINISH_BEFORE_JST':day+'T10:45:00+09:00'}
+        receipt={'SCHEMA':'G11_CANONICAL_OFFICIAL_RESPONSE_RECEIPT','SOURCE_ID':source,'HOST':'www.boatrace.jp',
+                 'URL':url,'FINAL_URL':url,'STATUS':'HTTP_200_BYTE_EXACT_READBACK','SHA256':m.hashlib.sha256(raw).hexdigest(),
+                 'CAPTURED_AT_JST':day+'T'+captured+'+09:00'}
+        saved={'SNAPSHOT':{'STAGE':'PREDEADLINE','NAME':source,'SOURCE_RECEIPTS':[receipt],
+               'PAYLOAD':{'STATUS':'PREDEADLINE_SOURCE_COMPLETE','RACE_KEY':key,'KIND':'ODDS3T',
+               'CAPTURED_AT_JST':receipt['CAPTURED_AT_JST'],'PARSED':{'ODDS_ROWS':copy.deepcopy(rows)}}}}
+        morning={'SNAPSHOT':{'PAYLOAD':{'PREDEADLINE_PLAN':[task]}}}
+        return morning,saved,key,raw,rows
+    def checked(self, f):
+        morning,saved,key,raw,rows=f
+        def parser(actual):
+            self.assertEqual(actual,raw)
+            return rows
+        return m.notification_odds(morning,saved,key,raw,parser,'G11_CANONICAL_OFFICIAL_RESPONSE_RECEIPT')
+    def test_early_and_legacy_window_prices_are_identical_and_no_source_is_rewritten(self):
+        for captured in ['10:35:00','10:36:00','10:38:00','10:44:59']:
+            f=self.fixture(captured=captured);before=copy.deepcopy(f)
+            self.assertEqual(len(self.checked(f)),120);self.assertEqual(f,before)
+    def test_forward_only_boundary_and_exact_ten_minute_deadline_bounds(self):
+        for f in [self.fixture(day='2026-11-15'),self.fixture(captured='10:34:59'),self.fixture(captured='10:45:00')]:
+            with self.assertRaises(ValueError):self.checked(f)
+    def test_official_identity_plan_and_receipt_binding_cannot_be_waived(self):
+        edits=[lambda a,b:b['SNAPSHOT'].update(NAME='different'),
+               lambda a,b:b['SNAPSHOT'].update(STAGE='MORNING'),
+               lambda a,b:b['SNAPSHOT']['SOURCE_RECEIPTS'][0].update(HOST='example.com'),
+               lambda a,b:b['SNAPSHOT']['SOURCE_RECEIPTS'][0].update(FINAL_URL='https://example.com'),
+               lambda a,b:b['SNAPSHOT']['SOURCE_RECEIPTS'][0].update(STATUS='HTTP_404'),
+               lambda a,b:b['SNAPSHOT']['SOURCE_RECEIPTS'][0].update(SCHEMA='other'),
+               lambda a,b:a['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN'][0].update(DUE_AT_JST='2026-11-16T10:30:00+09:00'),
+               lambda a,b:a['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN'].append(copy.deepcopy(a['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN'][0])),
+               lambda a,b:b['SNAPSHOT']['PAYLOAD'].update(RACE_KEY='20261116-13-02'),
+               lambda a,b:b['SNAPSHOT']['PAYLOAD'].update(CAPTURED_AT_JST='2026-11-16T10:37:00+09:00')]
+        for edit in edits:
+            f=self.fixture();edit(f[0],f[1])
+            with self.assertRaises(ValueError):self.checked(f)
+    def test_raw_hash_reparse_and_exact_120_prices_fail_closed(self):
+        edits=[lambda b:b['SNAPSHOT']['SOURCE_RECEIPTS'][0].update(SHA256='a'*64),
+               lambda b:b['SNAPSHOT']['PAYLOAD']['PARSED']['ODDS_ROWS'].pop(),
+               lambda b:b['SNAPSHOT']['PAYLOAD']['PARSED']['ODDS_ROWS'][0].update(MARKET_ODDS=999)]
+        for edit in edits:
+            f=self.fixture();edit(f[1])
+            with self.assertRaises(ValueError):self.checked(f)
+        for price in [0,-1,float('nan'),True]:
+            f=self.fixture();f[4][0]['MARKET_ODDS']=price;f[1]['SNAPSHOT']['PAYLOAD']['PARSED']['ODDS_ROWS']=copy.deepcopy(f[4])
+            with self.assertRaises(ValueError):self.checked(f)
+        f=self.fixture();f[4][-1]=copy.deepcopy(f[4][0]);f[1]['SNAPSHOT']['PAYLOAD']['PARSED']['ODDS_ROWS']=copy.deepcopy(f[4])
+        with self.assertRaises(ValueError):self.checked(f)
+    def test_real_reader_uses_verified_store_and_raw_parser_on_the_new_date(self):
+        f=self.fixture();morning,saved,key,raw,rows=f;calls=[]
+        class Store:
+            def __init__(self,root):calls.append(('root',root))
+            def load_verified_snapshot(self,stage,name):
+                calls.append((stage,name));return morning if stage=='morning' else saved
+            def response_bytes(self,name):calls.append(('raw',name));return raw
+        class Runner:
+            @staticmethod
+            def _validated_odds_only_market(*_):raise AssertionError('legacy seven-minute verifier used')
+        module=types.ModuleType('g11.canonical.official_pipeline')
+        module.OfficialArtifactStore=Store;module.CanonicalRunner=Runner
+        module.RECEIPT_SCHEMA='G11_CANONICAL_OFFICIAL_RESPONSE_RECEIPT'
+        module.parse_odds3t_html=lambda actual:rows if actual==raw else []
+        with patch.dict(sys.modules,{'g11.canonical.official_pipeline':module}):
+            result=m.read_official(Path('/verified/store'),key)
+        self.assertEqual(len(result[2]),120)
+        self.assertIn(('morning','official-day-input'),calls);self.assertIn(('predeadline','odds3t-'+key),calls)
+        self.assertIn(('raw','odds3t-'+key),calls)
+
 if __name__=='__main__':unittest.main()
 
 
