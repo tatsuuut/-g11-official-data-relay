@@ -13,6 +13,7 @@ EFFECTIVE_FROM = date(2026, 11, 14)
 CAPTURE_MINUTES = 10
 ODDS_WINDOW_SHA = '7c018b903107ce8ca44eac3224dfc756c12f230ebecd7d41dfc1362bbe799344'
 FORMAL_PLAN_SHA = '8c9d2dc0ffd441dc530bbe7832511f47f274e36778b5be1361e9d87a2eac5344'
+AVAILABILITY_WINDOW_SHA = '4d36e7826f48db78fd4dd2b47aa445d3bae24f4b87bff4a02a15538e8cccba4d'
 
 
 def effective_due(due, deadline):
@@ -38,16 +39,21 @@ def captured_in_window(due, deadline, captured):
 
 @contextmanager
 def verified_odds_window(official):
-    """Align both receipt gates before allowing T-10 acquisition; no LOCK writes."""
+    """Align all retained receipt gates before T-10 acquisition; no LOCK writes."""
     runner = official.CanonicalRunner
     original = getattr(runner,'_validated_odds_only_market',None)
     invocation = getattr(official,'FORMAL_ADAPTER',None)
     original_plan = getattr(invocation,'_bind_predeadline_plan',None)
+    availability = getattr(official,'PREDEADLINE_AVAILABILITY',None)
+    original_availability = getattr(availability,'_payload',None)
     if original is None or original_plan is None:
         yield False
         return
     if (hashlib.sha256(inspect.getsource(original).encode()).hexdigest() != ODDS_WINDOW_SHA
-            or hashlib.sha256(inspect.getsource(original_plan).encode()).hexdigest() != FORMAL_PLAN_SHA):
+            or hashlib.sha256(inspect.getsource(original_plan).encode()).hexdigest() != FORMAL_PLAN_SHA
+            or (availability is not None and (original_availability is None
+                or hashlib.sha256(inspect.getsource(original_availability).encode()).hexdigest()
+                    != AVAILABILITY_WINDOW_SHA))):
         # A new retained implementation keeps its own admission rules. The
         # acquisition adapter also checks this compatibility before advancing.
         yield False
@@ -61,12 +67,22 @@ def verified_odds_window(official):
         'and due <= captured < deadline,',
         'and _captured_in_window(due, deadline, captured),',
     )], {'_captured_in_window': captured_in_window})
+    adapted_availability = None
+    if original_availability is not None:
+        adapted_availability = replace_pinned(original_availability, AVAILABILITY_WINDOW_SHA, [(
+            'and due <= captured < deadline',
+            'and _captured_in_window(due, deadline, captured)',
+        )], {'_captured_in_window': captured_in_window})
     runner._validated_odds_only_market = adapted_market
     invocation._bind_predeadline_plan = adapted_plan
+    if adapted_availability is not None:
+        availability._payload = adapted_availability
     runner._g11_ten_minute_odds_window = True
     try:
         yield True
     finally:
         runner._validated_odds_only_market = original
         invocation._bind_predeadline_plan = original_plan
+        if original_availability is not None:
+            availability._payload = original_availability
         del runner._g11_ten_minute_odds_window

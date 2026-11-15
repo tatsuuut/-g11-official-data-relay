@@ -296,4 +296,63 @@ class FormalPlanTests(unittest.TestCase):
                 with self.assertRaisesRegex(old.PipelineError,'ODDS_ONLY_CAPTURE_WINDOW'):self.market.market()
 
 
+class AvailabilityReceiptTests(unittest.TestCase):
+    def setUp(self):
+        self.market=VerifiedMarketTests(methodName='runTest');self.market.setUp()
+        self.official=self.market.official
+        root=Path(os.environ.get('G11_RETRY_SOURCE_ROOT',Path(__file__).resolve().parents[1]/'.g11-private'))
+        path=root/'g11/canonical/predeadline_availability_v1.py'
+        if not path.is_file():self.skipTest('legacy frozen source predates official availability receipts')
+        self.helper=types.ModuleType('actual_availability_receipt')
+        exec(compile(path.read_text(),str(path),'exec'),self.helper.__dict__)
+        self.helper._pipeline=lambda:types.SimpleNamespace(_require=old.require,_parse_jst=datetime.fromisoformat)
+        self.official.PREDEADLINE_AVAILABILITY=self.helper
+        self.task={**task('ODDS3T'),'URL':self.market.url}
+        self.receipt={**self.market.odds['SNAPSHOT']['SOURCE_RECEIPTS'][0],'SHA256':'a'*64}
+        self.withdrawal={'WITHDRAWN_BOATS':[3],'ACTIVE_BOATS':[1,2,4,5,6]}
+
+    def payload(self):return self.helper._payload(self.task,self.receipt,self.withdrawal)
+
+    def test_actual_t10_withdrawal_receipt_no_longer_stops_the_collector(self):
+        before=copy.deepcopy((self.task,self.receipt,self.withdrawal));original=self.helper._payload
+        with self.assertRaisesRegex(old.PipelineError,'AVAILABILITY_OFFICIAL_RECEIPT_BINDING'):self.payload()
+        with window.verified_odds_window(self.official) as admitted:
+            self.assertTrue(admitted)
+            result=self.payload()
+            self.assertEqual(NOW.isoformat(),result['CAPTURED_AT_JST'])
+            self.assertEqual([3],result['WITHDRAWN_BOATS'])
+            self.assertFalse(result['MODEL_INFERENCE_PERFORMED'])
+        self.assertIs(original,self.helper._payload)
+        self.assertEqual(before,(self.task,self.receipt,self.withdrawal))
+
+    def test_early_cutoff_future_and_unbound_receipts_remain_rejected(self):
+        with window.verified_odds_window(self.official):
+            for at in (NOW-timedelta(seconds=1),DEADLINE,NOW-timedelta(days=1)):
+                self.receipt['CAPTURED_AT_JST']=at.isoformat()
+                with self.assertRaisesRegex(old.PipelineError,'AVAILABILITY_OFFICIAL_RECEIPT_BINDING'):self.payload()
+            self.receipt['CAPTURED_AT_JST']=NOW.isoformat()
+            for key,value in (('SOURCE_ID','odds3t-wrong'),('URL',self.market.url+'&wrong=1'),
+                    ('FINAL_URL','https://example.invalid/'),('SHA256','not-a-sha')):
+                original=self.receipt[key];self.receipt[key]=value
+                with self.assertRaisesRegex(old.PipelineError,'AVAILABILITY_OFFICIAL_RECEIPT_BINDING'):self.payload()
+                self.receipt[key]=original
+            with patch.object(window,'datetime',wraps=datetime) as clock:
+                clock.now.return_value=NOW
+                self.receipt['CAPTURED_AT_JST']=(NOW+timedelta(seconds=1)).isoformat()
+                with self.assertRaisesRegex(old.PipelineError,'AVAILABILITY_OFFICIAL_RECEIPT_BINDING'):self.payload()
+
+    def test_unknown_availability_source_keeps_all_three_original_gates(self):
+        original=self.helper._payload
+        market=self.official.CanonicalRunner._validated_odds_only_market
+        formal=self.official.FORMAL_ADAPTER._bind_predeadline_plan
+        with patch.object(window,'AVAILABILITY_WINDOW_SHA','0'*64):
+            with window.verified_odds_window(self.official) as admitted:
+                self.assertFalse(admitted)
+                self.assertIs(original,self.helper._payload)
+                self.assertIs(market,self.official.CanonicalRunner._validated_odds_only_market)
+                self.assertIs(formal,self.official.FORMAL_ADAPTER._bind_predeadline_plan)
+                self.assertFalse(getattr(self.official.CanonicalRunner,'_g11_ten_minute_odds_window',False))
+                with self.assertRaisesRegex(old.PipelineError,'AVAILABILITY_OFFICIAL_RECEIPT_BINDING'):self.payload()
+
+
 if __name__=='__main__':unittest.main()
