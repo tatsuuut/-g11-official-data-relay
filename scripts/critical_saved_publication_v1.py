@@ -8,14 +8,19 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
+import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 from urllib.request import Request, urlopen
 
 JST = timezone(timedelta(hours=9))
+INDEPENDENT_LIVE_FROM = '2026-11-15'
+SAVED_PROJECTOR_SHA = 'ce17fedac3770fe73f8059ceeb0a833c0bfdbc0b4d67902ebd4994ccd7337956'
 
 
 def newest_checkpoint_key(day, caches):
@@ -109,6 +114,107 @@ def align_empty_capture(state, day, *, clock=None, sleeper=None):
         delay -= interval
 
 
+def independent_live_projector(relay, store, day, morning, publication):
+    """Use verified independent LIVE locks to select the read-only feed stage.
+
+    The reviewed projector previously waited for a legacy P3 snapshot even
+    when V53 already had a valid saved LIVE. Read the existing native V53/P3
+    projections first; only their verified formal locks can open this stage.
+    No forecast, source file, saved plan or snapshot is written by this adapter.
+    Unknown projector versions retain their original stage policy.
+    """
+    original = relay.build_feed
+    if day < INDEPENDENT_LIVE_FROM:
+        return original
+    try:
+        source = inspect.getsource(inspect.unwrap(original))
+    except (OSError, TypeError):
+        return original
+    if hashlib.sha256(source.encode()).hexdigest() != SAVED_PROJECTOR_SHA:
+        return original
+    fields = morning.get('LOCK49_FIELDS')
+    rows = morning.get('LOCK49_ROWS')
+    require(morning.get('OPERATIONAL_DATE_JST') == day
+            and fields == list(relay.feedlib.LOCK49_FIELDS)
+            and type(rows) is list, 'EARLY_PUBLICATION_LIVE_MORNING_BINDING')
+    formal = {}
+    keys = set()
+    for row in rows:
+        require(type(row) is list and len(row) == len(fields),
+                'EARLY_PUBLICATION_LIVE_MORNING_ROW')
+        value = dict(zip(fields, row))
+        key = value['標準レースキー']
+        require(type(key) is str and key not in keys
+                and key.startswith(day.replace('-', '') + '-')
+                and value['正式/除外'] in {'FORMAL', 'EXCLUDED'},
+                'EARLY_PUBLICATION_LIVE_RACE_BINDING')
+        keys.add(key)
+        if value['正式/除外'] == 'FORMAL':
+            deadline = datetime.fromisoformat(relay.feedlib._deadline(
+                value['日付'], value['締切']))
+            require(deadline.utcoffset() == timedelta(hours=9)
+                    and deadline.date().isoformat() == day,
+                    'EARLY_PUBLICATION_LIVE_DEADLINE_BINDING')
+            formal[key] = deadline
+
+    def verified_time(view, key, *, v53=False):
+        require(type(view) is dict
+                and re.fullmatch(r'[0-9a-f]{64}', str(view.get('snapshot_sha256', ''))),
+                'EARLY_PUBLICATION_LIVE_SNAPSHOT_BINDING')
+        captured = datetime.fromisoformat(view['captured_at_jst'])
+        require(captured.utcoffset() == timedelta(hours=9)
+                and captured.date().isoformat() == day and captured < formal[key],
+                'EARLY_PUBLICATION_LIVE_CAPTURE_BINDING')
+        if v53:
+            locked = datetime.fromisoformat(view['locked_at_jst'])
+            require(locked.utcoffset() == timedelta(hours=9)
+                    and captured <= locked < formal[key],
+                    'EARLY_PUBLICATION_LIVE_LOCK_BINDING')
+
+    p3 = publication.get('LIVE_BY_RACE')
+    readback = publication.get('LIVE_READBACK')
+    require(publication.get('STATUS') == 'PASS' and publication.get('READ_ONLY') is True
+            and type(p3) is dict and type(readback) is dict
+            and readback.get('STATUS') == 'PASS'
+            and readback.get('READBACK_RACES') == len(p3)
+            and type(readback.get('SNAPSHOT_SHA256')) is dict
+            and set(readback['SNAPSHOT_SHA256']) == set(p3)
+            and set(p3) <= keys, 'EARLY_PUBLICATION_LIVE_P3_READBACK')
+    p3_live = set()
+    for key in sorted(set(p3) & set(formal)):
+        require(p3[key].get('status') == 'READY'
+                and p3[key].get('snapshot_sha256') == readback['SNAPSHOT_SHA256'][key],
+                'EARLY_PUBLICATION_LIVE_P3_BINDING')
+        verified_time(p3[key], key)
+        p3_live.add(key)
+    v53_live = set()
+    if any((store / 'snapshots/predeadline').glob('abeken-v53-shadow-live-*.json')):
+        # This native reader re-proves response bytes, snapshot identity,
+        # approved daily version, decisions, and the original MORNING hash.
+        _, abeken = relay.feedlib._abeken_public_projection(
+            store.parent, 'PREDEADLINE', day, keys)
+        for key in sorted(set(abeken) & set(formal)):
+            v53 = abeken[key].get('v53')
+            if (type(v53) is dict and v53.get('formal_use') is True
+                    and type(v53.get('live')) is dict):
+                verified_time(v53['live'], key, v53=True)
+                v53_live.add(key)
+    if not (p3_live or v53_live):
+        return original
+    from morning_race_isolation_v1 import replace_pinned
+    adapted = replace_pinned(original, SAVED_PROJECTOR_SHA, [(
+        'or predeadline_availability.public_by_race(OfficialArtifactStore(store), morning_keys))',
+        'or predeadline_availability.public_by_race(OfficialArtifactStore(store), morning_keys)\n'
+        '             or _verified_independent_live)',
+    )], {'_verified_independent_live': True})
+    require(adapted is not original, 'EARLY_PUBLICATION_LIVE_PROJECTOR_BINDING')
+    print('G11_EARLY_PUBLICATION_STAGE_EVIDENCE=' + json.dumps({
+        'p3_live': len(p3_live), 'v53_live': len(v53_live),
+        'source': 'VERIFIED_SAVED_NATIVE_READBACK',
+    }, sort_keys=True), flush=True)
+    return adapted
+
+
 def project_saved(state, day, run_id, source, output, *, authority_module=None,
                   relay=None, publisher=None, now=None):
     now = now or datetime.now(JST)
@@ -141,11 +247,14 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
         from g11.relay import v1 as relay
         from g11.growth_p3.v1_1 import relay_publish_v1 as publisher
     store = state / 'store'
-    publication = publisher.load_locked_publication(store, relay._morning_projection(store), now)
+    morning = relay._morning_projection(store)
+    publication = publisher.load_locked_publication(store, morning, now)
     require(publication.get('READ_ONLY') is True, 'EARLY_PUBLICATION_READ_ONLY_REQUIRED')
     from optional_display_isolation_v1 import isolate_optional_display
     with isolate_optional_display(relay):
-        feed = relay.build_feed(store, run_id=int(run_id),
+        # replace_pinned copies globals; copy the isolated optional reader too.
+        projector = independent_live_projector(relay, store, day, morning, publication)
+        feed = projector(store, run_id=int(run_id),
             github_sha=authority['runtime_source_sha'], current_p3_publication=publication,
             relay_phase='predeadline')
     if (day >= '2026-11-08' and feed.get('operational_date_jst') == day
@@ -291,4 +400,5 @@ if __name__ == '__main__':
         print('G11_EARLY_PUBLICATION=HELD REASON=' +
               (code if code.isupper() and len(code) < 160 else type(exc).__name__), file=sys.stderr)
         raise SystemExit(1) from None
+
 

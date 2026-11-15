@@ -30,6 +30,19 @@ def task(kind='BEFOREINFO'):
         'URL':'https://www.boatrace.jp/fixture'}
 
 
+def actual_formal_binding():
+    root=Path(os.environ.get('G11_RETRY_SOURCE_ROOT',Path(__file__).resolve().parents[1]/'.g11-private'))
+    path=root/'p3/formal_invocation_adapter/v1/src/formal_p3_invocation_adapter_v1.py'
+    code=ast.parse(path.read_text())
+    names={'FormalP3InvocationError','_require','_jst','_bind_predeadline_plan'}
+    code.body=[n for n in code.body if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in names]
+    module=types.ModuleType('actual_formal_invocation_binding')
+    module.__dict__.update(Any=Any,Mapping=Mapping,re=re,datetime=datetime,timedelta=timedelta,
+        FORMAL_GATE=types.SimpleNamespace(INDEX={'標準レースキー':0,'締切':1}))
+    exec(compile(code,str(path),'exec'),module.__dict__)
+    return module
+
+
 class EarlyAcquisitionTests(unittest.TestCase):
     def setUp(self):
         fixture=old.RetryTests(methodName='runTest');fixture.setUp()
@@ -160,7 +173,7 @@ class VerifiedMarketTests(unittest.TestCase):
             'parse_odds3t_html':lambda data:copy.deepcopy(self.rows)}
         exec(compile(code,str(path),'exec'),ns);self.Runner=ns['Runner'];self.runner=self.Runner()
         self.runner.store=types.SimpleNamespace(response_bytes=lambda source:b'official raw fixture')
-        self.official=types.SimpleNamespace(CanonicalRunner=self.Runner)
+        self.official=types.SimpleNamespace(CanonicalRunner=self.Runner,FORMAL_ADAPTER=actual_formal_binding())
         self.url='https://www.boatrace.jp/owpc/pc/race/odds3t?hd=20261114&jcd=20&rno=6'
         self.morning={'SNAPSHOT':{'PAYLOAD':{'PREDEADLINE_PLAN':[{**task('ODDS3T'),'URL':self.url}]}}}
         receipt={'SCHEMA':'RECEIPT','SOURCE_ID':'odds3t-'+KEY,'HOST':'www.boatrace.jp',
@@ -199,12 +212,88 @@ class VerifiedMarketTests(unittest.TestCase):
 
     def test_window_restores_after_error_and_unknown_source_is_not_patched(self):
         original=self.Runner._validated_odds_only_market
+        original_plan=self.official.FORMAL_ADAPTER._bind_predeadline_plan
         with self.assertRaisesRegex(RuntimeError,'fixture'):
             with window.verified_odds_window(self.official):raise RuntimeError('fixture')
         self.assertIs(original,self.Runner._validated_odds_only_market)
+        self.assertIs(original_plan,self.official.FORMAL_ADAPTER._bind_predeadline_plan)
         with patch.object(window,'ODDS_WINDOW_SHA','0'*64):
             with window.verified_odds_window(self.official) as admitted:self.assertFalse(admitted)
         self.assertIs(original,self.Runner._validated_odds_only_market)
+        self.assertIs(original_plan,self.official.FORMAL_ADAPTER._bind_predeadline_plan)
+        self.assertFalse(getattr(self.Runner,'_g11_ten_minute_odds_window',False))
+
+
+class FormalPlanTests(unittest.TestCase):
+    def setUp(self):
+        self.market=VerifiedMarketTests(methodName='runTest');self.market.setUp()
+        self.official=self.market.official;self.invocation=self.official.FORMAL_ADAPTER
+        self.bridge={'PREDEADLINE_PLAN':[task(k) for k in ('BEFOREINFO','ODDS3T')],
+            'RAW_DAY':{'rows':[[KEY,DEADLINE.strftime('%H:%M')]]*6}}
+        self.context={'BEFOREINFO_CAPTURED_AT_JST':NOW.isoformat(),'ODDS_CAPTURED_AT_JST':NOW.isoformat()}
+        self.sources={t['KIND']:{'SNAPSHOT':{'SOURCE_RECEIPTS':[
+            {'SOURCE_ID':t['SOURCE_ID'],'URL':t['URL']}]}} for t in self.bridge['PREDEADLINE_PLAN']}
+        clock=patch.object(window,'datetime',wraps=datetime);self.clock=clock.start();self.addCleanup(clock.stop)
+        self.clock.now.return_value=DEADLINE-timedelta(seconds=1)
+
+    def bind(self):
+        return self.invocation._bind_predeadline_plan(self.bridge,self.context,
+            self.sources['BEFOREINFO'],self.sources['ODDS3T'],KEY)
+
+    def test_actual_formal_gate_reproduces_t10_rejection_then_accepts_unchanged_evidence(self):
+        before=copy.deepcopy((self.bridge,self.context,self.sources))
+        with self.assertRaisesRegex(self.invocation.FormalP3InvocationError,'P07_PREDEADLINE_FRESHNESS_BINDING:BEFOREINFO'):
+            self.bind()
+        with window.verified_odds_window(self.official) as admitted:
+            self.assertTrue(admitted)
+            self.assertEqual(self.bridge['PREDEADLINE_PLAN'],self.bind()['TASKS'])
+            self.assertEqual(120,len(self.market.market()))
+            self.assertTrue(self.official.CanonicalRunner._g11_ten_minute_odds_window)
+        self.assertEqual(before,(self.bridge,self.context,self.sources))
+
+    def test_each_real_source_accepts_t10_t7_and_last_second_only(self):
+        with window.verified_odds_window(self.official):
+            for name in self.context:
+                for at in (NOW,NOW+timedelta(minutes=3),DEADLINE-timedelta(seconds=1)):
+                    self.context[name]=at.isoformat();self.bind()
+                self.context[name]=NOW.isoformat()
+
+    def test_both_sources_reject_old_other_day_future_and_cutoff_receipts(self):
+        with window.verified_odds_window(self.official):
+            for name in self.context:
+                for at in (NOW-timedelta(seconds=1),NOW-timedelta(days=1),DEADLINE,DEADLINE+timedelta(seconds=1)):
+                    with self.subTest(source=name,at=at):
+                        self.context[name]=at.isoformat()
+                        with self.assertRaisesRegex(self.invocation.FormalP3InvocationError,'P07_PREDEADLINE_FRESHNESS_BINDING'):
+                            self.bind()
+                self.context[name]=NOW.isoformat()
+            self.clock.now.return_value=NOW
+            for name in self.context:
+                self.context[name]=(NOW+timedelta(seconds=1)).isoformat()
+                with self.assertRaisesRegex(self.invocation.FormalP3InvocationError,'P07_PREDEADLINE_FRESHNESS_BINDING'):
+                    self.bind()
+                self.context[name]=NOW.isoformat()
+
+    def test_original_seven_minute_plan_source_kind_and_url_checks_stay_active(self):
+        with window.verified_odds_window(self.official):
+            for field,value in (('SOURCE_ID','beforeinfo-wrong'),('URL','https://www.boatrace.jp/wrong'),
+                    ('KIND','ODDS3T'),('DUE_AT_JST',NOW.isoformat())):
+                saved=self.bridge['PREDEADLINE_PLAN'][0][field]
+                self.bridge['PREDEADLINE_PLAN'][0][field]=value
+                with self.assertRaises(self.invocation.FormalP3InvocationError):self.bind()
+                self.bridge['PREDEADLINE_PLAN'][0][field]=saved
+
+    def test_unknown_formal_source_keeps_both_gates_and_collector_at_seven_minutes(self):
+        market=self.official.CanonicalRunner._validated_odds_only_market
+        formal=self.invocation._bind_predeadline_plan
+        with patch.object(window,'FORMAL_PLAN_SHA','0'*64):
+            with window.verified_odds_window(self.official) as admitted:
+                self.assertFalse(admitted)
+                self.assertIs(market,self.official.CanonicalRunner._validated_odds_only_market)
+                self.assertIs(formal,self.invocation._bind_predeadline_plan)
+                self.assertFalse(getattr(self.official.CanonicalRunner,'_g11_ten_minute_odds_window',False))
+                with self.assertRaises(self.invocation.FormalP3InvocationError):self.bind()
+                with self.assertRaisesRegex(old.PipelineError,'ODDS_ONLY_CAPTURE_WINDOW'):self.market.market()
 
 
 if __name__=='__main__':unittest.main()

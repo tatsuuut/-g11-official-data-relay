@@ -780,7 +780,331 @@ class PublishedGoripanTests(unittest.TestCase):
             self.assertEqual([self.row], handoff.without_published_goripan([self.row], DAY))
 
 
+class NativeIndependentLiveStageTests(unittest.TestCase):
+    """Actual frozen projector and V53/store readers, synthetic saved inputs.
+
+    Extract exact reader definitions from the retained private checkout. The
+    unrelated SG/research/P3-model services are controlled fixtures; no model,
+    official request, production checkpoint or external publication is run.
+    """
+    def setUp(self):
+        import ast
+        import __future__
+        import dataclasses
+        import hashlib
+        import re
+        import stat
+        from datetime import date, timedelta, timezone
+        from typing import Any, Mapping, Sequence
+        self.day = '2026-11-15'
+        self.key = '20261115-23-02'
+        self.now = datetime.fromisoformat(self.day + 'T09:04:00+09:00')
+        self.source = Path(os.environ.get('G11_SAVED_PROJECTOR_SOURCE_ROOT',
+            str(Path(__file__).resolve().parents[1] / '.g11-private'))).resolve()
+        files = {
+            'official': 'g11/canonical/official_pipeline.py',
+            'public': 'g11/canonical/public_app_feed.py',
+            'v53': 'g11/abeken/v53/abeken_shadow_v53_runtime.py',
+            'relay': 'g11/relay/v1.py',
+            'publisher': 'g11/growth_p3/v1_1/relay_publish_v1.py',
+        }
+        if not all((self.source / path).is_file() for path in files.values()):
+            if os.environ.get('G11_PRIVATE_INTEGRATION_TESTS') == 'true':
+                self.fail('required retained saved-projector source is missing')
+            self.skipTest('native source runs in the required private contract gate')
+        base = dict(Path=Path, json=json, hashlib=hashlib, os=os, re=re,
+                    stat=stat, datetime=datetime, date=date, timedelta=timedelta,
+                    timezone=timezone, Mapping=Mapping, Sequence=Sequence,
+                    Any=Any, dataclass=dataclasses.dataclass, JST=early.JST)
+        modules = {}
+        for name in ('g11', 'g11.canonical', 'g11.abeken', 'g11.abeken.v1',
+                     'g11.abeken.v53', 'g11.relay',
+                     'g11.relay.daily_runtime_authority_v1',
+                     'g11.canonical.official_pipeline',
+                     'g11.canonical.official_st_provenance_v1',
+                     'g11.abeken.v1.abeken_shadow_v1',
+                     'g11.abeken.v53.abeken_shadow_v53_runtime'):
+            modules[name] = ModuleType(name)
+            modules[name].__path__ = []
+        module_patch = patch.dict(sys.modules, modules)
+        module_patch.start()
+        self.addCleanup(module_patch.stop)
+        for name, module in modules.items():
+            if '.' in name:
+                parent, child = name.rsplit('.', 1)
+                setattr(modules[parent], child, module)
+
+        def load(which, names, module=None):
+            module = module or ModuleType('saved_' + which)
+            module.__dict__.update(base)
+            path = self.source / files[which]
+            parsed = ast.parse(path.read_text())
+            selected = []
+            for node in parsed.body:
+                bound = ([node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+                         else [t.id for t in node.targets if isinstance(t, ast.Name)]
+                         if isinstance(node, ast.Assign) else [])
+                if set(bound) & set(names):
+                    selected.append(node)
+            self.assertEqual(set(names), {
+                name for node in selected for name in
+                ([node.name] if hasattr(node, 'name') else
+                 [t.id for t in node.targets if isinstance(t, ast.Name)])} & set(names))
+            exec(compile(ast.Module(body=selected, type_ignores=[]), str(path), 'exec',
+                         flags=__future__.annotations.compiler_flag), module.__dict__)
+            return module
+
+        self.official = load('official', ['PipelineError', '_require', '_sha',
+            '_json_bytes', '_load_json', '_regular_file', '_safe_directory',
+            '_write_exclusive', '_fsync_directory', 'OfficialArtifactStore',
+            'SNAPSHOT_SCHEMA', 'VERIFIED_SNAPSHOT_SCHEMA', 'RECEIPT_SCHEMA',
+            'RAW38_FIELDS', 'WORK53_FIELDS', 'DISPLAY14_FIELDS', 'LOCK49_FIELDS',
+            'WORKBOOK_SCHEMA_SHA256', 'WORKBOOK_PROJECTION_SCHEMA',
+            'PREDEADLINE_WORKBOOK_PROJECTION_SCHEMA', 'PREDEADLINE_UPDATE_FIELDS',
+            'PREDEADLINE_CANDIDATE16_FIELDS', '_fixed_row_sha', '_fixed_matrix_sha',
+            '_canonical_cell_text', '_validated_odds_archive_record',
+            'build_predeadline_workbook_projection'],
+            modules['g11.canonical.official_pipeline'])
+        self.official.PREDEADLINE_AVAILABILITY = SimpleNamespace(
+            public_by_race=lambda *a: {}, EFFECTIVE_FROM=date(2026, 11, 11))
+        self.v53 = load('v53', ['RUNTIME_LOGIC_VERSION', 'RUNTIME_DISPLAY_VERSION',
+            'RUNTIME_STATUS', 'RESEARCH_PROGRESS_PERCENT', 'SECOND_STATES', 'THIRD_STATES',
+            'V53ContractError', '_boat', '_boats', 'ConditionalRoute', 'form_buy_set',
+            'validate_decision', '_restore_json_graph'],
+            modules['g11.abeken.v53.abeken_shadow_v53_runtime'])
+        old = modules['g11.abeken.v1.abeken_shadow_v1']
+        old.__dict__.update(MODEL_VERSION='SYNTHETIC', CURRENT_REPRODUCTION_ESTIMATE=45,
+            PROJECT='SYNTHETIC', OBSERVATION_IDS=(), BUY_LOGIC_SHA256='f' * 64)
+        modules['g11.relay.daily_runtime_authority_v1'].authority_for_store = lambda *_: {
+            'abeken_v53': {'logic_version': self.v53.RUNTIME_LOGIC_VERSION,
+                          'version': self.v53.RUNTIME_DISPLAY_VERSION}}
+        modules['g11.canonical.official_st_provenance_v1'].reconcile = lambda *a, **k: {}
+        self.feedlib = load('public', ['LOCK49_FIELDS', 'ABEKEN_RACE_SCHEMA',
+            'ABEKEN_STATUS_CAPABILITY', '_abeken_public_projection', '_apply_predeadline'])
+        self.feedlib._require = early.require
+        self.feedlib._predeadline_prediction_invalidations = lambda: {}
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.store = self.root / 'store'
+        (self.store / 'snapshots/morning').mkdir(parents=True)
+        (self.store / 'snapshots/predeadline').mkdir()
+        response = self.store / 'responses/synthetic-beforeinfo'
+        response.mkdir(parents=True)
+        self.raw = response / 'response.bin'
+        self.raw.write_bytes(b'synthetic official response fixture; no real race input')
+        self.receipt = {'SCHEMA': self.official.RECEIPT_SCHEMA,
+            'SOURCE_ID': 'synthetic-beforeinfo', 'SIZE_BYTES': self.raw.stat().st_size,
+            'SHA256': hashlib.sha256(self.raw.read_bytes()).hexdigest(),
+            'CAPTURED_AT_JST': self.day + 'T09:03:00+09:00'}
+        (response / 'receipt.json').write_bytes(self.official._json_bytes(self.receipt))
+        self.artifact = self.official.OfficialArtifactStore(self.store)
+        values = {'標準レースキー': self.key, '日付': self.day,
+                  '締切': '09:10', '正式/除外': 'FORMAL', '場': 'Synthetic', 'R': 2}
+        values['朝行SHA'] = self.official._fixed_row_sha(
+            values.get(field) for field in self.feedlib.LOCK49_FIELDS if field != '朝行SHA')
+        self.morning = {'SCHEMA': self.official.WORKBOOK_PROJECTION_SCHEMA,
+            'STATUS': 'WORKBOOK_PROJECTION_COMPLETE', 'OPERATIONAL_DATE_JST': self.day,
+            'WORKBOOK_SCHEMA_SHA256': self.official.WORKBOOK_SCHEMA_SHA256,
+            'WORKBOOK_PROFILE_SHA256': 'e' * 64, 'MORNING_ODDS_USED': False,
+            'CONFIDENCE_GENERATED': False, 'PURCHASE_EXECUTED': False,
+            'AUTHORITY_ISSUED': 0, 'AUTHORITY_CONSUMED': 0,
+            'DISPLAY14_FIELDS': list(self.official.DISPLAY14_FIELDS),
+            'DISPLAY14_ROWS': [[values.get(field) for field in self.official.DISPLAY14_FIELDS]],
+            'COUNTS': {'RACES': 1, 'FORMAL': 1, 'DISPLAY': 1, 'LOCK': 1},
+            'LOCK49_FIELDS': list(self.feedlib.LOCK49_FIELDS),
+            'LOCK49_ROWS': [[values.get(field) for field in self.feedlib.LOCK49_FIELDS]]}
+        self.artifact.commit_snapshot('morning', 'workbook-projection', self.morning, [self.receipt])
+        self.artifact.commit_snapshot('morning', 'official-day-input',
+                                      {'OPERATIONAL_DATE_JST': self.day}, [self.receipt])
+        self.artifact.commit_snapshot('morning', 'current-growth-p3-morning-' + self.key,
+                                      {'RACE_ID': self.key}, [self.receipt])
+        pin = self.store / 'abeken-v53-daily-version' / (self.day + '.json')
+        pin.parent.mkdir()
+        pin.write_text(json.dumps({'DAILY_ABEKEN_SHADOW_VERSION': self.v53.RUNTIME_LOGIC_VERSION}))
+        self.publication = {'STATUS': 'PASS', 'READ_ONLY': True, 'LIVE_BY_RACE': {},
+            'LIVE_READBACK': {'STATUS': 'PASS', 'READBACK_RACES': 0, 'SNAPSHOT_SHA256': {}}}
+        current = SimpleNamespace(snapshot_name=lambda key: 'current-growth-p3-morning-' + key)
+        def morning_reader(store, keys):
+            hashes = {key: store.load_verified_snapshot('morning', current.snapshot_name(key))[
+                'SNAPSHOT_SHA256'] for key in keys}
+            return {key: {} for key in keys}, {'STATUS': 'PASS', 'EXPECTED_RACES': len(keys),
+                'READBACK_RACES': len(keys), 'SNAPSHOT_SHA256': hashes}
+        current.load_public_morning_projection = morning_reader
+        current.load_public_live_projection = lambda *a: (
+            copy.deepcopy(self.publication['LIVE_BY_RACE']),
+            copy.deepcopy(self.publication['LIVE_READBACK']))
+        self.publisher = load('publisher', ['_locked_race_keys', 'load_locked_publication'])
+        self.publisher.__dict__.update(current=current, feedlib=self.feedlib,
+            OfficialArtifactStore=self.official.OfficialArtifactStore,
+            verification=SimpleNamespace(read_verified_records=lambda *a, **k: {}),
+            _require=early.require)
+        self.relay = load('relay', ['build_feed', '_morning_projection', '_json', '_write_json', '_sha'])
+        self.relay.__dict__.update(_require=early.require, feedlib=self.feedlib,
+            OfficialArtifactStore=self.official.OfficialArtifactStore,
+            _night_sg_race_keys=lambda *a: (set(), {'OFFICIAL_B_REPARSED': True}),
+            predeadline_availability=SimpleNamespace(public_by_race=lambda *a: {}),
+            build_predeadline_workbook_projection=self.official.build_predeadline_workbook_projection,
+            _display_research=lambda store, keys: ({}, {key: {} for key in keys}),
+            _canonical_authorities=lambda *a: {'capability': 'SYNTHETIC', 'payload': {}},
+            _now_jst=lambda: self.now,
+            current_growth_p3=SimpleNamespace(apply_to_feed=lambda rows, pub: [
+                row.update(predeadline=copy.deepcopy(pub['LIVE_BY_RACE'].get(row['key'])))
+                for row in rows]))
+        self.feedlib._deadline = lambda day, at: day + 'T' + at + ':00+09:00'
+        self.feedlib._base_races = lambda *a: [{'key': self.key,
+            'deadline_jst': self.day + 'T09:10:00+09:00', 'formal_status': 'FORMAL',
+            'research_eligible': True, 'predeadline': None}]
+        self.feedlib._counts = lambda *a: {'races': 1, 'formal': 1, 'excluded': 0,
+                                          'results': 0, 'pending': 1}
+        for name in ('_attach_three_engine_comparison', '_research', '_research_db',
+                     '_conditional_finish_research', '_logic_candidate_research'):
+            setattr(self.feedlib, name, lambda *a: {})
+        self.auth = {'authority_sha256': 'a' * 64, 'runtime_source_sha': 'b' * 40}
+        self.meta = {'OPERATIONAL_DATE_JST': self.day, 'CRITICAL': {
+            'OPERATIONAL_DATE': self.day, 'CRITICAL_CHECKPOINT_STATUS': 'PASS',
+            'LAST_CRITICAL_RUN_ID': '123', 'LAST_TIMELY_P3_LIVE_COUNT': 0,
+            'LAST_TIMELY_V53_COUNT': 0, 'AUTHORITY_SHA256': 'a' * 64,
+            'RUNTIME_SOURCE_SHA': 'b' * 40}}
+        self.module = SimpleNamespace(verify_runtime=lambda *a: self.auth,
+            verify_locks=self.verify_locks, feed_binding=lambda *a: {'immutable': True})
+        self.out = self.root / 'critical-feed.json'
+        self.seal_fixture()
+
+    def seal_fixture(self):
+        self.sealed = {p: p.read_bytes() for p in (self.store / 'snapshots').rglob('*.json')}
+
+    def verify_locks(self, *a, **k):
+        if any(not p.is_file() or p.read_bytes() != value for p, value in self.sealed.items()):
+            raise RuntimeError('LOCK_CHANGED')
+
+    def save_v53(self):
+        decision = {'MAIN_HEAD': 1, 'SUB_HEAD_LIST': [], 'HEAD_POOL': [1],
+            'HEAD_RIGHT': {'1': 'MAIN'}, 'SECOND_RIGHT': {'1': {'2': 'NORMAL'}},
+            'THIRD_RIGHT': {'1-2': {'3': 'NORMAL'}}, 'SPECIAL_POSITION_ROUTE': [],
+            'BUY_SET': ['1-2-3'], 'BUY_COUNT': 1,
+            'RUNTIME_LOGIC_VERSION': self.v53.RUNTIME_LOGIC_VERSION,
+            'MARK': {}, 'WIN_RIGHT': {}, 'FOLLOW_RIGHT': {}, 'ELIGIBLE_HIMO_POOL': [2, 3]}
+        result = {'STATUS': 'READY', 'SNAPSHOT_TYPE': 'MORNING',
+            'RUNTIME_LOGIC_VERSION': self.v53.RUNTIME_LOGIC_VERSION,
+            'RACE_ID': self.key, 'RACE_DATE': self.day, 'LEGACY_45_FALLBACK': False,
+            'LOCKED_AT': self.day + 'T06:00:00+09:00', 'DECISION': decision}
+        payload = {'RACE_KEY': self.key, 'FORMAL_USE': True,
+            'RESULT_FEEDBACK_TO_MODEL': False, 'P3_INPUT_USED': False, 'WILD_INPUT_USED': False,
+            'RESULT': result}
+        morning_name = 'abeken-v53-shadow-morning-' + self.key
+        identity = self.artifact.commit_snapshot('morning', morning_name, payload, [self.receipt])
+        result = {**result, 'SNAPSHOT_TYPE': 'PRE_RACE',
+            'LOCKED_AT': self.day + 'T09:03:00+09:00',
+            'PRE_RACE_DATA_CAPTURED_AT': self.day + 'T09:03:00+09:00',
+            'UPDATE_MODES': ['KEEP_MORNING_RIGHT'],
+            'MORNING_TO_PRE_RACE_DIFF': {'BUY_SET': {'MORNING': ['1-2-3']}}}
+        payload = {**payload, 'RESULT': result, 'MORNING_V53_SNAPSHOT_SHA256': identity['SHA256']}
+        self.live_name = 'abeken-v53-shadow-live-' + self.key
+        self.live_path = self.store / 'snapshots/predeadline' / (self.live_name + '.json')
+        self.artifact.commit_snapshot('predeadline', self.live_name, payload, [self.receipt])
+        self.meta['CRITICAL']['LAST_TIMELY_V53_COUNT'] = 1
+        self.seal_fixture()
+
+    def project(self):
+        (self.root / 'relay-state.json').write_text(json.dumps(self.meta))
+        return early.project_saved(self.root, self.day, '123', self.source, self.out,
+            authority_module=self.module, relay=self.relay, publisher=self.publisher, now=self.now)
+
+    def test_actual_v53_only_projector_publishes_saved_live_and_preserves_all_locks(self):
+        self.save_v53()
+        original = self.relay.build_feed
+        baseline = original(self.store, run_id=123, github_sha='b' * 40,
+            current_p3_publication=self.publisher.load_locked_publication(self.store, self.morning, self.now),
+            relay_phase='predeadline')
+        self.assertEqual('MORNING', baseline['stage'])
+        self.assertIsNone(baseline['races'][0]['abeken_shadow']['v53']['live'])
+        with patch.object(self.official.OfficialArtifactStore, 'commit_snapshot',
+                          side_effect=AssertionError('read-only publication cannot create a LOCK')):
+            self.assertTrue(self.project())
+        feed = json.loads(self.out.read_text())
+        self.assertEqual('PREDEADLINE', feed['stage'])
+        live = feed['races'][0]['abeken_shadow']['v53']['live']
+        self.assertEqual(['1-2-3'], live['practical_bets'])
+        self.assertEqual(self.day + 'T09:03:00+09:00', live['locked_at_jst'])
+        self.assertIsNone(feed['races'][0]['predeadline'])
+        self.assertIs(original, self.relay.build_feed)
+        self.verify_locks()
+
+    def test_actual_saved_only_retry_includes_prior_v53_without_new_lock(self):
+        self.save_v53()
+        self.meta['CRITICAL']['LAST_TIMELY_V53_COUNT'] = 0
+        self.assertTrue(self.project())
+        self.verify_locks()
+
+    def test_actual_v53_only_projection_keeps_optional_research_isolated(self):
+        self.save_v53()
+        self.relay._display_research = Mock(side_effect=ValueError('DISPLAY_RACE_PARTITION'))
+        self.assertTrue(self.project())
+        feed = json.loads(self.out.read_text())
+        self.assertEqual('PREDEADLINE', feed['stage'])
+        self.assertEqual('TECHNICAL_HOLD', feed['original_display_research']['status'])
+        self.assertIsNotNone(feed['races'][0]['abeken_shadow']['v53']['live'])
+        self.verify_locks()
+
+    def test_actual_core_projection_failure_is_never_isolated(self):
+        self.save_v53()
+        self.relay.build_feed.__globals__['build_predeadline_workbook_projection'] = Mock(
+            side_effect=ValueError('CORE_PROJECTION_BINDING'))
+        with self.assertRaisesRegex(ValueError, 'CORE_PROJECTION_BINDING'): self.project()
+        self.assertFalse(self.out.exists())
+
+    def test_actual_p3_only_native_stage_uses_matching_readback(self):
+        self.publication['LIVE_BY_RACE'] = {self.key: {'status': 'READY',
+            'snapshot_sha256': 'c' * 64, 'captured_at_jst': self.day + 'T09:03:00+09:00'}}
+        self.publication['LIVE_READBACK'].update(READBACK_RACES=1,
+            SNAPSHOT_SHA256={self.key: 'c' * 64})
+        self.meta['CRITICAL']['LAST_TIMELY_P3_LIVE_COUNT'] = 1
+        self.assertTrue(self.project())
+        self.assertEqual('PREDEADLINE', json.loads(self.out.read_text())['stage'])
+        self.verify_locks()
+
+    def test_actual_no_live_stays_morning_and_does_not_publish(self):
+        self.assertFalse(self.project())
+        self.assertFalse(self.out.exists())
+
+    def test_actual_v53_response_hash_corruption_fails_before_output(self):
+        self.save_v53()
+        self.raw.write_bytes(b'corrupted')
+        with self.assertRaisesRegex(self.official.PipelineError, 'RESPONSE_RECEIPT_READBACK'):
+            self.project()
+        self.assertFalse(self.out.exists())
+
+    def test_actual_wrong_v53_day_and_invalid_decision_cannot_open_stage(self):
+        self.save_v53()
+        original = self.live_path.read_bytes()
+        for kind in ('day', 'decision', 'morning_hash', 'late'):
+            value = json.loads(original)
+            result = value['PAYLOAD']['RESULT']
+            if kind == 'day': result['RACE_DATE'] = '2026-11-14'
+            elif kind == 'decision': result['DECISION']['BUY_SET'] = ['1-2-4']
+            elif kind == 'morning_hash': value['PAYLOAD']['MORNING_V53_SNAPSHOT_SHA256'] = 'd' * 64
+            else: result['LOCKED_AT'] = self.day + 'T09:10:00+09:00'
+            self.live_path.write_bytes(self.official._json_bytes(value))
+            self.seal_fixture()
+            with self.subTest(kind=kind), self.assertRaises((RuntimeError, ValueError)):
+                self.project()
+            self.assertFalse(self.out.exists())
+
+    def test_actual_changed_lock_and_p3_readback_mismatch_fail_closed(self):
+        self.save_v53()
+        self.live_path.write_bytes(self.live_path.read_bytes() + b' ')
+        with self.assertRaisesRegex(RuntimeError, 'LOCK_CHANGED'): self.project()
+        self.live_path.write_bytes(self.sealed[self.live_path])
+        self.publication['LIVE_BY_RACE'] = {self.key: {'status': 'READY',
+            'snapshot_sha256': 'c' * 64, 'captured_at_jst': self.day + 'T09:03:00+09:00'}}
+        self.publication['LIVE_READBACK'].update(READBACK_RACES=1,
+            SNAPSHOT_SHA256={self.key: 'd' * 64})
+        with self.assertRaisesRegex(RuntimeError, 'LIVE_P3_BINDING'): self.project()
+        self.assertFalse(self.out.exists())
+
+
 if __name__ == '__main__':
     unittest.main()
+
 
 
