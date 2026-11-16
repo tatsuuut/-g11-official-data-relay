@@ -107,6 +107,16 @@ jobs:
           fetch-depth: 1
           sparse-checkout: g11/canonical/deme_discovery*
           sparse-checkout-cone-mode: false
+      - name: Checkout the pinned independent fixed-rule Mashiro observer
+        if: steps.window.outputs.active=='true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 724b660ae36e59eb989892b1a4050a54f65e8ab6
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-mashiro-fixed
+          persist-credentials: false
+          sparse-checkout: g11/research/mashiro_fixed_v1
       - name: Run research only and export an allowlisted bundle
         if: steps.window.outputs.active=='true'
         id: research
@@ -134,3 +144,60 @@ jobs:
         env:
           RESEARCH_CHECKPOINT_VERIFIED: ${{steps.persisted.outputs.ready}}
         run: python3 scripts/isolated_research_runner_v1.py publish --state-root .research-state --day '${{steps.input.outputs.day}}'
+      - name: Select durable fixed-study evidence after verified research persistence
+        id: fixed-archive
+        if: steps.research.outcome=='success' && steps.research.outputs.fixed_archive_ready=='true' && (steps.persisted.outputs.ready=='true' || steps.research.outputs.no_change=='true')
+        env:
+          GH_TOKEN: ${{github.token}}
+          STUDY_DAY: ${{steps.input.outputs.day}}
+          STUDY_PROTOCOL_SHA: ${{steps.research.outputs.fixed_protocol_sha}}
+        run: |
+          python3 - <<'PY'
+          import json,os,re,subprocess
+          day=os.environ['STUDY_DAY'];sha=os.environ['STUDY_PROTOCOL_SHA']
+          assert re.fullmatch(r'2026-\d{2}-\d{2}',day) and re.fullmatch('[a-f0-9]{64}',sha)
+          name='mashiro-fixed-v1-'+day+'-'+sha[:12]
+          result=subprocess.run(['gh','api','repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/artifacts?name='+name+'&per_page=100'],check=True,capture_output=True,text=True)
+          exists=any(not a['expired'] and a['name']==name and a.get('workflow_run',{}).get('head_branch')=='main' for a in json.loads(result.stdout)['artifacts'])
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('needed='+str(not exists).lower()+'\nartifact_name='+name+'\n')
+          PY
+      - name: Encrypt and verify only the fixed-study daily evidence
+        if: steps.fixed-archive.outputs.needed=='true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          python3 scripts/audit_mashiro_fixed_inputs_v1.py --state-root .research-state --source-root .g11-private --observer-root .g11-mashiro-fixed --day '${{steps.input.outputs.day}}' --archive .mashiro-fixed-evidence --source-checkpoint '${{steps.input.outputs.source_key}}'
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 scripts/encrypt_runtime_state_v1.py --state-root .mashiro-fixed-evidence --output .mashiro-fixed-evidence.tgz.gpg
+          exec 3<&-
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output .mashiro-fixed-readback.tgz .mashiro-fixed-evidence.tgz.gpg 2>/dev/null
+          exec 3<&-
+          python3 - <<'PY'
+          import hashlib,json,pathlib,tarfile
+          with tarfile.open('.mashiro-fixed-readback.tgz','r:gz') as archive:
+              members=archive.getmembers()
+              assert len(members)<10000 and sum(m.size for m in members)<=256*1024*1024
+              assert all((m.isdir() or m.isfile()) and not pathlib.PurePosixPath(m.name).is_absolute() and '..' not in pathlib.PurePosixPath(m.name).parts for m in members)
+              files={pathlib.PurePosixPath(m.name).as_posix().removeprefix('./'):m for m in members if m.isfile()}
+              manifest=json.load(archive.extractfile(files['manifest.json']))
+              assert set(files)==set(manifest['FILES'])|{'manifest.json'}
+              for name,row in manifest['FILES'].items():
+                  raw=archive.extractfile(files[name]).read()
+                  assert len(raw)==row['bytes'] and hashlib.sha256(raw).hexdigest()==row['sha256']
+              assert manifest['P3_OR_MODEL_STATE_INCLUDED'] is False and manifest['OFFICIAL_ACQUISITION']==0
+          print('G11_MASHIRO_FIXED_ENCRYPTED_EVIDENCE_READBACK=PASS')
+          PY
+          rm -f .mashiro-fixed-readback.tgz
+      - name: Retain encrypted daily study evidence beyond transient caches
+        if: steps.fixed-archive.outputs.needed=='true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{steps.fixed-archive.outputs.artifact_name}}
+          path: .mashiro-fixed-evidence.tgz.gpg
+          retention-days: 90
+          if-no-files-found: error
+          include-hidden-files: true
+

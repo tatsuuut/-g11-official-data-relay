@@ -5,6 +5,7 @@ collects official inputs, publishes canonical forecasts or saves canonical
 state. Only a closed, allowlisted bundle can enter the NIGHT settlement copy.
 """
 import argparse
+import importlib.util
 from datetime import date, datetime, timedelta
 import json
 import os
@@ -198,20 +199,61 @@ def capture_only_research(state, source, day):
     return {'results':result,'failures':failures,'core_inference_calls':0,'official_acquisition':0}
 
 
-def run_research(state, source, deme_source, previous, destination, day, source_key, feed):
+def fixed_mashiro_research(state, source, fixed_source, day, closing):
+    if not '2026-11-17' <= day <= '2026-12-14':
+        return {'STATUS':'OUTSIDE_FIXED_WINDOW', 'CHANGED':False}
+    def members():
+        return {name:isolation.digest(path) for name,path in isolation.research_files(state,day).items()
+                if isolation.fixed_mashiro_member(name,day)}
+    before = members()
+    try:
+        path = fixed_source/'g11/research/mashiro_fixed_v1/observer.py'
+        spec = importlib.util.spec_from_file_location('g11_independent_fixed_mashiro',path)
+        observer = importlib.util.module_from_spec(spec);spec.loader.exec_module(observer)
+        from g11.canonical.official_pipeline import OfficialArtifactStore
+        artifact = OfficialArtifactStore(state/'store')
+        capture = observer.collect(artifact,day,allow_capture=not closing)
+        observer.save_coverage(artifact,day,'capture',capture)
+        result = observer.settle(artifact,day) if closing else {'STATUS':'RESULTS_NOT_READ_BEFORE_CLOSE'}
+        if closing:
+            observer.save_coverage(artifact,day,'result',result)
+        report = {'STATUS':'FIXED_RESEARCH_ONLY', 'RECORDED':capture.get('RECORDED',0),
+                  'RESULT_STATUS':result['STATUS'], 'RESULTS_ADDED':result.get('CHANGED',0),
+                  'NIGHT_RESULTS_COMPLETE':result.get('NIGHT_RESULTS_COMPLETE',False),
+                  'PROTOCOL_SHA256':observer.configuration()[1],
+                  'OFFICIAL_ACQUISITION':0, 'P3_OUTPUTS_USED':False}
+    except Exception as exc:
+        report = {'STATUS':'UNAVAILABLE','REASON':str(exc)[:150]}
+    report['CHANGED'] = before != members()
+    return report
+
+
+def run_research(state, source, deme_source, previous, destination, day, source_key, feed,
+                 *, fixed_source=Path('.g11-mashiro-fixed')):
     authority,binding = authority_binding(state,day,source)
     sources = isolation.core_sources(state,day)
     seeds = {name:isolation.digest(path) for name,path in isolation.research_files(state,day).items()}
     before = isolation.protected_metadata(state,day)
+    prior_closed = False
     if (previous/'manifest.json').is_file():
         prior = isolation.read_bundle(previous,day); prior['_root'] = previous
         isolation.validate_source(prior,state,day,binding)
-        if prior['closed']:
+        prior_closed = prior['closed']
+        if prior_closed and not '2026-11-17' <= day <= '2026-12-14':
             outputs(no_change=True,closing=True)
-            print('G11_ISOLATED_RESEARCH=ALREADY_CLOSED'); return
+            print('G11_ISOLATED_RESEARCH=ALREADY_CLOSED');return
         isolation.apply_files(prior,state,day)
     closing = datetime.now(isolation.JST) >= max(isolation.plan_deadlines(state,day).values())
+    isolation.require(not prior_closed or closing, 'RESEARCH_REOPEN_AFTER_CLOSE')
+    fixed = fixed_mashiro_research(state,source,fixed_source,day,closing)
+    if prior_closed and not fixed['CHANGED']:
+        isolation.require(isolation.protected_metadata(state,day) == before
+            and isolation.core_sources(state,day) == sources, 'RESEARCH_PROTECTED_STATE_CHANGED')
+        outputs(no_change=True,closing=True,fixed_archive_ready=fixed.get('NIGHT_RESULTS_COMPLETE') is True,
+                fixed_protocol_sha=fixed.get('PROTOCOL_SHA256',''))
+        print('G11_ISOLATED_RESEARCH=ALREADY_CLOSED_FIXED='+json.dumps(fixed,sort_keys=True));return
     result = {'mode':'CLOSE_ONLY'} if closing else capture_only_research(state,source,day)
+    result['fixed_mashiro'] = fixed
     if not closing:
         try:
             from saved_deme_recovery_v1 import recover
@@ -223,7 +265,9 @@ def run_research(state, source, deme_source, previous, destination, day, source_
     authority.verify_runtime(state,day,source)
     value = isolation.export_bundle(state,destination,day,binding,source_key,seeds,sources,closed=closing)
     isolation.read_bundle(destination,day)
-    outputs(no_change=False,closing=closing,bundle_sha=value['bundle_sha256'])
+    outputs(no_change=False,closing=closing,bundle_sha=value['bundle_sha256'],
+            fixed_archive_ready=closing and fixed.get('NIGHT_RESULTS_COMPLETE') is True,
+            fixed_protocol_sha=fixed.get('PROTOCOL_SHA256',''))
     print('G11_ISOLATED_RESEARCH='+json.dumps({'day':day,'closed':closing,
         'members':len(value['members']),'held_late_count':value['held_late_count'],
         'canonical_state_written':False,'result':result},sort_keys=True),flush=True)
@@ -326,6 +370,7 @@ def main():
     p.add_argument('--state-root',type=Path,default=Path('.relay-state'))
     p.add_argument('--source-root',type=Path,default=Path('.g11-private'))
     p.add_argument('--deme-source',type=Path,default=Path('.g11-deme-research'))
+    p.add_argument('--mashiro-fixed-source',type=Path,default=Path('.g11-mashiro-fixed'))
     p.add_argument('--previous',type=Path,default=Path('.research-previous'))
     p.add_argument('--destination',type=Path,default=Path('.research-export'))
     p.add_argument('--encrypted',type=Path,default=Path('.relay-cache/state.tgz.gpg'))
@@ -364,7 +409,7 @@ def main():
         print('G11_RESEARCH_NIGHT=CONTINUATION_DISPATCHED');return
     sys.path.insert(0,str(source))
     run_research(state,source,a.deme_source.resolve(),a.previous.resolve(),a.destination.resolve(),
-                 a.day,a.source_key,a.feed.resolve())
+                 a.day,a.source_key,a.feed.resolve(),fixed_source=a.mashiro_fixed_source.resolve())
 
 
 if __name__=='__main__':
@@ -375,3 +420,4 @@ if __name__=='__main__':
         print('G11_ISOLATED_RESEARCH=HELD TYPE='+type(exc).__name__+
               (' CODE='+code if re.fullmatch('[A-Z0-9_]{1,100}',code) else ''),flush=True)
         raise SystemExit(1) from None
+

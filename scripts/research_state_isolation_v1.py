@@ -18,6 +18,21 @@ SCHEMA = 'G11_ISOLATED_RESEARCH_STATE_20261114_V1'
 EFFECTIVE_FROM = '2026-11-14'
 MARKER = 'research-isolation/{day}.json'
 DEME = 'store/shadow/original-display/v2/deme-discovery.json'
+MASHIRO_FIXED_FROM = '2026-11-17'
+
+
+def fixed_mashiro_member(name, day):
+    if not MASHIRO_FIXED_FROM <= day <= '2026-12-14':
+        return None
+    key = re.escape(day.replace('-', '')) + r'-(?:0[1-9]|1\d|2[0-4])-(?:0[1-9]|1[0-2])'
+    if re.fullmatch(r'store/snapshots/predeadline/mashiro-fixed-v1-' + key + r'\.json', name):
+        return 'capture'
+    if re.fullmatch(r'store/snapshots/night/mashiro-fixed-v1-result-' + key + r'\.json', name):
+        return 'result'
+    if name in {f'store/research/mashiro-fixed-v1/{day}/capture-coverage.json',
+                f'store/research/mashiro-fixed-v1/{day}/result-coverage.json'}:
+        return 'coverage'
+    return None
 
 
 def require(ok, code):
@@ -56,6 +71,10 @@ def allowed(name, day, *, night=False):
     path = PurePosixPath(name)
     if path.is_absolute() or '..' in path.parts or str(path) != name:
         return False
+    if fixed_mashiro_member(name, day):
+        # This study persists only in the independent research cache. Even its
+        # predeadline observations never enter canonical NIGHT or its bindings.
+        return not night
     key = re.escape(day.replace('-', '')) + r'-\d{2}-(?:0[1-9]|1[0-2])'
     if name == DEME:
         return True
@@ -87,6 +106,7 @@ def safe_file(root, name):
 
 def research_files(state, day):
     roots = [state/'store/snapshots/morning', state/'store/snapshots/predeadline',
+             state/'store/snapshots/night', state/'store/research/mashiro-fixed-v1'/day,
              state/'store/g11/wild-pack-oos', state/'store/shadow/original-display/v2']
     result = {}
     for root in roots:
@@ -154,10 +174,28 @@ def timely_member(path, name, day, deadlines, mtime_ns):
         return True
     key = match.group(); require(key in deadlines, 'RESEARCH_MEMBER_UNPLANNED')
     deadline = deadlines[key]
+    kind = fixed_mashiro_member(name, day)
+    if kind == 'result':
+        value = json.loads(path.read_bytes()); payload = value.get('PAYLOAD', value)
+        require(payload.get('SCHEMA') == 'G11_MASHIRO_FIXED_FIRST_PLACE_RESULT_V1'
+                and payload.get('RACE_KEY') == key
+                and datetime.fromisoformat(payload['DEADLINE_AT_JST']) == deadline
+                and datetime.fromisoformat(payload['JOINED_AT_JST']) >= deadline
+                and datetime.fromtimestamp(mtime_ns/1e9, JST) >= deadline
+                and all(re.fullmatch('[a-f0-9]{64}', str(payload.get(k,''))) for k in
+                        ('OBSERVATION_SNAPSHOT_SHA256','RESULT_SNAPSHOT_SHA256','PROTOCOL_SHA256'))
+                and payload.get('PRODUCTION_MUTATED') is False, 'RESEARCH_MASHIRO_RESULT')
+        return True
     if datetime.fromtimestamp(mtime_ns/1e9, JST) >= deadline:
         return False
     value = json.loads(path.read_bytes())
     payload = value.get('PAYLOAD', value)
+    if kind == 'capture':
+        require(payload.get('SCHEMA') == 'G11_MASHIRO_FIXED_OBSERVATION_V1'
+                and payload.get('OPERATIONAL_DATE_JST') == day
+                and datetime.fromisoformat(payload['DEADLINE_AT_JST']) == deadline
+                and payload.get('P3_OUTPUTS_USED') is False
+                and payload.get('PRODUCTION_MUTATED') is False, 'RESEARCH_MASHIRO_CAPTURE')
     require(payload.get('RACE_ID', payload.get('RACE_KEY', key)) == key,
             'RESEARCH_MEMBER_RACE')
     for field in ('PREDICTION_AT', 'PREDICTION_LOCKED_AT', 'LOCKED_AT',
@@ -299,3 +337,4 @@ def apply_files(value, state, day, *, night=False, after_copy=None):
 def bundle_payload_sha(value, day):
     return hashlib.sha256(canonical({name: info['sha256'] for name, info in value['members'].items()
         if allowed(name, day, night=True)})).hexdigest()
+
