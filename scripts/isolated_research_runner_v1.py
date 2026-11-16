@@ -67,6 +67,14 @@ def event_selection(event, now):
     if (parent.get('head_branch') != 'main'
             or (parent.get('head_repository') or {}).get('full_name') != REPOSITORY):
         return None
+    # Source updates initialize only this read-only observer after its own
+    # contract succeeds on main. Reuse authenticated saved input; never
+    # dispatch the canonical acquisition/prediction workflow for publication.
+    if (parent.get('path')=='.github/workflows/g11-mashiro-p3-bridge-audit.yml'
+            and parent.get('name')=='paired Mashiro P3 saved comparison contract'):
+        day=now.date().isoformat()
+        if event.get('action')!='completed' or parent.get('conclusion')!='success' or not '2026-11-16'<=day<='2026-12-14' or not isinstance(parent.get('id'),int):return None
+        return {'day':day,'phase':'saved-audit','parent':parent['id']}
     title = parent.get('display_title','')
     match = re.fullmatch(r'LIVE-(predeadline|night|auto)-(\d{4}-\d{2}-\d{2})', title)
     if match:
@@ -228,33 +236,61 @@ def fixed_mashiro_research(state, source, fixed_source, day, closing):
     return report
 
 
+def paired_mashiro_research(state,source,study,fixed,day,checkpoint):
+    if not '2026-11-16'<=day<='2026-12-14' or not (study/'g11/research/mashiro_p3_bridge_v1/observer.py').is_file():
+        return {'STATUS':'PAIRED_SOURCE_UNAVAILABLE','CHANGED':False}
+    try:
+        from mashiro_p3_bridge_v1 import collect
+        return collect(state,source,study,fixed,day,checkpoint)
+    except Exception as exc:
+        return {'STATUS':'UNAVAILABLE','REASON':str(exc)[:150],'CHANGED':False}
+
+def apply_paired_saved_inputs(verified_bundle,state,day):
+    """Select only this study's parents after full bundle/source validation.
+
+    Keep the original apply_files seed guard. An unrelated mutable discovery
+    or WILD state must never be overwritten to obtain immutable Mashiro data.
+    """
+    prefix='store/snapshots/predeadline/mashiro-v4-shadow-'+day.replace('-','')+'-'
+    report=f'store/research/mashiro-p3-bridge-v1/{day}/report.json'
+    selected={k:v for k,v in verified_bundle['members'].items()
+              if k.startswith(prefix) or isolation.fixed_mashiro_member(k,day) or k==report}
+    return isolation.apply_files({**verified_bundle,'members':selected},state,day)
+
 def run_research(state, source, deme_source, previous, destination, day, source_key, feed,
-                 *, fixed_source=Path('.g11-mashiro-fixed')):
+                 *, fixed_source=Path('.g11-mashiro-fixed'),paired_source=Path('.g11-mashiro-bridge')):
     authority,binding = authority_binding(state,day,source)
     sources = isolation.core_sources(state,day)
     seeds = {name:isolation.digest(path) for name,path in isolation.research_files(state,day).items()}
     before = isolation.protected_metadata(state,day)
-    prior_closed = False
+    prior_closed = False;paired_only=False
     if (previous/'manifest.json').is_file():
         prior = isolation.read_bundle(previous,day); prior['_root'] = previous
         isolation.validate_source(prior,state,day,binding)
         prior_closed = prior['closed']
-        if prior_closed and not '2026-11-17' <= day <= '2026-12-14':
+        if prior_closed and not '2026-11-16' <= day <= '2026-12-14':
             outputs(no_change=True,closing=True)
             print('G11_ISOLATED_RESEARCH=ALREADY_CLOSED');return
-        isolation.apply_files(prior,state,day)
+        try:
+            isolation.apply_files(prior,state,day)
+        except ValueError as exc:
+            if str(exc)!='RESEARCH_SEED_CONFLICT' or not '2026-11-16'<=day<='2026-12-14' or not (paired_source/'g11/research/mashiro_p3_bridge_v1/observer.py').is_file():raise
+            apply_paired_saved_inputs(prior,state,day)
+            paired_only=True
     closing = datetime.now(isolation.JST) >= max(isolation.plan_deadlines(state,day).values())
     isolation.require(not prior_closed or closing, 'RESEARCH_REOPEN_AFTER_CLOSE')
     fixed = fixed_mashiro_research(state,source,fixed_source,day,closing)
-    if prior_closed and not fixed['CHANGED']:
+    paired=paired_mashiro_research(state,source,paired_source,fixed_source,day,source_key) if prior_closed else None
+    if prior_closed and not fixed['CHANGED'] and not paired['CHANGED']:
         isolation.require(isolation.protected_metadata(state,day) == before
             and isolation.core_sources(state,day) == sources, 'RESEARCH_PROTECTED_STATE_CHANGED')
         outputs(no_change=True,closing=True,fixed_archive_ready=fixed.get('NIGHT_RESULTS_COMPLETE') is True,
                 fixed_protocol_sha=fixed.get('PROTOCOL_SHA256',''))
         print('G11_ISOLATED_RESEARCH=ALREADY_CLOSED_FIXED='+json.dumps(fixed,sort_keys=True));return
-    result = {'mode':'CLOSE_ONLY'} if closing else capture_only_research(state,source,day)
+    result = {'mode':'PAIRED_ONLY_UNRELATED_SEED_CONFLICT'} if paired_only else {'mode':'CLOSE_ONLY'} if closing else capture_only_research(state,source,day)
     result['fixed_mashiro'] = fixed
-    if not closing:
+    result['paired_mashiro']=paired or paired_mashiro_research(state,source,paired_source,fixed_source,day,source_key)
+    if not closing and not paired_only:
         try:
             from saved_deme_recovery_v1 import recover
             result['deme'] = recover(state,deme_source,day,feed)['readback']
@@ -420,4 +456,3 @@ if __name__=='__main__':
         print('G11_ISOLATED_RESEARCH=HELD TYPE='+type(exc).__name__+
               (' CODE='+code if re.fullmatch('[A-Z0-9_]{1,100}',code) else ''),flush=True)
         raise SystemExit(1) from None
-

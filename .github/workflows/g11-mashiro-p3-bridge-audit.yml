@@ -1,0 +1,131 @@
+name: paired Mashiro P3 saved comparison contract
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/g11-mashiro-p3-bridge-audit.yml'
+      - '.github/workflows/g11-isolated-live-research.yml'
+      - 'scripts/*mashiro_p3_bridge*'
+      - 'scripts/isolated_research_runner_v1.py'
+      - 'scripts/research_state_isolation_v1.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/g11-mashiro-p3-bridge-audit.yml'
+      - '.github/workflows/g11-isolated-live-research.yml'
+      - 'scripts/*mashiro_p3_bridge*'
+      - 'scripts/isolated_research_runner_v1.py'
+      - 'scripts/research_state_isolation_v1.py'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: g11-mashiro-p3-paired-contract-${{github.ref}}
+  cancel-in-progress: true
+jobs:
+  paired-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      TZ: Asia/Tokyo
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Checkout the fixed paired comparison and original frozen validators
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: a121ca98fc80628a4fea056d589d05f19c83740b
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-mashiro-bridge
+          persist-credentials: false
+          sparse-checkout: |
+            g11/research/mashiro_p3_bridge_v1
+            g11/research/mashiro_fixed_v1
+            g11/growth_p3/v1_1/mashiro_tactical_research_v1.py
+            g11/growth_p3/v1_1/test_mashiro_tactical_research_v1.py
+            g11/growth_p3/v1_1/mashiro_v4_shadow_v1.py
+            g11/growth_p3/v1_1/tactical_forward_v1.py
+            g11/growth_p3/v1_1/head_selection_diagnostics_v1.py
+            g11/canonical/official_pipeline.py
+          sparse-checkout-cone-mode: false
+      - name: Verify existing and new definitions, same points, missing evidence and finance
+        env:
+          PYTHONPATH: .g11-mashiro-bridge
+        run: python3 -S -m unittest g11.research.mashiro_p3_bridge_v1.test_observer g11.growth_p3.v1_1.test_mashiro_tactical_research_v1 -v
+      - name: Verify paired output isolation and original research handover
+        run: |
+          python3 -S -m unittest discover -s scripts -p test_mashiro_p3_bridge_v1.py -v
+          python3 -S -m unittest discover -s scripts -p test_research_state_isolation_v1.py -v
+      - name: Select an existing saved input checkpoint; never acquire official data
+        id: source
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: python3 -S scripts/critical_saved_publication_v1.py --day 2026-11-16 --select-restore
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.source.outputs.cache_key}}
+          fail-on-cache-miss: true
+      - name: Authenticate a disposable checkpoint
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 -S scripts/isolated_research_runner_v1.py decode --destination .paired-input-audit
+          exec 3<&-
+          rm -f .relay-cache/state.tgz.gpg
+      - name: Restore the already-authorized frozen source without prediction
+        run: python3 -S scripts/daily_runtime_bootstrap_v1.py prepare --state-root .paired-input-audit --operational-date 2026-11-16 --phase predeadline --source-root .g11-private
+      - name: Select the separately retained old research evidence
+        id: research-source
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: |
+          python3 -S - <<'PYCODE'
+          import sys,os
+          sys.path.insert(0,'scripts')
+          from isolated_research_runner_v1 import latest_research
+          key=latest_research('2026-11-16')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:out.write('key='+key+'\n')
+          PYCODE
+      - name: Restore that exact isolated research checkpoint
+        if: steps.research-source.outputs.key!=''
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.research-source.outputs.key}}
+          fail-on-cache-miss: true
+      - name: Authenticate and attach existing research to the disposable audit copy
+        if: steps.research-source.outputs.key!=''
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 -S scripts/isolated_research_runner_v1.py decode --destination .paired-research-audit
+          exec 3<&-
+          python3 -S - <<'PYCODE'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0,'scripts')
+          from isolated_research_runner_v1 import authority_binding,apply_paired_saved_inputs
+          import research_state_isolation_v1 as isolation
+          state=Path('.paired-input-audit').resolve();source=Path('.g11-private').resolve();day='2026-11-16'
+          before=isolation.core_sources(state,day)
+          _,binding=authority_binding(state,day,source)
+          bundle=isolation.read_bundle(Path('.paired-research-audit'),day);bundle['_root']=Path('.paired-research-audit')
+          isolation.validate_source(bundle,state,day,binding)
+          n=apply_paired_saved_inputs(bundle,state,day)
+          assert before==isolation.core_sources(state,day)
+          print('PAIRED_EXISTING_RESEARCH_ATTACHED='+str(n)+'; CANONICAL_FORECASTS_CHANGED=false')
+          PYCODE
+      - name: Audit original P3 and existing research together without writing
+        if: steps.research-source.outputs.key!=''
+        run: python3 -S scripts/mashiro_p3_bridge_v1.py --mode audit --state-root .paired-input-audit --study-root .g11-mashiro-bridge --fixed-root .g11-mashiro-bridge --day 2026-11-16 --source-checkpoint '${{steps.source.outputs.cache_key}}'
+      - name: Audit saved real P3 pairs without writing, regenerating or publishing
+        if: steps.research-source.outputs.key==''
+        run: python3 -S scripts/mashiro_p3_bridge_v1.py --mode audit --state-root .paired-input-audit --study-root .g11-mashiro-bridge --fixed-root .g11-mashiro-bridge --day 2026-11-16 --source-checkpoint '${{steps.source.outputs.cache_key}}'

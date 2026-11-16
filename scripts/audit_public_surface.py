@@ -9,6 +9,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    'scripts/mashiro_p3_bridge_v1.py',
+    '.github/workflows/g11-mashiro-p3-bridge-audit.yml',
+    'scripts/test_mashiro_p3_bridge_v1.py',
+    'docs/mashiro-p3-paired-bridge-20261117.md',
     'scripts/mashiro_fixed_display_v1.py',
     # Exact observation-only wiring; private study implementation and raw
     # evidence remain outside this public source tree.
