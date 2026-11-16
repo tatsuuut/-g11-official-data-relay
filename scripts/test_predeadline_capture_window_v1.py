@@ -385,5 +385,64 @@ class AvailabilityReceiptTests(unittest.TestCase):
                 self.assertEqual(1,len(writes))
 
 
-if __name__=='__main__':unittest.main()
+    def test_saved_publication_reopens_t10_availability_without_regenerating_or_rewriting(self):
+        import tempfile
+        from unittest.mock import Mock
+        import critical_saved_publication_v1 as early
+        raw=b'synthetic retained official withdrawal bytes'
+        self.receipt['SHA256']=hashlib.sha256(raw).hexdigest()
+        morning={'SNAPSHOT':{'PAYLOAD':{'PREDEADLINE_PLAN':[self.task]}}}
+        with tempfile.TemporaryDirectory() as d:
+            state=Path(d);root=state/'store';writes=[]
+            def load(stage,name):
+                if stage=='morning':return morning
+                data=(root/'snapshots'/stage/(name+'.json')).read_bytes()
+                return {'SNAPSHOT':json.loads(data),'SNAPSHOT_SHA256':hashlib.sha256(data).hexdigest()}
+            def commit(stage,name,payload,receipts):
+                path=root/'snapshots'/stage/(name+'.json');path.parent.mkdir(parents=True,exist_ok=True)
+                with path.open('x') as output:
+                    json.dump({'STAGE':'PREDEADLINE','NAME':name,'PAYLOAD':payload,'SOURCE_RECEIPTS':receipts},output)
+                writes.append(path)
+            store=types.SimpleNamespace(root=root,response_bytes=lambda sid:raw,
+                commit_snapshot=commit,load_verified_snapshot=load)
+            authority={'authority_sha256':'a'*64,'runtime_source_sha':'b'*40}
+            (state/'relay-state.json').write_text(json.dumps({'OPERATIONAL_DATE_JST':DAY,'CRITICAL':{
+                'OPERATIONAL_DATE':DAY,'CRITICAL_CHECKPOINT_STATUS':'PASS','LAST_CRITICAL_RUN_ID':'123',
+                'AUTHORITY_SHA256':'a'*64,'RUNTIME_SOURCE_SHA':'b'*40,
+                'LAST_TIMELY_P3_LIVE_COUNT':1,'LAST_TIMELY_V53_COUNT':1}}))
+            runtime=types.SimpleNamespace(verify_runtime=Mock(return_value=authority),verify_locks=Mock(),
+                feed_binding=Mock(return_value=authority))
+            publisher=types.SimpleNamespace(load_locked_publication=Mock(return_value={'READ_ONLY':True}))
+            saved_live={'practical_bets':['1-2-3'],'captured_at_jst':NOW.isoformat(),'snapshot_sha256':'c'*64}
+            def build(*args,**kwargs):
+                availability=self.helper.public_by_race(store,[KEY])
+                return {'stage':'PREDEADLINE','status':'PASS','operational_date_jst':DAY,
+                    'races':[{'key':KEY,'predeadline':saved_live,'predeadline_availability':availability[KEY]}]}
+            relay=types.SimpleNamespace(_morning_projection=Mock(return_value={}),build_feed=Mock(side_effect=build),
+                predeadline_availability=types.SimpleNamespace(_pipeline=lambda:self.official))
+            with patch.object(self.helper,'parse_official_withdrawal',return_value=self.withdrawal), \
+                    patch.object(window,'datetime',wraps=datetime) as clock:
+                clock.now.return_value=NOW+timedelta(seconds=1)
+                with window.verified_odds_window(self.official):
+                    self.helper.save(store,self.task,self.receipt,self.withdrawal,NOW+timedelta(seconds=1))
+                original_bytes=writes[0].read_bytes();original_gate=self.helper._payload
+                with self.assertRaisesRegex(old.PipelineError,'AVAILABILITY_OFFICIAL_RECEIPT_BINDING'):
+                    self.helper.public_by_race(store,[KEY])
+                clock.now.return_value=DEADLINE+timedelta(hours=1)
+                with patch.object(store,'commit_snapshot',side_effect=AssertionError('publication is read only')):
+                    for attempt in range(2):
+                        self.assertTrue(early.project_saved(state,DAY,'123',state/'frozen',state/'feed.json',
+                            authority_module=runtime,relay=relay,publisher=publisher,now=clock.now.return_value))
+                        feed=json.loads((state/'feed.json').read_text())
+                        self.assertEqual(saved_live,feed['races'][0]['predeadline'])
+                        self.assertEqual([3],feed['races'][0]['predeadline_availability']['withdrawn_boats'])
+                self.assertEqual(original_bytes,writes[0].read_bytes());self.assertEqual(1,len(writes))
+                self.assertIs(original_gate,self.helper._payload)
+                with patch.object(self.helper,'parse_official_withdrawal',return_value=None):
+                    with self.assertRaisesRegex(old.PipelineError,'AVAILABILITY_WITHDRAWAL_EVIDENCE_MISSING'):
+                        early.project_saved(state,DAY,'123',state/'frozen',state/'feed.json',
+                            authority_module=runtime,relay=relay,publisher=publisher,now=clock.now.return_value)
+                self.assertIs(original_gate,self.helper._payload)
 
+
+if __name__=='__main__':unittest.main()
