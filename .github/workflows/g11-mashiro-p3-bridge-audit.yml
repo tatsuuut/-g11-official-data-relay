@@ -80,5 +80,52 @@ jobs:
           rm -f .relay-cache/state.tgz.gpg
       - name: Restore the already-authorized frozen source without prediction
         run: python3 -S scripts/daily_runtime_bootstrap_v1.py prepare --state-root .paired-input-audit --operational-date 2026-11-16 --phase predeadline --source-root .g11-private
+      - name: Select the separately retained old research evidence
+        id: research-source
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: |
+          python3 -S - <<'PYCODE'
+          import sys,os
+          sys.path.insert(0,'scripts')
+          from isolated_research_runner_v1 import latest_research
+          key=latest_research('2026-11-16')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:out.write('key='+key+'\n')
+          PYCODE
+      - name: Restore that exact isolated research checkpoint
+        if: steps.research-source.outputs.key!=''
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.research-source.outputs.key}}
+          fail-on-cache-miss: true
+      - name: Authenticate and attach existing research to the disposable audit copy
+        if: steps.research-source.outputs.key!=''
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 -S scripts/isolated_research_runner_v1.py decode --destination .paired-research-audit
+          exec 3<&-
+          python3 -S - <<'PYCODE'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0,'scripts')
+          from isolated_research_runner_v1 import authority_binding
+          import research_state_isolation_v1 as isolation
+          state=Path('.paired-input-audit').resolve();source=Path('.g11-private').resolve();day='2026-11-16'
+          before=isolation.core_sources(state,day)
+          _,binding=authority_binding(state,day,source)
+          bundle=isolation.read_bundle(Path('.paired-research-audit'),day);bundle['_root']=Path('.paired-research-audit')
+          isolation.validate_source(bundle,state,day,binding)
+          n=isolation.apply_files(bundle,state,day)
+          assert before==isolation.core_sources(state,day)
+          print('PAIRED_EXISTING_RESEARCH_ATTACHED='+str(n)+'; CANONICAL_FORECASTS_CHANGED=false')
+          PYCODE
+      - name: Audit original P3 and existing research together without writing
+        if: steps.research-source.outputs.key!=''
+        run: python3 -S scripts/mashiro_p3_bridge_v1.py --mode audit --state-root .paired-input-audit --study-root .g11-mashiro-bridge --fixed-root .g11-mashiro-bridge --day 2026-11-16 --source-checkpoint '${{steps.source.outputs.cache_key}}'
       - name: Audit saved real P3 pairs without writing, regenerating or publishing
+        if: steps.research-source.outputs.key==''
         run: python3 -S scripts/mashiro_p3_bridge_v1.py --mode audit --state-root .paired-input-audit --study-root .g11-mashiro-bridge --fixed-root .g11-mashiro-bridge --day 2026-11-16 --source-checkpoint '${{steps.source.outputs.cache_key}}'
