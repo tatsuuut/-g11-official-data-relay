@@ -12,7 +12,7 @@ on:
         required: true
         type: string
   workflow_run:
-    workflows: [runtime sync]
+    workflows: [runtime sync, paired Mashiro P3 saved comparison contract]
     types: [in_progress, completed]
     branches: [main]
 

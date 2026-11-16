@@ -67,6 +67,14 @@ def event_selection(event, now):
     if (parent.get('head_branch') != 'main'
             or (parent.get('head_repository') or {}).get('full_name') != REPOSITORY):
         return None
+    # Source updates initialize only this read-only observer after its own
+    # contract succeeds on main. Reuse authenticated saved input; never
+    # dispatch the canonical acquisition/prediction workflow for publication.
+    if (parent.get('path')=='.github/workflows/g11-mashiro-p3-bridge-audit.yml'
+            and parent.get('name')=='paired Mashiro P3 saved comparison contract'):
+        day=now.date().isoformat()
+        if event.get('action')!='completed' or parent.get('conclusion')!='success' or not '2026-11-16'<=day<='2026-12-14' or not isinstance(parent.get('id'),int):return None
+        return {'day':day,'phase':'saved-audit','parent':parent['id']}
     title = parent.get('display_title','')
     match = re.fullmatch(r'LIVE-(predeadline|night|auto)-(\d{4}-\d{2}-\d{2})', title)
     if match:

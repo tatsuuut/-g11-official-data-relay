@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -7,6 +8,15 @@ import isolated_research_runner_v1 as runner
 import mashiro_p3_bridge_v1 as bridge
 
 class IsolationTests(unittest.TestCase):
+    def test_initialization_requires_owned_main_success_and_the_exact_contract_path(self):
+        now=datetime.fromisoformat('2026-11-17T12:00:00+09:00')
+        parent=dict(head_branch='main',head_repository={'full_name':runner.REPOSITORY},id=42,
+            name='paired Mashiro P3 saved comparison contract',path='.github/workflows/g11-mashiro-p3-bridge-audit.yml',conclusion='success')
+        event={'action':'completed','workflow_run':parent}
+        self.assertEqual({'day':'2026-11-17','phase':'saved-audit','parent':42},runner.event_selection(event,now))
+        for patch_ in ({'conclusion':'failure'},{'head_branch':'feature'},{'path':'.github/workflows/other.yml'},{'head_repository':{'full_name':'fork/repo'}}):
+            self.assertIsNone(runner.event_selection({'action':'completed','workflow_run':{**parent,**patch_}},now))
+        self.assertIsNone(runner.event_selection({'action':'in_progress','workflow_run':parent},now))
     def test_report_is_day_scoped_research_only_and_excluded_from_canonical_night(self):
         name='store/research/mashiro-p3-bridge-v1/2026-11-17/report.json'
         self.assertTrue(I.allowed(name,'2026-11-17'))
