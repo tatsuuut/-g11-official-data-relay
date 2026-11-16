@@ -9,6 +9,12 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    # Exact observation-only wiring; private study implementation and raw
+    # evidence remain outside this public source tree.
+    '.github/workflows/g11-mashiro-fixed-research-audit.yml',
+    'scripts/audit_mashiro_fixed_inputs_v1.py',
+    'scripts/test_mashiro_fixed_research_v1.py',
+    'docs/mashiro-fixed-independent-research-20261117.md',
     'scripts/predeadline_capture_window_v1.py',
     'scripts/test_predeadline_capture_window_v1.py',
     'docs/predeadline-ten-minute-start-20261114.md',
@@ -1061,6 +1067,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
+
 
 
 
