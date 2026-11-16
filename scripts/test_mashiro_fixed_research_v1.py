@@ -3,12 +3,14 @@ from datetime import datetime, timedelta
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
 import tempfile
 from types import ModuleType, SimpleNamespace
 import unittest
+import subprocess
 from unittest.mock import patch
 
 import isolated_research_runner_v1 as runner
@@ -108,6 +110,47 @@ class FixedResearchIsolationTests(unittest.TestCase):
         saved=isolation.read_bundle(second,DAY)
         self.assertTrue(saved['closed']);self.assertIn(CAPTURE,saved['members']);self.assertIn(RESULT,saved['members'])
         self.assertEqual(before,isolation.core_sources(self.state,DAY))
+
+
+@unittest.skipUnless(os.environ.get('G11_MASHIRO_FIXED_ENCRYPTION_TEST')=='true',
+                     'Encrypted fixture roundtrip runs in the pinned-source contract CI')
+class EncryptedEvidenceIntegrationTests(unittest.TestCase):
+    def test_actual_workflow_readback_authenticates_the_small_daily_archive(self):
+        root=Path(__file__).resolve().parents[1]
+        path=root/'.g11-mashiro-fixed/g11/research/mashiro_fixed_v1/test_observer.py'
+        spec=importlib.util.spec_from_file_location('fixed_archive_fixture',path)
+        fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
+        import encrypt_runtime_state_v1 as encryption
+        with tempfile.TemporaryDirectory() as directory:
+            work=Path(directory);home=work/'gnupg';home.mkdir(mode=0o700)
+            store=fixture.Store(work/'state');m,p,mr,pr=fixture.source_packets()
+            store.commit_snapshot('morning','official-day-input',m,mr)
+            store.commit_snapshot('predeadline','beforeinfo-'+fixture.KEY,p,pr)
+            fixture.R.save_observation(store,store.load_verified_snapshot('morning','official-day-input'),
+                store.load_verified_snapshot('predeadline','beforeinfo-'+fixture.KEY),fixture.KEY,clock=lambda:fixture.NOW)
+            store.time=fixture.DEADLINE+timedelta(minutes=2)
+            receipt=fixture.receipt('result-k-20261117',store.time,'https://www1.mbrace.or.jp/od2/K/202611/k261117.lzh')
+            store.commit_snapshot('night','official-day-results',{'OPERATIONAL_DATE_JST':fixture.DAY,
+                'STATUS':'NIGHT_RESULTS_COMPLETE','PENDING_RESULT_COUNT':0,'RESULTS':[fixture.ObserverTests().result()]},[receipt])
+            fixture.R.settle(store,fixture.DAY,clock=lambda:store.time)
+            fixture.R.export_evidence(store,fixture.DAY,work/'evidence',{'source_checkpoint':'SYNTHETIC_FIXTURE_ONLY'})
+            secret=work/'fixture-password';secret.write_text('synthetic-fixture-only\n');secret.chmod(0o600)
+            with patch.dict(os.environ,{'GNUPGHOME':str(home)}):
+                with secret.open('rb') as fd:
+                    encryption.encrypt(work/'evidence',work/'encrypted.gpg',passphrase_fd=fd.fileno())
+                with secret.open('rb') as fd:
+                    subprocess.run(['gpg','--batch','--yes','--pinentry-mode','loopback','--passphrase-fd',str(fd.fileno()),
+                        '--decrypt','--output',str(work/'.mashiro-fixed-readback.tgz'),str(work/'encrypted.gpg')],
+                        pass_fds=(fd.fileno(),),check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            text=(root/'.github/workflows/g11-isolated-live-research.yml').read_text()
+            section=text.split('      - name: Encrypt and verify only the fixed-study daily evidence',1)[1]
+            match=re.search("python3 - <<'PY'\\n(.*?)\\n          PY",section,re.S)
+            self.assertIsNotNone(match)
+            import textwrap
+            body=textwrap.dedent(match[1]);previous=Path.cwd()
+            try:
+                os.chdir(work);exec(compile(body,'actual-encrypted-evidence-readback','exec'),{})
+            finally:os.chdir(previous)
 
 
 if __name__=='__main__':unittest.main()

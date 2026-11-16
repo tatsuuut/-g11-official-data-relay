@@ -28,7 +28,7 @@ The artifact name binds the day and protocol hash. Retries skip an already saved
 same-study main-branch artifact. A failed archive can retry from the verified
 closed cache without regenerating any observation.
 
-The dedicated contract runs the 11 observer tests, 6 new isolation tests and
+The dedicated contract runs the 11 observer tests, 7 new isolation/archive tests and
 15 existing isolation/routing tests. A read-only audit uses a disposable
 authenticated November 16 checkpoint and its frozen source to verify actual
 input formats. That audit writes no observation, reads no result, and is not
