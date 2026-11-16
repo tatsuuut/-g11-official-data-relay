@@ -117,6 +117,19 @@ jobs:
           path: .g11-mashiro-fixed
           persist-credentials: false
           sparse-checkout: g11/research/mashiro_fixed_v1
+      - name: Checkout the pinned paired Mashiro and P3 auditor
+        if: steps.window.outputs.active=='true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 067e539db5df5176fde9d0dc68b3844f0c3282ce
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-mashiro-bridge
+          persist-credentials: false
+          sparse-checkout: |
+            g11/research/mashiro_p3_bridge_v1
+            g11/growth_p3/v1_1/mashiro_tactical_research_v1.py
+          sparse-checkout-cone-mode: false
       - name: Run research only and export an allowlisted bundle
         if: steps.window.outputs.active=='true'
         id: research
@@ -144,6 +157,20 @@ jobs:
         env:
           RESEARCH_CHECKPOINT_VERIFIED: 'true'
         run: python3 -S scripts/mashiro_fixed_display_v1.py --state-root .research-state --source-root .g11-private --observer-root .g11-mashiro-fixed --day '${{steps.input.outputs.day}}' --source-checkpoint '${{steps.input.outputs.source_key}}'
+      - name: Publish the isolated same-point Mashiro and P3 comparison
+        if: steps.research.outcome=='success' && (steps.persisted.outputs.ready=='true' || steps.research.outputs.no_change=='true')
+        env:
+          RESEARCH_CHECKPOINT_VERIFIED: 'true'
+        run: python3 -S scripts/mashiro_p3_bridge_v1.py --mode publish --state-root .research-state --day '${{steps.input.outputs.day}}'
+      - name: Retain encrypted paired evidence after a changed closing checkpoint
+        if: steps.research.outputs.closing=='true' && steps.persisted.outputs.ready=='true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mashiro-p3-paired-${{steps.input.outputs.day}}-${{github.run_id}}-${{github.run_attempt}}
+          path: .relay-cache/state.tgz.gpg
+          retention-days: 90
+          if-no-files-found: error
+          include-hidden-files: true
       - name: Publish only the separate research display
         if: steps.persisted.outputs.ready=='true' && steps.research.outputs.closing!='true'
         env:
@@ -205,4 +232,3 @@ jobs:
           retention-days: 90
           if-no-files-found: error
           include-hidden-files: true
-

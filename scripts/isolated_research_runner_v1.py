@@ -228,8 +228,17 @@ def fixed_mashiro_research(state, source, fixed_source, day, closing):
     return report
 
 
+def paired_mashiro_research(state,source,study,fixed,day,checkpoint):
+    if not '2026-11-16'<=day<='2026-12-14' or not (study/'g11/research/mashiro_p3_bridge_v1/observer.py').is_file():
+        return {'STATUS':'PAIRED_SOURCE_UNAVAILABLE','CHANGED':False}
+    try:
+        from mashiro_p3_bridge_v1 import collect
+        return collect(state,source,study,fixed,day,checkpoint)
+    except Exception as exc:
+        return {'STATUS':'UNAVAILABLE','REASON':str(exc)[:150],'CHANGED':False}
+
 def run_research(state, source, deme_source, previous, destination, day, source_key, feed,
-                 *, fixed_source=Path('.g11-mashiro-fixed')):
+                 *, fixed_source=Path('.g11-mashiro-fixed'),paired_source=Path('.g11-mashiro-bridge')):
     authority,binding = authority_binding(state,day,source)
     sources = isolation.core_sources(state,day)
     seeds = {name:isolation.digest(path) for name,path in isolation.research_files(state,day).items()}
@@ -239,14 +248,15 @@ def run_research(state, source, deme_source, previous, destination, day, source_
         prior = isolation.read_bundle(previous,day); prior['_root'] = previous
         isolation.validate_source(prior,state,day,binding)
         prior_closed = prior['closed']
-        if prior_closed and not '2026-11-17' <= day <= '2026-12-14':
+        if prior_closed and not '2026-11-16' <= day <= '2026-12-14':
             outputs(no_change=True,closing=True)
             print('G11_ISOLATED_RESEARCH=ALREADY_CLOSED');return
         isolation.apply_files(prior,state,day)
     closing = datetime.now(isolation.JST) >= max(isolation.plan_deadlines(state,day).values())
     isolation.require(not prior_closed or closing, 'RESEARCH_REOPEN_AFTER_CLOSE')
     fixed = fixed_mashiro_research(state,source,fixed_source,day,closing)
-    if prior_closed and not fixed['CHANGED']:
+    paired=paired_mashiro_research(state,source,paired_source,fixed_source,day,source_key) if prior_closed else None
+    if prior_closed and not fixed['CHANGED'] and not paired['CHANGED']:
         isolation.require(isolation.protected_metadata(state,day) == before
             and isolation.core_sources(state,day) == sources, 'RESEARCH_PROTECTED_STATE_CHANGED')
         outputs(no_change=True,closing=True,fixed_archive_ready=fixed.get('NIGHT_RESULTS_COMPLETE') is True,
@@ -254,6 +264,7 @@ def run_research(state, source, deme_source, previous, destination, day, source_
         print('G11_ISOLATED_RESEARCH=ALREADY_CLOSED_FIXED='+json.dumps(fixed,sort_keys=True));return
     result = {'mode':'CLOSE_ONLY'} if closing else capture_only_research(state,source,day)
     result['fixed_mashiro'] = fixed
+    result['paired_mashiro']=paired or paired_mashiro_research(state,source,paired_source,fixed_source,day,source_key)
     if not closing:
         try:
             from saved_deme_recovery_v1 import recover
@@ -420,4 +431,3 @@ if __name__=='__main__':
         print('G11_ISOLATED_RESEARCH=HELD TYPE='+type(exc).__name__+
               (' CODE='+code if re.fullmatch('[A-Z0-9_]{1,100}',code) else ''),flush=True)
         raise SystemExit(1) from None
-

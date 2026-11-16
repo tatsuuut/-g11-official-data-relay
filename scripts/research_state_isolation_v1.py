@@ -75,6 +75,8 @@ def allowed(name, day, *, night=False):
         # This study persists only in the independent research cache. Even its
         # predeadline observations never enter canonical NIGHT or its bindings.
         return not night
+    if '2026-11-16'<=day<='2026-12-14' and name==f'store/research/mashiro-p3-bridge-v1/{day}/report.json':
+        return not night
     key = re.escape(day.replace('-', '')) + r'-\d{2}-(?:0[1-9]|1[0-2])'
     if name == DEME:
         return True
@@ -107,6 +109,7 @@ def safe_file(root, name):
 def research_files(state, day):
     roots = [state/'store/snapshots/morning', state/'store/snapshots/predeadline',
              state/'store/snapshots/night', state/'store/research/mashiro-fixed-v1'/day,
+             state/'store/research/mashiro-p3-bridge-v1'/day,
              state/'store/g11/wild-pack-oos', state/'store/shadow/original-display/v2']
     result = {}
     for root in roots:
@@ -337,4 +340,3 @@ def apply_files(value, state, day, *, night=False, after_copy=None):
 def bundle_payload_sha(value, day):
     return hashlib.sha256(canonical({name: info['sha256'] for name, info in value['members'].items()
         if allowed(name, day, night=True)})).hexdigest()
-
