@@ -252,10 +252,12 @@ def validate_availability(row: dict, day: str) -> dict | None:
     try:
         captured = datetime.fromisoformat(evidence["captured_at_jst"])
         deadline = datetime.fromisoformat(row["deadline_jst"])
+        # Same approved acquisition window as the collector; saved evidence is unchanged.
+        capture_minutes = 10 if day >= "2026-11-14" else 7
         if (captured.utcoffset() != timedelta(hours=9)
                 or deadline.utcoffset() != timedelta(hours=9)
                 or captured.date().isoformat() != day or deadline.date().isoformat() != day
-                or not deadline - timedelta(minutes=7) <= captured < deadline):
+                or not deadline - timedelta(minutes=capture_minutes) <= captured < deadline):
             raise ValueError("capture window")
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("HOT_AVAILABILITY_CAPTURE") from exc

@@ -445,4 +445,43 @@ class AvailabilityReceiptTests(unittest.TestCase):
                 self.assertIs(original_gate,self.helper._payload)
 
 
+class HotAvailabilityReceiptWindowTests(unittest.TestCase):
+    def test_saved_receipts_use_the_approved_date_scoped_window_without_rewriting_locks(self):
+        import hot_delta_transport_v1 as transport
+        for day, minutes in [('2026-11-13', 7), ('2026-11-14', 10), ('2026-11-16', 10)]:
+            deadline = datetime.fromisoformat(day+'T12:31:00+09:00')
+            key = day.replace('-', '')+'-18-09'
+            saved = {'snapshot_sha256': 'a'*64, 'practical_bets': ['1-2-3']}
+            row = {'key': key, 'date_jst': day, 'venue_code': '18', 'race': 9,
+                'deadline_jst': deadline.isoformat(), 'predeadline': saved,
+                'predeadline_availability': {
+                    'schema': 'G11_PREDEADLINE_AVAILABILITY_V1', 'status': 'UNAVAILABLE',
+                    'reason': 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE',
+                    'withdrawn_boats': [3], 'active_boats': [1, 2, 4, 5, 6],
+                    'captured_at_jst': '', 'source_snapshot_sha256': 'b'*64,
+                    'official_response_sha256': 'c'*64,
+                    'source_url': 'https://www.boatrace.jp/owpc/pc/race/odds3t?rno=9&jcd=18&hd='+day.replace('-', '')}}
+            receipt = row['predeadline_availability']
+            for seconds in [minutes*60, minutes*60-1, 1]:
+                receipt['captured_at_jst'] = (deadline-timedelta(seconds=seconds)).isoformat()
+                before = copy.deepcopy(row)
+                self.assertEqual(receipt, transport.validate_availability(row, day))
+                self.assertEqual(before, row)
+                self.assertIs(saved, row['predeadline'])
+            for seconds in [minutes*60+1, 0, -1]:
+                receipt['captured_at_jst'] = (deadline-timedelta(seconds=seconds)).isoformat()
+                with self.assertRaisesRegex(RuntimeError, 'HOT_AVAILABILITY_CAPTURE'):
+                    transport.validate_availability(row, day)
+            receipt['captured_at_jst'] = (deadline-timedelta(minutes=minutes)).isoformat()
+            for field, value, error in [
+                    ('official_response_sha256', '', 'HASH'),
+                    ('active_boats', [1, 2, 3, 4, 5], 'ROSTER'),
+                    ('source_url', receipt['source_url'].replace('rno=9', 'rno=8'), 'SOURCE'),
+                    ('captured_at_jst', receipt['captured_at_jst'].replace(day, '2026-11-12'), 'CAPTURE')]:
+                invalid = copy.deepcopy(row)
+                invalid['predeadline_availability'][field] = value
+                with self.assertRaisesRegex(RuntimeError, 'HOT_AVAILABILITY_'+error):
+                    transport.validate_availability(invalid, day)
+
+
 if __name__=='__main__':unittest.main()
