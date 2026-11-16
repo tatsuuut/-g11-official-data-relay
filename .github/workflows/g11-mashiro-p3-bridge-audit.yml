@@ -112,14 +112,14 @@ jobs:
           import sys
           from pathlib import Path
           sys.path.insert(0,'scripts')
-          from isolated_research_runner_v1 import authority_binding
+          from isolated_research_runner_v1 import authority_binding,apply_paired_saved_inputs
           import research_state_isolation_v1 as isolation
           state=Path('.paired-input-audit').resolve();source=Path('.g11-private').resolve();day='2026-11-16'
           before=isolation.core_sources(state,day)
           _,binding=authority_binding(state,day,source)
           bundle=isolation.read_bundle(Path('.paired-research-audit'),day);bundle['_root']=Path('.paired-research-audit')
           isolation.validate_source(bundle,state,day,binding)
-          n=isolation.apply_files(bundle,state,day)
+          n=apply_paired_saved_inputs(bundle,state,day)
           assert before==isolation.core_sources(state,day)
           print('PAIRED_EXISTING_RESEARCH_ATTACHED='+str(n)+'; CANONICAL_FORECASTS_CHANGED=false')
           PYCODE
