@@ -7,6 +7,7 @@ The workflow must verify the encrypted critical checkpoint before invoking it.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
@@ -247,11 +248,18 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
         from g11.relay import v1 as relay
         from g11.growth_p3.v1_1 import relay_publish_v1 as publisher
     store = state / 'store'
-    morning = relay._morning_projection(store)
-    publication = publisher.load_locked_publication(store, morning, now)
-    require(publication.get('READ_ONLY') is True, 'EARLY_PUBLICATION_READ_ONLY_REQUIRED')
+    from predeadline_capture_window_v1 import verified_odds_window
     from optional_display_isolation_v1 import isolate_optional_display
-    with isolate_optional_display(relay):
+    pipeline = getattr(getattr(relay, 'predeadline_availability', None), '_pipeline', None)
+    receipt_window = (verified_odds_window(pipeline())
+                      if callable(pipeline) else nullcontext(False))
+    # Reopen saved receipts under the same reviewed admission window used to
+    # capture them. Unknown source versions keep their original fail-closed
+    # gates; source bytes, MORNING plans, LOCKs and cutoffs remain unchanged.
+    with receipt_window, isolate_optional_display(relay):
+        morning = relay._morning_projection(store)
+        publication = publisher.load_locked_publication(store, morning, now)
+        require(publication.get('READ_ONLY') is True, 'EARLY_PUBLICATION_READ_ONLY_REQUIRED')
         # replace_pinned copies globals; copy the isolated optional reader too.
         projector = independent_live_projector(relay, store, day, morning, publication)
         feed = projector(store, run_id=int(run_id),
@@ -400,5 +408,3 @@ if __name__ == '__main__':
         print('G11_EARLY_PUBLICATION=HELD REASON=' +
               (code if code.isupper() and len(code) < 160 else type(exc).__name__), file=sys.stderr)
         raise SystemExit(1) from None
-
-
