@@ -9,6 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    'scripts/mashiro_fixed_display_v1.py',
     # Exact observation-only wiring; private study implementation and raw
     # evidence remain outside this public source tree.
     '.github/workflows/g11-mashiro-fixed-research-audit.yml',

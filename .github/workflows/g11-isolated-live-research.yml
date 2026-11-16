@@ -139,6 +139,11 @@ jobs:
         uses: ./.github/actions/g11-publication-checkpoint
         with:
           cache-key: g11-research-v1-${{steps.input.outputs.day}}-${{github.run_id}}-${{github.run_attempt}}
+      - name: Publish the independent fixed-study app display after verified persistence
+        if: steps.research.outcome=='success' && (steps.persisted.outputs.ready=='true' || steps.research.outputs.no_change=='true')
+        env:
+          RESEARCH_CHECKPOINT_VERIFIED: 'true'
+        run: python3 -S scripts/mashiro_fixed_display_v1.py --state-root .research-state --source-root .g11-private --observer-root .g11-mashiro-fixed --day '${{steps.input.outputs.day}}' --source-checkpoint '${{steps.input.outputs.source_key}}'
       - name: Publish only the separate research display
         if: steps.persisted.outputs.ready=='true' && steps.research.outputs.closing!='true'
         env:
