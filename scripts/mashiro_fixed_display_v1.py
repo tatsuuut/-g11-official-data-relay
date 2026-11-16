@@ -62,6 +62,8 @@ def projection(store, observer, day, source_checkpoint, *, now=None):
                     expected={(c['basis'],t['boat']) for c in obs['COHORTS'] for t in c['targets']}
                     require(len(result['RESULTS'])==len(expected) and {(r['basis'],r['boat']) for r in result['RESULTS']}==expected,'RESULT_TARGETS')
                 for cohort in obs['COHORTS']:
+                    coverage_key=cohort['basis']+'_'+cohort['status']
+                    p['coverage'][coverage_key]=p['coverage'].get(coverage_key,0)+1
                     for target in cohort['targets']:
                         b=target['boat'];source=rows[b];entry=entries[b];status='WAITING'
                         require(entry['racer_number']==target['racer_number'],'ROSTER')

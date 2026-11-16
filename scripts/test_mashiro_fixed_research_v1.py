@@ -68,6 +68,18 @@ class FixedDisplayTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'COVERAGE_COUNT'):display.projection(store,f.R,DAY,SOURCE,now=NOW)
         with self.assertRaisesRegex(ValueError,'CHECKPOINT'):display.projection(store,f.R,DAY,'unverified',now=NOW)
 
+    def test_missing_exhibition_positions_are_unknown_eligibility_not_zero_opportunities(self):
+        f,store=self.fixture()
+        preview=store.root/'snapshots/predeadline'/('beforeinfo-'+KEY+'.json')
+        value=json.loads(preview.read_bytes())
+        for r in value['PAYLOAD']['PARSED']['RACERS']:r['COURSE']=None
+        preview.write_bytes(f.R.canonical(value))
+        report=f.R.collect(store,DAY,clock=lambda:NOW);f.R.save_coverage(store,DAY,'capture',report)
+        p=display.projection(store,f.R,DAY,SOURCE,now=NOW)['projection']
+        self.assertEqual(1,p['coverage']['EXHIBITION_COURSE_POSITION_UNKNOWN'])
+        self.assertEqual(1,p['coverage']['BOAT_NUMBER_PRESENT'])
+        self.assertEqual(3,len(p['rows']));self.assertTrue(all(r['basis']=='BOAT_NUMBER' for r in p['rows']))
+
     def test_publication_requires_verified_persistence_before_requesting_a_token(self):
         f,store=self.fixture();value=display.projection(store,f.R,DAY,SOURCE,now=NOW)
         with patch.dict(os.environ,{'RESEARCH_CHECKPOINT_VERIFIED':'false'}):
