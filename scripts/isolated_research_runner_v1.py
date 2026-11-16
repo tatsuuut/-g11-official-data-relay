@@ -280,15 +280,6 @@ def run_research(state, source, deme_source, previous, destination, day, source_
                 fixed_protocol_sha=fixed.get('PROTOCOL_SHA256',''))
         print('G11_ISOLATED_RESEARCH=ALREADY_CLOSED_FIXED='+json.dumps(fixed,sort_keys=True));return
     result = {'mode':'PAIRED_ONLY_UNRELATED_SEED_CONFLICT'} if paired_only else {'mode':'CLOSE_ONLY'} if closing else capture_only_research(state,source,day)
-    if paired_only and not closing:
-        try:
-            from daily_predeadline_authority_recovery_v1 import guard_optional_mashiro_shadow
-            from g11.growth_p3.v1_1 import mashiro_v4_runtime_adapter_v1 as legacy_mashiro
-            from g11.canonical.official_pipeline import OfficialArtifactStore
-            guard_optional_mashiro_shadow()
-            result['legacy_capture']=legacy_mashiro.collect_predeadline(OfficialArtifactStore(state/'store'),date.fromisoformat(day))['STATUS']
-        except Exception as exc:
-            result['legacy_capture']='UNAVAILABLE:'+type(exc).__name__
     result['fixed_mashiro'] = fixed
     result['paired_mashiro']=paired or paired_mashiro_research(state,source,paired_source,fixed_source,day,source_key)
     if not closing and not paired_only:

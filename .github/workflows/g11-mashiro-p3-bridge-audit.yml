@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 067e539db5df5176fde9d0dc68b3844f0c3282ce
+          ref: a121ca98fc80628a4fea056d589d05f19c83740b
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .g11-mashiro-bridge
           persist-credentials: false

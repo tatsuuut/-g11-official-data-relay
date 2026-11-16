@@ -36,7 +36,9 @@ def collect(state,source,study,fixed,day,checkpoint,*,save=True):
             old=known.get(row['race'])
             if old is None:continue
             if row['status']!='READY':report['records'][i]=old;continue
-            isolation.require(all(row['sources'][k]==old['sources'][k] for k in ('p3','legacy','packet','proof','pin')),'MASHIRO_BRIDGE_FROZEN_SOURCE_CHANGED')
+            isolation.require(all(row['sources'][k]==old['sources'][k] for k in ('p3','packet','proof','pin')),'MASHIRO_BRIDGE_FROZEN_SOURCE_CHANGED')
+            if old['sources']['legacy'] is not None:isolation.require(row['sources']['legacy']==old['sources']['legacy'],'MASHIRO_BRIDGE_LEGACY_SOURCE_CHANGED')
+            isolation.require(row['cohorts'][0]==old['cohorts'][0],'MASHIRO_BRIDGE_LEGACY_DEFINITION_CHANGED')
             if old['sources']['fixed'] is not None:isolation.require(row['sources']['fixed']==old['sources']['fixed'],'MASHIRO_BRIDGE_FIXED_SOURCE_CHANGED')
             if old['finance'] is not None:
                 isolation.require(row['finance'] is None or row['finance']==old['finance'],'MASHIRO_BRIDGE_SETTLED_FINANCE_CHANGED')
