@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import isolated_research_runner_v1 as runner
 import research_state_isolation_v1 as isolation
+import mashiro_fixed_display_v1 as display
 
 DAY='2026-11-17'
 KEY='20261117-01-01'
@@ -24,6 +25,54 @@ CAPTURE=f'store/snapshots/predeadline/mashiro-fixed-v1-{KEY}.json'
 RESULT=f'store/snapshots/night/mashiro-fixed-v1-result-{KEY}.json'
 SOURCE='g11-state-v4-critical-'+DAY+'-42'
 BINDING={'authority_sha256':'a'*64,'runtime_source_sha':'b'*40}
+
+
+@unittest.skipUnless((Path(__file__).resolve().parents[1]/'.g11-mashiro-fixed/g11/research/mashiro_fixed_v1/test_observer.py').is_file(), 'Pinned observer is supplied by the fixed-study contract CI')
+class FixedDisplayTests(unittest.TestCase):
+    def fixture(self):
+        path=Path(__file__).resolve().parents[1]/'.g11-mashiro-fixed/g11/research/mashiro_fixed_v1/test_observer.py'
+        spec=importlib.util.spec_from_file_location('fixed_display_fixture',path)
+        fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
+        tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
+        store=fixture.Store(Path(tmp.name));m,p,mr,pr=fixture.source_packets()
+        store.commit_snapshot('morning','official-day-input',m,mr)
+        store.commit_snapshot('predeadline','beforeinfo-'+KEY,p,pr)
+        return fixture,store
+
+    def test_saved_observations_are_the_only_display_targets_and_pending_is_not_a_loss(self):
+        f,store=self.fixture()
+        value=display.projection(store,f.R,DAY,SOURCE,now=NOW)
+        self.assertEqual('AWAITING_CAPTURE',value['projection']['state']);self.assertIsNone(value['projection']['recorded'])
+        f.R.collect(store,DAY,clock=lambda:NOW)
+        report=f.R.collect(store,DAY,clock=lambda:NOW)
+        f.R.save_coverage(store,DAY,'capture',report)
+        before={p:(p.stat().st_size,p.stat().st_mtime_ns) for p in store.root.rglob('*') if p.is_file()}
+        value=display.projection(store,f.R,DAY,SOURCE,now=NOW)
+        self.assertEqual(1,value['projection']['recorded']);self.assertEqual(6,len(value['projection']['rows']))
+        self.assertTrue(all(r['outcome']=='WAITING' for r in value['projection']['rows']))
+        self.assertEqual(before,{p:(p.stat().st_size,p.stat().st_mtime_ns) for p in store.root.rglob('*') if p.is_file()})
+        store.time=f.DEADLINE+timedelta(minutes=2)
+        receipt=f.receipt('result-k-20261117',store.time,'https://www1.mbrace.or.jp/od2/K/202611/k261117.lzh')
+        store.commit_snapshot('night','official-day-results',{'OPERATIONAL_DATE_JST':DAY,'STATUS':'NIGHT_RESULTS_COMPLETE',
+            'PENDING_RESULT_COUNT':0,'RESULTS':[f.ObserverTests().result()]},[receipt])
+        f.R.settle(store,DAY,clock=lambda:store.time)
+        value=display.projection(store,f.R,DAY,SOURCE,now=store.time)
+        self.assertEqual(2,sum(r['outcome']=='WIN' for r in value['projection']['rows']))
+        self.assertTrue(all(r['result_sha256'] for r in value['projection']['rows']))
+
+    def test_tampered_coverage_and_wrong_checkpoint_fail_closed(self):
+        f,store=self.fixture();report=f.R.collect(store,DAY,clock=lambda:NOW)
+        f.R.save_coverage(store,DAY,'capture',report)
+        path=store.root/'research/mashiro-fixed-v1'/DAY/'capture-coverage.json'
+        value=json.loads(path.read_bytes());value['REPORT']['RECORDED']=0;path.write_text(json.dumps(value))
+        with self.assertRaisesRegex(ValueError,'COVERAGE_COUNT'):display.projection(store,f.R,DAY,SOURCE,now=NOW)
+        with self.assertRaisesRegex(ValueError,'CHECKPOINT'):display.projection(store,f.R,DAY,'unverified',now=NOW)
+
+    def test_publication_requires_verified_persistence_before_requesting_a_token(self):
+        f,store=self.fixture();value=display.projection(store,f.R,DAY,SOURCE,now=NOW)
+        with patch.dict(os.environ,{'RESEARCH_CHECKPOINT_VERIFIED':'false'}):
+            with self.assertRaisesRegex(ValueError,'PERSISTENCE_REQUIRED'):
+                display.publish(value,opener=lambda *a,**k:self.fail('credential requested before persistence'))
 
 
 class FixedResearchIsolationTests(unittest.TestCase):

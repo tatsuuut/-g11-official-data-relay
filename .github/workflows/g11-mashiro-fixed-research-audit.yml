@@ -75,3 +75,5 @@ jobs:
         run: python3 -S -c 'from g11.canonical.official_pipeline import OfficialArtifactStore; print("MASHIRO_FIXED_CLOSING_STORE_READER=PASS")'
       - name: Verify real saved input identities without writing observations or reading results
         run: python3 -S scripts/audit_mashiro_fixed_inputs_v1.py --state-root .mashiro-input-audit-state --source-root .g11-private --observer-root .g11-mashiro-fixed --day 2026-11-16
+      - name: Verify the app projection from real saved input without publishing
+        run: python3 -S scripts/mashiro_fixed_display_v1.py --state-root .mashiro-input-audit-state --source-root .g11-private --observer-root .g11-mashiro-fixed --day 2026-11-16 --source-checkpoint '${{steps.source.outputs.cache_key}}' --audit-only
