@@ -1,0 +1,76 @@
+name: fixed Mashiro independent research contract
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/g11-mashiro-fixed-research-audit.yml'
+      - '.github/workflows/g11-isolated-live-research.yml'
+      - 'scripts/isolated_research_runner_v1.py'
+      - 'scripts/research_state_isolation_v1.py'
+      - 'scripts/*mashiro_fixed*'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/g11-mashiro-fixed-research-audit.yml'
+      - '.github/workflows/g11-isolated-live-research.yml'
+      - 'scripts/isolated_research_runner_v1.py'
+      - 'scripts/research_state_isolation_v1.py'
+      - 'scripts/*mashiro_fixed*'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: g11-mashiro-fixed-contract-${{github.ref}}
+  cancel-in-progress: true
+jobs:
+  fixed-observer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      TZ: Asia/Tokyo
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 724b660ae36e59eb989892b1a4050a54f65e8ab6
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-mashiro-fixed
+          persist-credentials: false
+          sparse-checkout: g11/research/mashiro_fixed_v1
+      - name: Verify independent definitions, cutoffs and daily evidence retention
+        run: python3 -S -m unittest discover -s .g11-mashiro-fixed/g11/research/mashiro_fixed_v1 -p test_observer.py -v
+      - name: Verify research-only capture, closure and canonical NIGHT exclusion
+        run: |
+          python3 -S -m unittest discover -s scripts -p test_mashiro_fixed_research_v1.py -v
+          python3 -S -m unittest discover -s scripts -p test_research_state_isolation_v1.py -v
+      - name: Select existing saved input; never reacquire official data
+        id: source
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: python3 -S scripts/critical_saved_publication_v1.py --day 2026-11-16 --select-restore
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.source.outputs.cache_key}}
+          fail-on-cache-miss: true
+      - name: Authenticate a disposable input copy
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 -S scripts/isolated_research_runner_v1.py decode --destination .mashiro-input-audit-state
+          exec 3<&-
+          rm -f .relay-cache/state.tgz.gpg
+      - name: Restore the existing frozen source without generating a prediction
+        run: python3 -S scripts/daily_runtime_bootstrap_v1.py prepare --state-root .mashiro-input-audit-state --operational-date 2026-11-16 --phase predeadline --source-root .g11-private
+      - name: Require the saved-store reader to work in the dependency-free closing lane
+        env:
+          PYTHONPATH: .g11-private
+        run: python3 -S -c 'from g11.canonical.official_pipeline import OfficialArtifactStore; print("MASHIRO_FIXED_CLOSING_STORE_READER=PASS")'
+      - name: Verify real saved input identities without writing observations or reading results
+        run: python3 -S scripts/audit_mashiro_fixed_inputs_v1.py --state-root .mashiro-input-audit-state --source-root .g11-private --observer-root .g11-mashiro-fixed --day 2026-11-16
