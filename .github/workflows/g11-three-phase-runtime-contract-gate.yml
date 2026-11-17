@@ -771,17 +771,18 @@ jobs:
       - name: Checkout exact saved-projection readback verifier
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 2b6f5719fc815e99b16f7b2e8ccdd18f8aeec9ea
+          ref: 6618440227d47ebe4922f60ffc01975f684411af
           path: .g11-saved-readback-guard
           sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
           persist-credentials: false
       - name: Verify saved LOCK readback without optional display research
         env:
           WILD4_READBACK_WORKFLOW_PATH: .g11-saved-readback-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
+          WILD4_COMPACT_WORKFLOW_PATH: .g11-saved-readback-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
           PYTHONPATH: scripts
         run: |
           "$(go env GOPATH)/bin/actionlint" "$WILD4_READBACK_WORKFLOW_PATH"
-          python3 -m unittest test_wild4_checkpoint_handoff_v1.SavedReadbackTransportTests -v
+          python3 -m unittest test_wild4_checkpoint_handoff_v1.SavedReadbackTransportTests test_wild4_checkpoint_handoff_v1.CurrentCompactWorkflowTests -v
       - name: Verify isolated future boundary uses the tested contract
         run: |
           python3 - <<'PYGUARD'

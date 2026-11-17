@@ -42,7 +42,7 @@ def gzip_stream(archive, decompressor):
             child.wait()
 
 
-def extract_complete_state(archive: Path, destination: Path, *, decompressor='auto') -> None:
+def extract_complete_state(archive: Path, destination: Path, *, decompressor='auto', inventory_path=None) -> None:
     archive, destination = Path(archive), Path(destination).absolute()
     if destination.is_symlink() or (destination.exists() and
             (not destination.is_dir() or any(destination.iterdir()))):
@@ -88,3 +88,10 @@ def extract_complete_state(archive: Path, destination: Path, *, decompressor='au
             shutil.rmtree(staging)
     print(f'G11_COMPLETE_STATE_EXTRACT=PASS MEMBERS={count} '
           f'SECONDS={time.monotonic() - started:.3f} PASSES=1')
+    if inventory_path is not None:
+        try:
+            from encrypt_runtime_state_v1 import save_base_inventory
+            save_base_inventory(destination, inventory_path)
+        except (OSError, ValueError):
+            Path(inventory_path).unlink(missing_ok=True)
+            print('G11_DELTA_BASE_INDEX=UNAVAILABLE_FULL_CHECKPOINT_RETAINED')

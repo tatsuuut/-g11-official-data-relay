@@ -245,8 +245,9 @@ class OverlappedCheckpointDispatchTests(unittest.TestCase):
         block = action.split('    - name: Start WILD4 after verified delayed checkpoint visibility\n', 1)[1]
         condition = next(line.split('if: ',1)[1] for line in block.splitlines() if '      if: ' in line)
         for ready, visible, expected in [('', '', False), ('true', 'true', False), ('true', '', True)]:
-            expression = condition.replace('inputs.wild4-day',repr(DAY)).replace('steps.verified.outputs.ready',repr(ready)).replace('steps.wild4-visible.outputs.cache-hit',repr(visible))
+            expression = condition.replace('inputs.wild4-day',repr(DAY)).replace('steps.verified.outputs.ready',repr(ready)).replace('steps.wild4-visible.outputs.cache-hit',repr(visible)).replace('steps.wild4-compact.outputs.attempted',repr(''))
             self.assertEqual(eval(expression.replace('&&',' and '), {'__builtins__':{}}, {}),expected)
+            self.assertFalse(eval(expression.replace("'' != 'true'", "'true' != 'true'").replace('&&',' and '), {'__builtins__':{}}, {}))
         result, output, calls = self.exercise(fallback=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(output, 'attempted=true\nsent=true\n')
@@ -258,6 +259,98 @@ class OverlappedCheckpointDispatchTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs):
                 result, output, calls = self.exercise(fallback=True, **kwargs)
                 self.assertNotEqual(result.returncode,0);self.assertEqual(output,'');self.assertEqual(calls,'')
+
+
+class CompactDispatchTests(unittest.TestCase):
+    def exercise(self, *, corrupt=False, status='PASS', count=1, dispatch_status=0):
+        import encrypt_runtime_state_v1 as archive
+        action=(ROOT/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        block=action.split('    - name: Start WILD4 from a verified full reconstruction before large backup transfer\n',1)[1].split('    - name:',1)[0]
+        script=textwrap.dedent(block.split('      run: |\n',1)[1])
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);out=root/'.relay-output';out.mkdir();(root/'scripts').mkdir()
+            (root/'scripts/encrypt_runtime_state_v1.py').write_text((ROOT/'scripts/encrypt_runtime_state_v1.py').read_text())
+            cipher=out/'early-delta.tgz.gpg';cipher.write_bytes(b'complete authenticated compact checkpoint')
+            delta_key='g11-state-v4-delta-'+DAY+'-123'
+            archive.atomic_json(out/'early-delta-ready.json',{'day':DAY,'run_id':'123','checkpoint_key':KEY,
+                'delta_key':delta_key,'base_key':'g11-state-v4-published-'+DAY+'-122-1-checkpoint','cipher_sha256':archive.file_sha(cipher)})
+            (out/'result.json').write_text(json.dumps({'CRITICAL':{'CRITICAL_CHECKPOINT_STATUS':status,'LAST_TIMELY_SOURCE_COUNT':count}}))
+            if corrupt:cipher.write_bytes(b'corrupt remote readback')
+            output=root/'output';calls=root/'calls'
+            env={**os.environ,'GITHUB_OUTPUT':str(output),'TEST_CALLS':str(calls),'GITHUB_RUN_ID':'123',
+                'OPERATIONAL_DATE':DAY,'CHECKPOINT_KEY':KEY,'DELTA_KEY':delta_key,'TEST_STATUS':str(dispatch_status)}
+            stub='gh() { printf "%s\\n" "$@" >> "$TEST_CALLS"; return "$TEST_STATUS"; }\n timeout() { shift 3; "$@"; }\n'
+            result=subprocess.run(['bash','-c',stub+script],cwd=root,env=env,text=True,capture_output=True,timeout=10)
+            return result,output.read_text() if output.exists() else '',calls.read_text() if calls.exists() else ''
+
+    def test_full_reconstruction_can_start_before_large_backup_but_canonical_gate_is_unchanged(self):
+        result,output,calls=self.exercise()
+        self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(output,'attempted=true\nsent=true\n')
+        self.assertIn('predeadline_checkpoint_key='+KEY,calls);self.assertIn('predeadline_delta_key=g11-state-v4-delta-'+DAY+'-123',calls)
+        action=(ROOT/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        self.assertLess(action.index('id: compact-readback'),action.index('id: wild4-compact'))
+        self.assertLess(action.index('id: wild4-compact'),action.index('name: Save complete encrypted state before publication'))
+        self.assertIn('value: ${{ steps.verified.outputs.ready }}',action)
+
+    def test_corrupt_empty_and_nonpass_inputs_never_dispatch(self):
+        for kwargs in ({'corrupt':True},{'status':'PARTIAL'},{'count':0}):
+            with self.subTest(kwargs=kwargs):
+                result,output,calls=self.exercise(**kwargs)
+                self.assertNotEqual(result.returncode,0);self.assertEqual(output,'');self.assertEqual(calls,'')
+
+    def test_ambiguous_compact_dispatch_is_retained_and_blocks_both_full_fallback_dispatches(self):
+        result,output,calls=self.exercise(dispatch_status=1)
+        self.assertNotEqual(result.returncode,0);self.assertEqual(output,'attempted=true\n');self.assertEqual(calls.splitlines().count('workflow'),1)
+        action=(ROOT/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        for name in ('Start independently verified WILD4 worker after checkpoint save','Start WILD4 after verified delayed checkpoint visibility'):
+            block=action.split('    - name: '+name+'\n',1)[1].split('    - name:',1)[0]
+            self.assertIn("steps.wild4-compact.outputs.attempted != 'true'",block)
+
+
+@unittest.skipUnless(os.environ.get('WILD4_COMPACT_WORKFLOW_PATH'), 'exact compact child is provided by CI')
+class CurrentCompactWorkflowTests(unittest.TestCase):
+    def source(self):
+        return Path(os.environ['WILD4_COMPACT_WORKFLOW_PATH']).read_text()
+
+    def test_current_deployed_prediction_learning_and_settlement_bytes_are_unchanged(self):
+        # Exact deployed 2b6f5719 baseline. Historical guard hashes stay separate.
+        expected={'Carry previous-day model registry without copying previous predictions':'08b4d4c9cec584c0d4328fd758cf20c2c1e1758613239bfa836cd5cc94689f02',
+            'Bind one model for the operational day':'988e96549a566fa5bcbdfce254381445386d56a5e17a02da61743b62ffb49db6',
+            'Verify frozen WILD4 inference runtime':'4495877bd12adea8c5d209ed488a85122892ef0858bf8161cda0d4340c6d0202',
+            'Check for a matching unexpired official odds packet':'455bd16a042ba59030bff53f69ad844e74b1e57a43352a55eb9c5e2ff117ed7a',
+            'Lock future races before deadline without any production write':'4c4fa5c0dec49e4fb47d4322bee731ab7ad8c503d659ee778db5abd13bffb4a6',
+            'Settle only immutable locks from verified final NIGHT':'80f4df9e28fada9f0fa810948d3edc943060da57e0e2a52bdd410c08147b7bd4',
+            'Continue existing BET learning after completed NIGHT':'13d0c5f33151da4f614e685da3d962974730dcf62bc03a73a47efe980aa07b6d'}
+        for name,digest in expected.items():
+            block=self.source().split('      - name: '+name+'\n',1)[1].split('      - name:',1)[0]
+            with self.subTest(name=name):self.assertEqual(hashlib.sha256(block.encode()).hexdigest(),digest)
+
+    def test_complete_authenticated_reconstruction_precedes_original_full_store_guard(self):
+        source=self.source()
+        authenticate=source.split('      - name: Authenticate compact manifest before choosing its exact base\n',1)[1].split('      - name:',1)[0]
+        self.assertLess(authenticate.index('--decrypt'),authenticate.index('value=inspect_delta('));self.assertIn('set -euo pipefail',authenticate)
+        self.assertIn("steps.compact-cache.outputs.cache-hit }}' = true",authenticate)
+        restore=source.split('      - name: Restore current encrypted canonical state\n',1)[1].split('      - name:',1)[0]
+        self.assertIn('key: ${{ steps.compact.outputs.base_key || inputs.predeadline_checkpoint_key',restore)
+        decrypt=source.split('      - name: Decrypt verified state and candidate\n',1)[1].split('      - name:',1)[0]
+        self.assertLess(decrypt.index('extract_complete_state('),decrypt.index('apply_delta('))
+        self.assertLess(decrypt.index('apply_delta('),decrypt.index("state=json.loads("))
+        self.assertIn("base_cipher=pathlib.Path('.relay-cache/state.tgz.gpg')",decrypt)
+        self.assertIn("critical.get('CRITICAL_CHECKPOINT_SHA')",decrypt)
+        self.assertIn("critical.get('AUTHORITY_SHA256')",decrypt)
+
+    def test_executable_child_binding_rejects_delta_without_exact_current_capture(self):
+        source=self.source();start=source.index('          live_checkpoint=');end=source.index('          with open(os.environ[\'GITHUB_OUTPUT\']',start)
+        code=textwrap.dedent(source[start:end])
+        for live,delta,ok in [(KEY,KEY.replace('critical-','delta-'),True),(KEY,'',True),
+                ('',KEY.replace('critical-','delta-'),False),(KEY,KEY.replace('critical-','delta-')+'4',False),
+                (KEY,KEY.replace(DAY,'2026-10-23').replace('critical-','delta-'),False)]:
+            env={'PREDEADLINE_CHECKPOINT_KEY':live,'PREDEADLINE_DELTA_KEY':delta,'REQUESTED_MODE':'wild4'}
+            with self.subTest(live=live,delta=delta),patch.dict(os.environ,env):
+                scope={'os':os,'re':__import__('re'),'day':DAY,'checkpoint':'','readback':''}
+                if ok:exec(compile(code,'<exact-compact-binding>','exec'),scope)
+                else:
+                    with self.assertRaises(SystemExit):exec(compile(code,'<exact-compact-binding>','exec'),scope)
 
 
 @unittest.skipUnless(os.environ.get('WILD4_READBACK_WORKFLOW_PATH'), 'exact publisher workflow is provided by CI')

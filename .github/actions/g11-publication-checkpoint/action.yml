@@ -14,16 +14,59 @@ outputs:
     value: ${{ steps.verified.outputs.ready }}
   wild4-sent:
     description: True only when the exact-checkpoint WILD4 dispatch was accepted.
-    value: ${{ steps.wild4-dispatch.outputs.sent || steps.wild4-fallback.outputs.sent }}
+    value: ${{ steps.wild4-compact.outputs.sent || steps.wild4-dispatch.outputs.sent || steps.wild4-fallback.outputs.sent }}
   wild4-attempted:
     description: Retain an ambiguous dispatch without immediately posting it twice.
-    value: ${{ steps.wild4-dispatch.outputs.attempted || steps.wild4-fallback.outputs.attempted }}
+    value: ${{ steps.wild4-compact.outputs.attempted || steps.wild4-dispatch.outputs.attempted || steps.wild4-fallback.outputs.attempted }}
 runs:
   using: composite
   steps:
     - name: Record encrypted publication checkpoint digest
       shell: bash
       run: sha256sum .relay-cache/state.tgz.gpg > .relay-output/publication-state.sha256
+    - name: Identify a complete reconstruction checkpoint
+      id: compact
+      if: inputs.wild4-day != ''
+      shell: bash
+      run: python3 scripts/encrypt_runtime_state_v1.py --compact-ready '${{ inputs.cache-key }}'
+    - name: Save authenticated replacements and complete inventories
+      id: compact-save
+      if: steps.compact.outputs.key != ''
+      continue-on-error: true
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .relay-output/early-delta.tgz.gpg
+        key: ${{ steps.compact.outputs.key }}
+    - name: Read back the exact compact checkpoint
+      id: compact-readback
+      if: steps.compact-save.outcome == 'success' && steps.compact.outputs.key != ''
+      continue-on-error: true
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .relay-output/early-delta.tgz.gpg
+        key: ${{ steps.compact.outputs.key }}
+        fail-on-cache-miss: true
+    - name: Start WILD4 from a verified full reconstruction before large backup transfer
+      id: wild4-compact
+      if: steps.compact-readback.outputs.cache-hit == 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        OPERATIONAL_DATE: ${{ inputs.wild4-day }}
+        CHECKPOINT_KEY: ${{ inputs.cache-key }}
+        DELTA_KEY: ${{ steps.compact.outputs.key }}
+      run: |
+        set -euo pipefail
+        test "${CHECKPOINT_KEY}" = "g11-state-v4-critical-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
+        test "${DELTA_KEY}" = "g11-state-v4-delta-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
+        python3 -c 'import os,sys;sys.path.insert(0,"scripts");from encrypt_runtime_state_v1 import compact_ready,require;v=compact_ready(os.environ["CHECKPOINT_KEY"]);require(v is not None and v["delta_key"]==os.environ["DELTA_KEY"],"REMOTE_READBACK")'
+        jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS" and .CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0' .relay-output/result.json >/dev/null
+        echo 'attempted=true' >> "${GITHUB_OUTPUT}"
+        timeout --signal=TERM --kill-after=2s 12s gh workflow run 364923281 \
+          -f mode=wild4 -f operational_date="${OPERATIONAL_DATE}" \
+          -f predeadline_checkpoint_key="${CHECKPOINT_KEY}" -f predeadline_delta_key="${DELTA_KEY}"
+        echo 'sent=true' >> "${GITHUB_OUTPUT}"
+        echo 'WILD4_COMPACT_HANDOFF=DISPATCH_ACCEPTED_BEFORE_FULL_TRANSFER'
     - name: Save complete encrypted state before publication
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
@@ -31,7 +74,7 @@ runs:
         key: ${{ inputs.cache-key }}
     - name: Check exact saved checkpoint visibility without downloading
       id: wild4-visible
-      if: inputs.wild4-day != ''
+      if: inputs.wild4-day != '' && steps.wild4-compact.outputs.attempted != 'true'
       continue-on-error: true
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
@@ -40,7 +83,7 @@ runs:
         lookup-only: true
     - name: Start independently verified WILD4 worker after checkpoint save
       id: wild4-dispatch
-      if: inputs.wild4-day != '' && steps.wild4-visible.outputs.cache-hit == 'true'
+      if: inputs.wild4-day != '' && steps.wild4-visible.outputs.cache-hit == 'true' && steps.wild4-compact.outputs.attempted != 'true'
       continue-on-error: true
       shell: bash
       env:
@@ -114,7 +157,7 @@ runs:
         echo 'G11_PUBLICATION_STATE_READBACK=PASS'
     - name: Start WILD4 after verified delayed checkpoint visibility
       id: wild4-fallback
-      if: inputs.wild4-day != '' && steps.verified.outputs.ready == 'true' && steps.wild4-visible.outputs.cache-hit != 'true'
+      if: inputs.wild4-day != '' && steps.verified.outputs.ready == 'true' && steps.wild4-visible.outputs.cache-hit != 'true' && steps.wild4-compact.outputs.attempted != 'true'
       continue-on-error: true
       shell: bash
       env:
