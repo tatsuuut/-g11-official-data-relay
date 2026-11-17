@@ -944,10 +944,10 @@ jobs:
           if day>='2026-10-13':
               previous=(date.fromisoformat(day)-timedelta(days=1)).isoformat()
               try:
-                  feed,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date='+previous)
+                  feed,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=wild4-day-binding&date='+previous)
                   prior_complete=(feed.get('operational_date_jst')==previous and feed.get('stage')=='NIGHT' and feed.get('status')=='PASS'
                       and feed.get('counts',{}).get('results')==feed.get('counts',{}).get('races') and feed.get('counts',{}).get('races',0)>0)
-                  today,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?date='+day)
+                  today,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=wild4-day-binding&date='+day)
                   deadlines=[datetime.fromisoformat(day+'T'+r['deadline_jst']+':00+09:00') if len(r['deadline_jst'])==5 else datetime.fromisoformat(r['deadline_jst']) for r in today.get('races',[])]
                   prior_complete=bool(prior_complete and today.get('operational_date_jst')==day and deadlines and datetime.now(timezone.utc)<min(deadlines))
               except Exception: prior_complete=False
