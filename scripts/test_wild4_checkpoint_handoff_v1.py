@@ -1,14 +1,19 @@
 """Early encrypted input delivery; all dispatches and predictions are mocked."""
 import ast
 import copy
+from contextlib import redirect_stdout
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
+from urllib.parse import urlparse, parse_qs
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = Path(os.environ.get('WILD4_WORKFLOW_PATH', '/tmp/g11-wild4-handoff.yml'))
@@ -253,6 +258,48 @@ class OverlappedCheckpointDispatchTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs):
                 result, output, calls = self.exercise(fallback=True, **kwargs)
                 self.assertNotEqual(result.returncode,0);self.assertEqual(output,'');self.assertEqual(calls,'')
+
+
+@unittest.skipUnless(os.environ.get('WILD4_READBACK_WORKFLOW_PATH'), 'exact publisher workflow is provided by CI')
+class SavedReadbackTransportTests(unittest.TestCase):
+    def exercise(self, change=None, scope='WILD4_SAVED_PROJECTION', bad_sha=False):
+        workflow = Path(os.environ['WILD4_READBACK_WORKFLOW_PATH']).read_text()
+        block = workflow.split('      - name: Verify exact Site GET after priority notification input\n',1)[1].split('      - name:',1)[0]
+        code = block.split("          python3 - <<'PY'\n",1)[1].split('\n          PY',1)[0]
+        code = textwrap.dedent(code).replace('${{ steps.decrypted.outputs.canonical_ready }}','true')
+        lock={'race_key':'20261117-23-04','bets':['1-2-3'],'bet_count':1,'abstain':False,'lock_sha256':'a'*64}
+        lifecycle={'active':{'identity':'same-immutable-model'},'source_locks_mutated':False}
+        projection={'races':[lock],'observation':{'lifecycle':lifecycle}}
+        feed={'races':[{'key':lock['race_key'],'wild_pack':{'wild4':{'goripan':copy.deepcopy(lock)}}}],
+              'goripan':{'status':'VERIFIED_CANONICAL_PROJECTION','observation':{'lifecycle':copy.deepcopy(lifecycle)}}}
+        if change:change(feed)
+        raw=json.dumps(feed,ensure_ascii=False).encode()
+        headers={'x-g11-feed-sha256':'f'*64 if bad_sha else hashlib.sha256(raw).hexdigest(),'x-g11-readback-scope':scope}
+        def fetch(url):
+            parsed=urlparse(url);query=parse_qs(parsed.query)
+            self.assertEqual(parsed.path,'/api/g11-feed');self.assertEqual(query,{'view':['wild4-readback'],'date':['2026-11-17']})
+            return feed,headers,raw
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);p=root/'goripan-public-projection.json';p.write_text(json.dumps(projection));before=p.read_bytes()
+            prior=Path.cwd();output=io.StringIO()
+            try:
+                os.chdir(root)
+                with patch.dict(os.environ,{'RUNNER_TEMP':str(root),'OPERATIONAL_DATE':'2026-11-17'}),patch.dict(sys.modules,{'hot_delta_transport_v1':type('ReadOnlyTransport',(),{'fetch':staticmethod(fetch)})}),redirect_stdout(output):
+                    exec(compile(code,'<exact-saved-readback-verifier>','exec'),{})
+                self.assertEqual(p.read_bytes(),before)
+                return output.getvalue()
+            finally:os.chdir(prior)
+
+    def test_saved_projection_and_lifecycle_verify_without_full_research_view(self):
+        self.assertIn('GORIPAN_SITE_GET_READBACK=PASS',self.exercise())
+
+    def test_scope_bytes_locks_and_lifecycle_all_remain_required(self):
+        cases=[({'scope':'UNSCOPED'},'SITE_READBACK_SCOPE'),({'bad_sha':True},'SITE_GET_SHA'),
+          ({'change':lambda f:f['goripan'].update(status='PROJECTION_UNAVAILABLE')},'SITE_PROJECTION_STATUS'),
+          ({'change':lambda f:f['races'][0]['wild_pack']['wild4']['goripan'].update(bets=['6-5-4'])},'SITE_LOCK_READBACK_MISMATCH'),
+          ({'change':lambda f:f['goripan']['observation'].update(lifecycle={})},'SITE_LIFECYCLE_READBACK_MISMATCH')]
+        for kwargs,reason in cases:
+            with self.subTest(reason=reason),self.assertRaisesRegex(SystemExit,reason):self.exercise(**kwargs)
 
 
 class ProtectedLogicTests(unittest.TestCase):
