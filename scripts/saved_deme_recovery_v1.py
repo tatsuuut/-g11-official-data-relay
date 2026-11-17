@@ -32,7 +32,7 @@ def recover(state, source, day, feed_path, *, request=request_json, runner=None)
     feed_path.write_bytes(compact(feed)+b'\n')
     if runner is None:
         sys.path.insert(0,str(source/'g11/canonical'))
-        runner = importlib.import_module('deme_discovery_thirty_entry').run
+        runner = importlib.import_module('deme_discovery_saved_refresh').run
     result = runner(state/'store',feed_path,feed_path.parent/'deme-discovery-public.json',fast=True)
     if result.get('readback') != 'PASS':
         raise ValueError('DEME_RECOVERY_SAVED_READBACK')
@@ -88,3 +88,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
