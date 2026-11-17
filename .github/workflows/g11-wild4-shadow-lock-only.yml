@@ -148,9 +148,18 @@ jobs:
           print('WILD4_CANDIDATE_REVIEW_HELD='+str('2026-11-13'<=day<'2026-11-14').lower())
           print('WILD4_HISTORICAL_NIGHT_REPAIR='+str(historical_night_repair).lower())
           PY
+      - name: Restore exact authenticated complete reconstruction delta
+        id: compact-cache
+        if: inputs.predeadline_delta_key != ''
+        continue-on-error: ${{ inputs.prewarm_base_key != '' }}
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-output/early-delta.tgz.gpg
+          key: ${{ inputs.predeadline_delta_key }}
+          fail-on-cache-miss: ${{ inputs.prewarm_base_key == '' }}
       - name: Wait only for the exact new saved handoff after preparation
         id: handoff
-        if: inputs.prewarm_base_key != ''
+        if: inputs.prewarm_base_key != '' && steps.compact-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PREWARM_BASE_KEY: ${{ inputs.prewarm_base_key }}
@@ -164,9 +173,9 @@ jobs:
           available=wait_for_compact(os.environ['PREWARM_BASE_KEY'],os.environ['CHECKPOINT_KEY'],os.environ['DELTA_KEY'])
           with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('available='+str(available).lower()+'\n')
           PY
-      - name: Restore exact authenticated complete reconstruction delta
-        id: compact-cache
-        if: inputs.predeadline_delta_key != '' && (inputs.prewarm_base_key == '' || steps.handoff.outputs.available == 'true')
+      - name: Restore the exact handoff after bounded visibility wait
+        id: compact-cache-retry
+        if: inputs.prewarm_base_key != '' && steps.compact-cache.outputs.cache-hit != 'true' && steps.handoff.outputs.available == 'true'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-output/early-delta.tgz.gpg
@@ -174,7 +183,7 @@ jobs:
           fail-on-cache-miss: true
       - name: Authenticate compact manifest before choosing its exact base
         id: compact
-        if: inputs.predeadline_delta_key != '' && (inputs.prewarm_base_key == '' || steps.handoff.outputs.available == 'true')
+        if: inputs.predeadline_delta_key != '' && (steps.compact-cache.outputs.cache-hit == 'true' || steps.compact-cache-retry.outputs.cache-hit == 'true')
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
@@ -183,7 +192,7 @@ jobs:
           PREPARED_BASE_KEY: ${{ steps.preparation.outputs.prewarm-base-key }}
         run: |
           set -euo pipefail
-          test '${{ steps.compact-cache.outputs.cache-hit }}' = true
+          test '${{ steps.compact-cache.outputs.cache-hit == 'true' || steps.compact-cache-retry.outputs.cache-hit == 'true' }}' = true
           exec 3<<<"${STATE_PASSPHRASE}"
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
             --decrypt --output "${RUNNER_TEMP}/g11-compact.tgz" .relay-output/early-delta.tgz.gpg
