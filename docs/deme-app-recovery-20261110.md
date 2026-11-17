@@ -66,3 +66,8 @@ A diagnostic failure cannot block normal research persistence/publication.
 The optional diagnostic hook stops after November 17. Five focused tests pass,
 including late/corrupt captures, exact refund accounting, missing/nonestablished
 results, state immutability and failure/future-day isolation.
+
+
+## Research display priority and independent Yotsuba — November 17
+
+The research-only checkout advances to `ff75f53fd34c4509077a228f35a4699c7d0a1580`, a descendant of the existing pin. It restores the original independent Yotsuba saved-input observer in the checkpoint refresh path. New admissions require a real before-deadline commit; closed first reads remain references. Fixed thresholds and all original LOCK/BET evidence stay unchanged. The new checksummed projection presents the existing 13-15-35 candidate (6aa419f58b0bb092b569) from saved captures and bound official outcomes, retaining Futagon as historical research. No candidate fitting, production override or statistical adoption is performed. Missing records remain unknown. Five priority/rollback tests, six refresh isolation tests and the separate Yotsuba suite validate this path.
