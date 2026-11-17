@@ -1804,14 +1804,27 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
         run: |
           python3 - <<'PY'
-          import hashlib,json,os,pathlib,sys,urllib.parse
+          import hashlib,json,os,pathlib,sys,urllib.parse,re,subprocess,time
           base='https://g11-race-lab.higatatsunori2.chatgpt.site'
           projection=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-public-projection.json').read_bytes())
           query=urllib.parse.urlencode({'view':'wild4-readback','date':os.environ['OPERATIONAL_DATE']})
           sys.path.insert(0,'scripts')
           import hot_delta_transport_v1 as hot
           pathlib.Path('.relay-output').mkdir(exist_ok=True)
-          feed,readback_headers,data=hot.fetch(base+'/api/g11-feed?'+query)
+          started=time.monotonic()
+          for attempt in range(3):
+              try:
+                  feed,readback_headers,data=hot.fetch(base+'/api/g11-feed?'+query)
+                  break
+              except subprocess.CalledProcessError as error:
+                  header=pathlib.Path('.relay-output/hot-get-headers.txt')
+                  statuses=re.findall(r'^HTTP/\S+\s+(\d{3})',header.read_text(errors='replace')[:16000] if header.is_file() else '',re.M)
+                  delay=(3,10,0)[attempt]
+                  if (attempt==2 or error.returncode!=22 or not statuses or int(statuses[-1]) not in (500,502,503,504)
+                      or time.monotonic()-started+delay>20):
+                      raise
+                  print('GORIPAN_SAVED_GET_RETRY=HTTP_'+statuses[-1]+' ATTEMPT='+str(attempt+2),flush=True)
+                  time.sleep(delay)
           if readback_headers.get('x-g11-readback-scope')!='WILD4_SAVED_PROJECTION': raise SystemExit('SITE_READBACK_SCOPE')
           expected=readback_headers['x-g11-feed-sha256']
           if hashlib.sha256(data).hexdigest()!=expected: raise SystemExit('SITE_GET_SHA')
