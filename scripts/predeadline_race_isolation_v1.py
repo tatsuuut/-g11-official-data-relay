@@ -240,7 +240,7 @@ def without_published_goripan(rows, day):
     try:
         import hashlib
         import tempfile
-        url = 'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date=' + day
+        url = 'https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=wild4-readback&date=' + day
         # Use the same HTTP client as canonical Site delivery. The plain
         # urllib request is rejected by this origin even when curl readback
         # succeeds, which otherwise makes every deduplication a retry.
@@ -259,7 +259,8 @@ def without_published_goripan(rows, day):
                 elif ':' in line:
                     key, value = line.split(':', 1)
                     headers[key.lower()] = value.strip()
-            if len(raw) > 20_000_000 or hashlib.sha256(raw).hexdigest() != headers.get('x-g11-feed-sha256'):
+            if (len(raw) > 20_000_000 or hashlib.sha256(raw).hexdigest() != headers.get('x-g11-feed-sha256')
+                    or headers.get('x-g11-readback-scope') != 'WILD4_SAVED_PROJECTION'):
                 raise ValueError('FOLLOWUP_PUBLIC_HASH')
         remaining = exclude_published_goripan(rows, json.loads(raw), day)
         print('WILD4_FOLLOWUP_ALREADY_PUBLIC=' + str(len(rows) - len(remaining)))

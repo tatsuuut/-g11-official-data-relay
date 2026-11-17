@@ -250,3 +250,18 @@ cache refs/keys, missing new input, authenticated prewarm corruption, complete
 reconstruction equivalence and the original protected runtime blocks. Production
 acceptance still requires timing a genuinely new race through the actual saved
 notification screen, with the 180-second gate unchanged.
+
+The first prepared run did authenticate and reuse the complete base, but still
+reached its quote at 237 seconds. It queued behind an unkeyed observer of an
+already-public prior race, and then waited 39 seconds on cache-list metadata
+despite the parent's compact checkpoint already being saved and readable.
+This is not timely recovery.
+
+The follow-up deduplication reader now uses the existing saved-only
+`wild4-readback` view, requiring its scope and exact final body SHA256. The
+display-enriched `v53-final` read had failed its bounded read, retaining the
+fallback and repeatedly starting an old observer. A missing/corrupt saved
+projection still retains that fallback; new or unpublished races are never
+suppressed. Prepared children first attempt the exact compact cache restore.
+Only an actual miss uses the bounded metadata wait and a second exact restore.
+All authenticated reconstruction and protected runtime checks remain unchanged.
