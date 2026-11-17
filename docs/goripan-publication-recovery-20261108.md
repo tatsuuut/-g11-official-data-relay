@@ -151,3 +151,43 @@ step took 98.7 seconds. Compression-level microbenchmarks do not establish an
 end-to-end remedy; the existing compression is retained. These remaining full
 checkpoint transfer and restore costs are not reported as resolved by the
 readback repair, and notification quality/freshness thresholds are unchanged.
+
+
+## November 17: complete reconstruction before full backup transfer
+
+The 3-minute odds rule remains unchanged. A sampled original parent spent
+98.723 seconds uploading a 1.89 GB encrypted checkpoint; its child considered
+those odds at age 260 seconds. The earlier handoff/readback overlap and saved
+GET repair did not remove that transfer delay.
+
+The primary runner now records the complete restored file/directory inventory
+before runtime work. After a valid same-day critical capture, it creates an
+AES256-authenticated delta containing changed files and both complete inventories,
+bound to the exact retained base ciphertext, current run/day and frozen authority.
+A delta that exceeds 128 MiB, is not at least four times smaller than the base,
+has no current timely input or cannot prove its base uses the existing full lane.
+Canonical full encryption, cache persistence/readback and publication gates remain.
+
+The compact ciphertext is saved and read back exactly before dispatch. It can
+start the independently verifying child before the large full backup upload.
+The child authenticates the delta, restores only its exact same-day base cache,
+authenticates that base, reconstructs into a disposable staging tree and compares
+every file byte/hash, mode and directory against the complete target inventory.
+The original full-store SHA, run/day and frozen daily authority checks then run
+before the unchanged model/inference block. A missing/wrong/corrupt base or delta
+cannot fall back to stale input. A failed compact preparation/cache readback
+retains the full handoff; an ambiguous dispatch is not immediately duplicated.
+
+Public immutable helpers: 5241f15a67497463db892b454d073136f2338912.
+Child: 6618440227d47ebe4922f60ffc01975f684411af, based on deployed
+2b6f5719fc815e99b16f7b2e8ccdd18f8aeec9ea. All seven current model,
+odds selection, inference, settlement and learning blocks retain their exact
+baseline hashes; historical guard tests remain separate and unchanged.
+
+Validation includes real GPG full/delta roundtrip in mandatory runner CI,
+complete byte/mode/directory equality, unsafe/duplicate/extra/missing tar members,
+wrong run/day/frozen authority/base cipher, corrupt replacements, atomic exposure
+failure, original-state retention, exact cache readback and ambiguous dispatch.
+No official requests or artificial phone notifications are used by these tests.
+Only subsequent normal runs can establish actual odds age and device delivery;
+source changes and synthetic speed measurements are not that evidence.

@@ -1,5 +1,6 @@
 """Regression boundaries for faster publication without dropping saved work."""
 import copy
+import hashlib
 from datetime import datetime, timedelta
 import io
 import json
@@ -8,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import tarfile
 import time
 import unittest
 from unittest.mock import Mock, patch
@@ -298,6 +300,156 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(2, step.count('dynamic_last_race_heartbeat.py'))
         self.assertIn('predeadline_dispatch_v1.py --day "$d" --mode continuation', step)
         self.assertNotIn('gh workflow run g11-free-runner.yml', step)
+
+
+class CompleteDeltaTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name); self.base = self.root/'base'; self.base.mkdir()
+        self.cipher = self.root/'base.gpg'; self.cipher.write_bytes(b'authenticated original cipher')
+        data = {'relay-state.json': b'old metadata', 'store/old-lock': b'immutable old LOCK',
+                'store/odds': b'old captured odds', 'store/removed/file': b'old transient',
+                'daily-runtime/'+DAY+'/authority.json': json.dumps({'immutable':True,'operational_date_jst':DAY,
+                    'authority_sha256':'a'*64,'runtime_source_sha':'b'*40}).encode(),
+                'models/static.bin': os.urandom(2*1024*1024), '.hidden': b'preserved'}
+        for name, raw in data.items():
+            path = self.base/name; path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(raw)
+        (self.base/'empty-history-directory').mkdir()
+        self.target = self.root/'target'; shutil.copytree(self.base,self.target)
+        (self.target/'store/odds').write_bytes(b'new original predeadline odds')
+        (self.target/'store/removed/file').unlink(); (self.target/'store/removed').rmdir()
+        (self.target/'new-empty-directory').mkdir()
+        (self.target/'store/new-lock').write_bytes(b'new immutable LOCK')
+        (self.target/'.hidden').chmod(0o600)
+        self.key = 'g11-state-v4-critical-'+DAY+'-43'
+        self.base_key = 'g11-state-v4-published-'+DAY+'-42-1-checkpoint'
+        self.state = {'OPERATIONAL_DATE_JST':DAY,'MORNING_COMPLETE':True,'CRITICAL':{
+            'SCHEMA':'G11_PREDEADLINE_CRITICAL_CHECKPOINT_V1','CRITICAL_CHECKPOINT_STATUS':'PASS',
+            'OPERATIONAL_DATE':DAY,'LAST_CRITICAL_RUN_ID':'43','POST_DEADLINE_GENERATION':0,
+            'LAST_TIMELY_SOURCE_COUNT':1,'AUTHORITY_SHA256':'a'*64,'RUNTIME_SOURCE_SHA':'b'*40}}
+        (self.target/'relay-state.json').write_text(json.dumps(self.state))
+        self.before = archive.snapshot_state(self.base)
+        self.manifest = archive.delta_manifest(self.target,self.before,self.base_key,archive.file_sha(self.cipher))
+        self.delta = self.root/'delta.tgz'; archive.write_delta(self.target,self.manifest,self.delta)
+
+    def restored(self):
+        path=self.root/'restored';shutil.copytree(self.base,path);return path
+
+    def rewrite(self, mutate):
+        with tarfile.open(self.delta,'r:gz') as source:
+            items=[(m,source.extractfile(m).read()) for m in source.getmembers()]
+        items=mutate(items)
+        with tarfile.open(self.delta,'w:gz') as output:
+            for member,raw in items:
+                member.size=len(raw);output.addfile(member,io.BytesIO(raw))
+
+    def test_exact_reconstruction_preserves_all_history_models_empty_directories_modes_and_sources(self):
+        source_before=archive.snapshot_state(self.target);dest=self.restored()
+        self.assertNotIn('models/static.bin',self.manifest['changed'])
+        self.assertLess(self.delta.stat().st_size,100000)
+        archive.apply_delta(self.delta,dest,day=DAY,checkpoint_key=self.key,base_cipher=self.cipher)
+        self.assertEqual(archive.snapshot_state(dest),source_before)
+        self.assertEqual(archive.snapshot_state(self.base),self.before)
+        self.assertEqual(archive.snapshot_state(self.target),source_before)
+        self.assertEqual(self.before['files']['store/old-lock'],archive.snapshot_state(dest)['files']['store/old-lock'])
+
+    def test_wrong_day_run_base_cipher_and_modified_base_are_rejected_without_mutation(self):
+        for kind in ('day','run','cipher','base'):
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory() as tmp:
+                dest=Path(tmp)/'restored';shutil.copytree(self.base,dest)
+                cipher=self.cipher
+                if kind=='cipher':cipher=Path(tmp)/'other.gpg';cipher.write_bytes(b'wrong base')
+                if kind=='base':(dest/'store/old-lock').write_bytes(b'modified')
+                before=archive.snapshot_state(dest)
+                with self.assertRaises(ValueError):
+                    archive.apply_delta(self.delta,dest,day='2026-11-05' if kind=='day' else DAY,
+                        checkpoint_key=self.key+'4' if kind=='run' else self.key,base_cipher=cipher)
+                self.assertEqual(archive.snapshot_state(dest),before)
+
+    def test_corrupt_replacement_rolls_back_all_changes(self):
+        def corrupt(items):
+            member,raw=items[-1];items[-1]=(member,b'x'*len(raw));return items
+        self.rewrite(corrupt);dest=self.restored()
+        with self.assertRaisesRegex(ValueError,'TARGET_INVENTORY'):
+            archive.apply_delta(self.delta,dest,day=DAY,checkpoint_key=self.key,base_cipher=self.cipher)
+        self.assertEqual(archive.snapshot_state(dest),self.before)
+        self.assertFalse(list(dest.parent.glob('.g11-delta-verified-*')))
+
+    def test_duplicate_extra_and_link_members_cannot_enter_reconstruction(self):
+        original=self.delta.read_bytes()
+        for kind in ('duplicate','traversal','link','missing'):
+            self.delta.write_bytes(original)
+            def mutate(items):
+                if kind=='missing':return items[:-1]
+                item=copy.copy(items[-1][0]);raw=items[-1][1]
+                if kind=='traversal':item.name='../escape'
+                if kind=='link':item.type=tarfile.SYMTYPE;item.linkname='/tmp/escape';items[-1]=(item,b'');return items
+                return items+[(item,raw)]
+            self.rewrite(mutate)
+            with self.subTest(kind=kind),self.assertRaises(ValueError):
+                archive.inspect_delta(self.delta,day=DAY,checkpoint_key=self.key)
+
+    def test_frozen_authority_change_and_wrong_source_date_cannot_be_transported(self):
+        path=self.target/'daily-runtime'/DAY/'authority.json';raw=path.read_bytes()
+        path.write_bytes(raw+b' ')
+        with self.assertRaisesRegex(ValueError,'BASE_AUTHORITY_CHANGED'):
+            archive.delta_manifest(self.target,self.before,self.base_key,archive.file_sha(self.cipher))
+        path.write_bytes(raw)
+        with self.assertRaisesRegex(ValueError,'TARGET_BINDING'):
+            archive.delta_manifest(self.target,self.before,self.base_key.replace(DAY,'2026-11-05'),archive.file_sha(self.cipher))
+
+    def test_file_directory_replacements_preserve_the_exact_complete_tree(self):
+        (self.target/'store/new-lock').unlink();(self.target/'store/new-lock').mkdir()
+        (self.target/'store/new-lock/child').write_bytes(b'new')
+        (self.target/'models/static.bin').unlink();(self.target/'models').rmdir();(self.target/'models').write_bytes(b'file replacing directory')
+        manifest=archive.delta_manifest(self.target,self.before,self.base_key,archive.file_sha(self.cipher))
+        archive.write_delta(self.target,manifest,self.delta);dest=self.restored()
+        archive.apply_delta(self.delta,dest,day=DAY,checkpoint_key=self.key,base_cipher=self.cipher)
+        self.assertEqual(archive.snapshot_state(dest),archive.snapshot_state(self.target))
+
+    def test_failed_atomic_exposure_keeps_the_original_state(self):
+        dest=self.restored();replace=archive.os.replace
+        def fail(source,target):
+            if Path(target)==dest:raise OSError('synthetic atomic move failure')
+            return replace(source,target)
+        with patch.object(archive.os,'replace',side_effect=fail),self.assertRaises(OSError):
+            archive.apply_delta(self.delta,dest,day=DAY,checkpoint_key=self.key,base_cipher=self.cipher)
+        self.assertEqual(archive.snapshot_state(dest),self.before)
+
+    def test_real_authenticated_delta_and_full_checkpoint_share_no_partial_state_or_secret_file(self):
+        import extract_runtime_state_v1 as restore
+        home=self.root/'gnupg';home.mkdir(mode=0o700)
+        probe=subprocess.run(['gpg','--homedir',str(home),'--batch','--yes','--pinentry-mode','loopback',
+            '--passphrase-fd','0','--symmetric','--output',str(self.root/'probe.gpg'),str(self.base/'.hidden')],
+            input=b'synthetic-test-only\n',capture_output=True)
+        if probe.returncode:
+            if os.environ.get('G11_REQUIRE_ENCRYPTION_TESTS')=='1':self.fail('Real GPG required in CI')
+            self.skipTest('local gpg-agent unavailable; mandatory in contract CI')
+        workspace=self.root/'work';workspace.mkdir();output=workspace/'.relay-cache/state.tgz.gpg';output.parent.mkdir()
+        env={**os.environ,'GNUPGHOME':str(home),'GITHUB_RUN_ID':'43'}
+        try:
+            with patch.dict(os.environ,env),archive.secret_pipe(b'synthetic-test-only\n') as fd:
+                archive.encrypt(self.base,output,passphrase_fd=fd,codec='gzip')
+            original=workspace/'base-retained.gpg';shutil.copyfile(output,original)
+            archive.save_base_inventory(self.base,workspace/'.relay-output/base-inventory.json')
+            result=subprocess.run(['bash','-c','exec 3<<<"synthetic-test-only"; exec python3 "$1" --state-root "$2" --output "$3" --delta-base-key "$4"',
+                'checkpoint-test',str(ROOT/'scripts/encrypt_runtime_state_v1.py'),str(self.target),str(output),self.base_key],
+                env=env,cwd=workspace,text=True,capture_output=True,timeout=60)
+            self.assertEqual(result.returncode,0,result.stderr);self.assertIn('G11_COMPACT_CHECKPOINT=READY',result.stdout)
+            def decrypt(source,target):
+                subprocess.run(['gpg','--batch','--yes','--pinentry-mode','loopback','--passphrase-fd','0',
+                    '--decrypt','--output',str(target),str(source)],input=b'synthetic-test-only\n',env=env,capture_output=True,check=True)
+            delta=workspace/'delta.tgz';decrypt(workspace/'.relay-output/early-delta.tgz.gpg',delta)
+            baseline=workspace/'base.tgz';decrypt(original,baseline)
+            complete=workspace/'complete.tgz';decrypt(output,complete)
+            old=workspace/'restored-base';restore.extract_complete_state(baseline,old)
+            archive.apply_delta(delta,old,day=DAY,checkpoint_key=self.key,base_cipher=original)
+            full=workspace/'restored-full';restore.extract_complete_state(complete,full)
+            self.assertEqual(archive.snapshot_state(old),archive.snapshot_state(full))
+            self.assertEqual(archive.snapshot_state(full),archive.snapshot_state(self.target))
+            self.assertFalse((workspace/'passphrase').exists())
+        finally:
+            subprocess.run(['gpgconf','--homedir',str(home),'--kill','gpg-agent'],capture_output=True)
 
 
 if __name__ == '__main__': unittest.main()

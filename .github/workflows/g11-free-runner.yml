@@ -238,7 +238,7 @@ jobs:
           archive = pathlib.Path(sys.argv[1])
           operational_date = sys.argv[2]
           state_root = pathlib.Path(".relay-state")
-          extract_complete_state(archive, state_root)
+          extract_complete_state(archive, state_root, inventory_path='.relay-output/base-inventory.json')
           metadata_path = state_root / "relay-state.json"
           if metadata_path.is_file():
               metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -361,13 +361,14 @@ jobs:
         id: critical-encrypt
         env:
           G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          G11_DELTA_BASE_KEY: ${{steps.restore-state.outputs.cache-matched-key}}
         run: |
           set -euo pipefail
           jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
           mkdir -p .relay-cache
           exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
           python3 scripts/encrypt_runtime_state_v1.py --state-root .relay-state \
-            --output .relay-cache/state.tgz.gpg
+            --output .relay-cache/state.tgz.gpg --delta-base-key "${G11_DELTA_BASE_KEY}"
           exec 3<&-
           test -s .relay-cache/state.tgz.gpg
           echo 'ready=true' >> "${GITHUB_OUTPUT}"
