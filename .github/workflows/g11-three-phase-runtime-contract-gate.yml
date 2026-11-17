@@ -25,6 +25,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  predeadline-saved-input-health-nov17:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/predeadline-operation-health-20261117'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Select the saved current-day checkpoint without collecting official data
+        id: input
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: python3 scripts/critical_saved_publication_v1.py --day 2026-11-17 --select-restore
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.input.outputs.cache_key}}
+          fail-on-cache-miss: true
+      - name: Authenticate a disposable saved-state copy
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          python3 scripts/isolated_research_runner_v1.py decode --destination .input-health-audit-state
+          exec 3<&-
+          rm -f .relay-cache/state.tgz.gpg
+      - name: Restore the day's retained source without production writes
+        run: python3 scripts/daily_runtime_bootstrap_v1.py prepare --state-root .input-health-audit-state --operational-date 2026-11-17 --phase predeadline --source-root .g11-private
+      - name: Read the original rejected responses and saved cutoffs
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 scripts/predeadline_input_health_v1.py --state-root .input-health-audit-state --source .g11-private --day 2026-11-17
   goripan-prepared-reserve-contract:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/goripan-prepared-reserves-20261115'
     runs-on: ubuntu-24.04
@@ -665,7 +701,9 @@ jobs:
         env:
           PYTHONPATH: .g11-private:scripts
           G11_REQUIRE_PRIVATE_CRITICAL_TESTS: "1"
-        run: python3 -m unittest discover -s scripts -p test_critical_formal_lock_scope_v1.py -v
+        run: |
+          python3 -m unittest discover -s scripts -p test_critical_formal_lock_scope_v1.py -v
+          python3 -m unittest discover -s scripts -p test_predeadline_input_health_v1.py -v
 
       - name: Run bounded private regression
         working-directory: .g11-private

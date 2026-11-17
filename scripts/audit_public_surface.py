@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    'scripts/predeadline_input_health_v1.py',
+    'scripts/test_predeadline_input_health_v1.py',
+    'docs/predeadline-input-health-20261117.md',
     'scripts/mashiro_p3_bridge_v1.py',
     '.github/workflows/g11-mashiro-p3-bridge-audit.yml',
     'scripts/test_mashiro_p3_bridge_v1.py',

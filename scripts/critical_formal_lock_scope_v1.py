@@ -63,7 +63,13 @@ def formal_lock_scope(day):
         )'''
     critical.run = replace_pinned(original, RUN_SHA256, [(before, after)],
                                   {'_missing_formal_locks': missing_formal_locks})
+    original_capture = critical.capture
+    if day >= '2026-11-17':
+        from predeadline_input_health_v1 import observed_capture
+        critical.capture = observed_capture(original_capture, critical.OfficialArtifactStore, day)
     try:
         yield
     finally:
+        critical.capture = original_capture
         critical.run = original
+
