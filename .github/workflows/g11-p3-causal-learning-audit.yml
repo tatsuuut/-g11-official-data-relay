@@ -1,0 +1,107 @@
+name: P3 original-input cause learning audit
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/g11-p3-causal-learning-audit.yml']
+permissions:
+  contents: read
+concurrency:
+  group: p3-causal-learning-20261117
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/p3-causal-learning-20261117'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-16-cause-audit-unused
+          restore-keys: |
+            g11-state-v4-published-2026-11-17-
+            g11-state-v4-critical-2026-11-17-
+            g11-state-v4-published-2026-11-16-
+            g11-state-v4-critical-2026-11-16-
+          fail-on-cache-miss: true
+      - name: Extract disposable saved state
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/p3-cause-state.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          python3 - <<'PY'
+          import os,pathlib,sys
+          sys.path.insert(0,'scripts')
+          from extract_runtime_state_v1 import extract_complete_state
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          extract_complete_state(root/'p3-cause-state.tgz',root/'p3-cause-audit')
+          PY
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: 341fc234f2bd743136fa5a1cbbb51c9bd9fe8e83
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: candidate
+          persist-credentials: false
+      - name: Install fixed explanation dependencies
+        run: python3 -m pip install --disable-pip-version-check --no-input 'catboost==1.2.8' 'lxml==6.1.1'
+      - name: Test isolated research selectors
+        working-directory: candidate
+        env:
+          PYTHONPATH: .
+        run: python3 g11/research/p3_causal_learning_v1/20261117/test_audit_causal_learning.py
+      - name: Explain original inputs and evaluate frozen-output alternatives
+        working-directory: candidate
+        env:
+          PYTHONPATH: .
+        run: |
+          python3 g11/research/p3_causal_learning_v1/20261117/audit_causal_learning.py \
+            --state "${RUNNER_TEMP}/p3-cause-audit" \
+            --cohort g11/research/p3_causal_learning_v1/20261117/cohort.json \
+            --calibration g11/research/p3_causal_learning_v1/20261117/head_calibration.json \
+            --output "${RUNNER_TEMP}/p3-causal-learning-report.json"
+      - name: Encrypt observations to research recipient
+        run: |
+          cat > "${RUNNER_TEMP}/p3-cause-recipient.pem" <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIENTCCAp2gAwIBAgIUCRLFcShG+12HviAxmw2BNEswto0wDQYJKoZIhvcNAQEL
+          BQAwKjEoMCYGA1UEAwwfRzExLVAzLWNhdXNhbC1yZWFkb25seS0yMDI2MTExNzAe
+          Fw0yNjExMTcwNDE5MTdaFw0yNjEyMTcwNDE5MTdaMCoxKDAmBgNVBAMMH0cxMS1Q
+          My1jYXVzYWwtcmVhZG9ubHktMjAyNjExMTcwggGiMA0GCSqGSIb3DQEBAQUAA4IB
+          jwAwggGKAoIBgQDGjD79255Akjxa6cPVowCRAqWSK9t4CLfxX6XsOrEmAx5X2Dr2
+          0j1SvC8wCj/M8DcwO6xbArqQeFyIebKgAwxIj0yv+3QpKAtoOZbBYb0mYurWhGOh
+          GbMTgCQXZxV0lrHxyhLe4EFYdM1aWfAC40jIxNHfY935PELNkYNIDg8seLuXia/i
+          cEJSgvG1j5OvBNDeYI7HDh3/lYo0gzS+h7qq1H1wl+EhjDbco2F1NX8ytfhmQJKo
+          mSk/bF2Gh051bXn04cBZM4uAwg25zoQ4m5SIV8IyAzYs8MuqxgfKDZeJO8zzHY/I
+          9XqB7EEBb70Yd4KObXnP9FW+5Bol1sKwU9KiiJENEgSq5hzCkv6FjcvsczvleP1q
+          D6nAHDEZKDRHEQzKir/5d49JOwnDQinZnganK6vijpznfRatBd1rpnIQ2uTkD2UD
+          8oteRzaQuZtY3soabBT3tVKgrJByJccsdHZy7l89HJVJXKl/L4hZKn+/wCWg4HUS
+          p9MDvS1ee7GLoEkCAwEAAaNTMFEwHQYDVR0OBBYEFEiTqSDJKmBCBeP2z5D29jol
+          y4mmMB8GA1UdIwQYMBaAFEiTqSDJKmBCBeP2z5D29joly4mmMA8GA1UdEwEB/wQF
+          MAMBAf8wDQYJKoZIhvcNAQELBQADggGBAJPUbGE0A4Q9o4JbiIu2A+9g+gOCH+rK
+          L3JwczFaTA2X2wA9DJqitv3vz7/9T4polh6IXg86VYYH9g8amqz1xB+Fkl8dOayk
+          dqfmCXzwqlRP2XsYFjnt9wUfn2ZsetyKEvgZ/IIg1J1FgrMga1I+XS1r1L/DYUQi
+          YX1IerlQHC4F7E41PuzJdAtJ6vW6OtZ9c4SioNnM23VGbZ2bVq/RhWIXLnhKIPdm
+          BaoyurJUllC++lets5ujW2sNB9KUJnwn9C0IwBLHom4bHMd0rMZ6CeqSsV1wFu5r
+          DDJo4kvyNzpKPGqzxwJLSv22O3k5v7Jwz0JEEIT6mL03WGeB3V73j0Rn3ih2mcxy
+          4vxSncUoT9dkSND0i/92LOmnN4ynQGaLCW/dGB0xxELPJdwKgQQnGDw1ccAowKj1
+          d2SZy/vSHDtWjijffs5K3UAgnmBUXUKeoPs1NoZ4TsLZ+9ujaZzWUfWZSHFkkwyC
+          cIsGlrDSP20WGovJ+2PXfZRy46HdG3w8JA==
+          -----END CERTIFICATE-----
+          CERT
+          gzip -c "${RUNNER_TEMP}/p3-causal-learning-report.json" > "${RUNNER_TEMP}/p3-causal-learning-report.json.gz"
+          openssl cms -encrypt -binary -aes256 -outform DER \
+            -in "${RUNNER_TEMP}/p3-causal-learning-report.json.gz" \
+            -out "${RUNNER_TEMP}/p3-causal-learning-report.cms" "${RUNNER_TEMP}/p3-cause-recipient.pem"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p3-causal-learning-encrypted-20261117
+          path: ${{runner.temp}}/p3-causal-learning-report.cms
+          retention-days: 14
+          if-no-files-found: error

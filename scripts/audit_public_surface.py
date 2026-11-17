@@ -9,6 +9,8 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    # Read-only audit wiring; observations leave the runner only as ciphertext.
+    '.github/workflows/g11-p3-causal-learning-audit.yml',
     'scripts/mashiro_p3_bridge_v1.py',
     '.github/workflows/g11-mashiro-p3-bridge-audit.yml',
     'scripts/test_mashiro_p3_bridge_v1.py',
