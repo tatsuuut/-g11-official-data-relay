@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
         id: preparation
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@b116c9b158882db67fa862d68eb4028ca767008f
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@755214257eb85b1faed3c14d8187da3159ee81be
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
           prewarm-base-key: ${{ inputs.prewarm_base_key }}
@@ -1741,7 +1741,7 @@ jobs:
           python3 -m unittest g11.wild_pack.v1.test_goripan_public_projection_v1 g11.wild_pack.v1.test_goripan_daily_comparison_v1
           python3 - <<'PYPUBLISHEDLOCK'
           import os,pathlib,sys
-          sys.path.insert(0,str(pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'scripts'))
+          sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
           import hot_delta_transport_v1 as hot
           pathlib.Path('.relay-output').mkdir(exist_ok=True)
           day=os.environ['OPERATIONAL_DATE']
