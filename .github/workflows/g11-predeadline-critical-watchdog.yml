@@ -18,21 +18,30 @@ on:
     # 08:00-22:55 JST. The accepted MORNING last-race deadline is the stop gate.
     - cron: "*/5 23,0-13 * * *"
   workflow_dispatch:
+    inputs:
+      morning_handoff_day:
+        description: Existing verified MORNING handoff day; empty runs the normal watchdog
+        required: false
+        type: string
+      morning_handoff_authority:
+        description: Exact saved daily authority for a bounded handoff continuation
+        required: false
+        type: string
 
 permissions:
   actions: write
   checks: read
   contents: read
 
-concurrency:
-  group: g11-predeadline-critical-watchdog
-  cancel-in-progress: false
-
 jobs:
   inspect:
     if: >-
       github.repository_id == '1367703708' && github.ref == 'refs/heads/main' &&
+      inputs.morning_handoff_day == '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure')
+    concurrency:
+      group: g11-predeadline-critical-watchdog
+      cancel-in-progress: false
     # The lightweight supervisor uses an independent hosted image pool.
     runs-on: ubuntu-22.04
     timeout-minutes: 3
@@ -48,5 +57,37 @@ jobs:
       - name: Audit public production firewall
         run: python3 scripts/audit_public_surface.py
       - name: Recover absent critical checkpoint without a model runtime
+        run: python3 scripts/predeadline_watchdog_v1.py
+
+  arm-first-race:
+    if: >-
+      github.repository_id == '1367703708' && github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'workflow_run' && github.event.workflow_run.name == 'runtime sync' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository) ||
+       (github.event_name == 'workflow_dispatch' && inputs.morning_handoff_day != ''))
+    # Timed metadata-only waiting must never occupy the normal watchdog or
+    # prediction concurrency groups. Each leg stays below the hosted job cap.
+    concurrency:
+      group: g11-verified-morning-first-race-handoff
+      cancel-in-progress: false
+    runs-on: ubuntu-22.04
+    timeout-minutes: 190
+    env:
+      TZ: Asia/Tokyo
+      GH_TOKEN: ${{ github.token }}
+      G11_APP_ORIGIN: ${{ secrets.APP_ENDPOINT }}
+      G11_ARM_MORNING: 'true'
+      G11_ARM_MORNING_DAY: ${{ inputs.morning_handoff_day }}
+      G11_ARM_MORNING_AUTHORITY: ${{ inputs.morning_handoff_authority }}
+    steps:
+      - name: Checkout saved-only MORNING handoff
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Audit public production firewall
+        run: python3 scripts/audit_public_surface.py
+      - name: Arm the first existing PREDEADLINE run without relying on cron
         run: python3 scripts/predeadline_watchdog_v1.py
 

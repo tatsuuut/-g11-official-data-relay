@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import re
 import sys
+import time
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from pathlib import Path
@@ -14,6 +16,9 @@ MAX_AGE = timedelta(minutes=6)
 ACTIVE = {"queued", "in_progress", "requested", "waiting", "pending"}
 RUNNER_NOT_ACQUIRED = "The job was not acquired by Runner of type hosted even after multiple attempts"
 MAX_RUNNER_ATTEMPTS = 3
+MORNING_ARM_LEG_SECONDS = 3 * 60 * 60
+MORNING_ARM_MARGIN = timedelta(minutes=20)
+REPOSITORY = "tatsuuut/-g11-official-data-relay"
 
 
 def runner_retry_decision(run: dict, jobs: list[dict], annotations: list[dict],
@@ -208,6 +213,125 @@ def _last_deadline(feed: dict, day: str) -> datetime:
     return max(deadlines)
 
 
+def morning_arm_plan(feed: dict, now: datetime, expected_day: str | None = None,
+                     expected_authority: str | None = None) -> dict:
+    """Schedule only from a verified saved MORNING; never open official inputs."""
+    if now.utcoffset() != timedelta(hours=9):
+        raise ValueError("MORNING_ARM_CLOCK")
+    day = now.date().isoformat()
+    if expected_day is not None and expected_day != day:
+        raise ValueError("MORNING_ARM_DAY")
+    last = _last_deadline(feed, day)
+    authority = feed.get("daily_runtime", {})
+    sha = authority.get("authority_sha256")
+    if (feed.get("SNAPSHOT_CLASS") is not None or authority.get("immutable") is not True
+            or authority.get("operational_date_jst") != day
+            or not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{64}", sha) is None
+            or feed.get("canonical_authorities", {}).get("growth_p3", {}).get("app_readback_status") != "PASS"
+            or (expected_authority is not None and expected_authority != sha)):
+        raise ValueError("MORNING_ARM_AUTHORITY")
+    first = min(datetime.fromisoformat(row["deadline_jst"]) for row in feed["races"])
+    return {"day": day, "authority": sha, "first": first, "last": last,
+            "wake": first - MORNING_ARM_MARGIN}
+
+
+def morning_arm_event(event: dict, now: datetime) -> bool:
+    run = event.get("workflow_run", {})
+    try:
+        created = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (run.get("head_branch") == "main"
+            and run.get("head_repository", {}).get("full_name") == REPOSITORY
+            and run.get("path") == ".github/workflows/g11-free-runner.yml"
+            and run.get("name") == "runtime sync" and run.get("status") == "completed"
+            and run.get("conclusion") == "success"
+            and run.get("event") in {"schedule", "workflow_dispatch", "push"}
+            and created.tzinfo is not None and created.astimezone(JST).date() == now.date())
+
+
+def active_runtime_before_arm(token: str) -> bool:
+    # Read status-specific metadata; an old active run must not fall off a
+    # latest-runs page. An incomplete or ambiguous empty response cannot arm.
+    base = f"https://api.github.com/repos/{REPOSITORY}/actions/workflows/g11-free-runner.yml"
+    for status in sorted(ACTIVE):
+        data = _get(base + f"/runs?branch=main&status={status}&per_page=100", token)
+        rows, total = data.get("workflow_runs"), data.get("total_count")
+        if (not isinstance(rows, list) or type(total) is not int or total < 0
+                or len(rows) != min(total, 100)):
+            raise ValueError("MORNING_ARM_RUN_LIST_INCOMPLETE")
+        if any(row.get("head_branch") != "main" or row.get("status") != status for row in rows):
+            raise ValueError("MORNING_ARM_RUN_LIST_BINDING")
+        if total:
+            return True
+    return False
+
+
+def arm_morning_handoff(*, clock=lambda: datetime.now(JST), sleep=time.sleep) -> str:
+    """One small timed handoff, independent of cron and the private runtime.
+
+    Long waits use bounded three-hour legs in a separate supervisor job. Only
+    saved feed/Actions metadata is read, and all prediction and capture gates
+    remain in the existing fresh PREDEADLINE invocation.
+    """
+    from predeadline_dispatch_v1 import Client, dispatch
+    if (os.environ.get("GITHUB_REPOSITORY") != REPOSITORY
+            or os.environ.get("GITHUB_REF") != "refs/heads/main"
+            or os.environ.get("GITHUB_RUN_ATTEMPT") != "1"):
+        raise ValueError("MORNING_ARM_CONTEXT")
+    now = clock()
+    expected_day = os.environ.get("G11_ARM_MORNING_DAY") or None
+    expected_authority = os.environ.get("G11_ARM_MORNING_AUTHORITY") or None
+    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_run":
+        if expected_day or expected_authority or not morning_arm_event(
+                json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()), now):
+            return "NOT_VERIFIED_MORNING_EVENT"
+    elif (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+            or expected_day != now.date().isoformat()
+            or not expected_authority or re.fullmatch(r"[0-9a-f]{64}", expected_authority) is None):
+        raise ValueError("MORNING_ARM_CONTINUATION")
+    origin = os.environ["G11_APP_ORIGIN"].rstrip("/")
+    day = now.date().isoformat()
+    # This cheap saved-only view avoids opening large feeds after ordinary
+    # successful LIVE/NIGHT completions. The full authority is verified below.
+    summary = _get(f"{origin}/api/g11-feed?view=wild4-day-binding&date={day}")
+    if summary.get("operational_date_jst") != day or summary.get("status") != "PASS":
+        return "MORNING_NOT_PUBLISHED"
+    if summary.get("stage") != "MORNING":
+        return "ALREADY_LIVE_OR_CLOSED"
+    feed = _get(f"{origin}/api/g11-feed?date={day}")
+    plan = morning_arm_plan(feed, now, expected_day, expected_authority)
+    if now >= plan["last"]:
+        return "NIGHT_HANDOFF"
+    until = min(plan["wake"], now + timedelta(seconds=MORNING_ARM_LEG_SECONDS))
+    print("G11_MORNING_ARM_WAIT=" + json.dumps({"day": day,
+        "wake_at": plan["wake"].isoformat(), "leg_until": until.isoformat()}), flush=True)
+    while True:
+        remaining = (until - clock()).total_seconds()
+        if remaining <= 0:
+            break
+        sleep(min(60, remaining))
+    now = clock()
+    # No old-day or changed-authority continuation; no timestamps are renewed.
+    fresh = _get(f"{origin}/api/g11-feed?date={day}")
+    current = morning_arm_plan(fresh, now, day, plan["authority"])
+    if (current["first"], current["last"]) != (plan["first"], plan["last"]):
+        raise ValueError("MORNING_ARM_DEADLINE_CHANGED")
+    if now >= current["last"]:
+        return "NIGHT_HANDOFF"
+    if active_runtime_before_arm(os.environ["GH_TOKEN"]):
+        return "ACTIVE_RUNTIME"
+    if now < current["wake"]:
+        # One POST only. An ambiguous response is not blindly replayed.
+        _post(f"https://api.github.com/repos/{REPOSITORY}/actions/workflows/g11-predeadline-critical-watchdog.yml/dispatches",
+              os.environ["GH_TOKEN"], {"ref": "main", "inputs": {
+                  "morning_handoff_day": day, "morning_handoff_authority": plan["authority"]}})
+        return "ARM_CONTINUATION_ACCEPTED"
+    result = dispatch(Client(os.environ["GH_TOKEN"]), day,
+                      int(os.environ["GITHUB_RUN_ID"]), int(os.environ["GITHUB_RUN_NUMBER"]), "bootstrap")
+    return result["status"]
+
+
 def daytime_recovery_decision(feed: dict, runs: list[dict], now: datetime) -> str:
     """Request the existing isolated lane; its saved-authority guards still decide eligibility."""
     day = now.date().isoformat()
@@ -349,6 +473,9 @@ def recover_failed_live(now: datetime, token: str, repository: str, origin: str)
 
 
 def main(now: datetime | None = None) -> None:
+    if os.environ.get("G11_ARM_MORNING") == "true":
+        print("G11_MORNING_ARM=" + arm_morning_handoff())
+        return
     now = now or datetime.now(JST)
     day = now.date().isoformat()
     token = os.environ["GH_TOKEN"]
