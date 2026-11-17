@@ -6,11 +6,13 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import textwrap
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from urllib.parse import urlparse, parse_qs
@@ -30,6 +32,42 @@ def digest_tree(root):
             digest.update(name)
             digest.update(path.read_bytes())
     return digest.hexdigest()
+
+
+class SourcePushRoutingTests(unittest.TestCase):
+    def expression(self, event, *, message='', mode='', schedule='', title='LIVE-predeadline-2026-11-17', result='success', group=False):
+        source=(ROOT/'.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
+        if group:
+            value=next(l for l in source.splitlines() if l.startswith('  group: ')).split('${{',1)[1].rsplit('}}',1)[0]
+        else:
+            block=source.split('  wild4-prospective:\n',1)[1]
+            value=block.split('    if: >-\n',1)[1].split('    uses:',1)[0]
+        gh=SimpleNamespace(repository_id='1367703708',ref='refs/heads/main',repository='tatsuuut/-g11-official-data-relay',event_name=event,
+            event=SimpleNamespace(head_commit=SimpleNamespace(message=message),schedule=schedule,
+                workflow_run=SimpleNamespace(display_title=title,conclusion=result,head_branch='main',
+                    path='.github/workflows/g11-free-runner.yml',head_repository=SimpleNamespace(full_name='tatsuuut/-g11-official-data-relay'))))
+        scope={'github':gh,'inputs':SimpleNamespace(mode=mode),'contains':lambda text,part:part in text,'startsWith':lambda text,prefix:text.startswith(prefix)}
+        value=re.sub(r'!(?!=)',' not ',' '.join(value.split()).replace('&&',' and ').replace('||',' or '))
+        return eval(value,{'__builtins__':{}},scope)
+
+    def test_source_push_cannot_start_an_unkeyed_worker_or_cancel_a_pending_exact_handoff(self):
+        self.assertFalse(self.expression('push',message='Merge ordinary transport fix'))
+        self.assertEqual(self.expression('push',message='Merge ordinary transport fix',group=True),'source-only')
+        self.assertTrue(self.expression('push',message='[goripan-promotion] retained lineage check'))
+        self.assertEqual(self.expression('push',message='[goripan-promotion] retained lineage check',group=True),'wild4')
+        for message in ('[footprint-storage-check] retained audit','[footprint-storage-check] [goripan-promotion]'):
+            self.assertFalse(self.expression('push',message=message))
+            self.assertEqual(self.expression('push',message=message,group=True),'footprint')
+
+    def test_normal_exact_handoff_fallback_cron_and_night_routes_stay_available(self):
+        for mode in ('wild4','wild4-settle'):
+            self.assertTrue(self.expression('workflow_dispatch',mode=mode))
+            self.assertEqual(self.expression('workflow_dispatch',mode=mode,group=True),'wild4')
+        for schedule in ('1-56/5 0-12 * * *','25,40,55 13 * * *'):
+            self.assertTrue(self.expression('schedule',schedule=schedule))
+        self.assertTrue(self.expression('workflow_run'))
+        self.assertFalse(self.expression('workflow_run',result='failure'))
+        self.assertFalse(self.expression('workflow_dispatch',mode='capture'))
 
 
 class CheckpointBindingTests(unittest.TestCase):
@@ -328,6 +366,9 @@ class CurrentCompactWorkflowTests(unittest.TestCase):
                 # transport. Every model/eligibility statement stays identical.
                 self.assertEqual(block.count('?view=wild4-day-binding&date='), 2)
                 block=block.replace('?view=wild4-day-binding&date=', '?date=')
+                guard="if day>='2026-10-13' and not (temp/'g11-wild4-future-locks/day-model-binding.json').is_file():"
+                self.assertEqual(block.count(guard),1)
+                block=block.replace(guard,"if day>='2026-10-13':")
             with self.subTest(name=name):self.assertEqual(hashlib.sha256(block.encode()).hexdigest(),digest)
 
     def test_complete_authenticated_reconstruction_precedes_original_full_store_guard(self):
@@ -360,7 +401,7 @@ class CurrentCompactWorkflowTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('WILD4_READBACK_WORKFLOW_PATH'), 'exact publisher workflow is provided by CI')
 class SavedReadbackTransportTests(unittest.TestCase):
-    def exercise(self, change=None, scope='WILD4_SAVED_PROJECTION', bad_sha=False):
+    def exercise(self, change=None, scope='WILD4_SAVED_PROJECTION', bad_sha=False, failures=()):
         workflow = Path(os.environ['WILD4_READBACK_WORKFLOW_PATH']).read_text()
         block = workflow.split('      - name: Verify exact Site GET after priority notification input\n',1)[1].split('      - name:',1)[0]
         code = block.split("          python3 - <<'PY'\n",1)[1].split('\n          PY',1)[0]
@@ -373,16 +414,21 @@ class SavedReadbackTransportTests(unittest.TestCase):
         if change:change(feed)
         raw=json.dumps(feed,ensure_ascii=False).encode()
         headers={'x-g11-feed-sha256':'f'*64 if bad_sha else hashlib.sha256(raw).hexdigest(),'x-g11-readback-scope':scope}
+        self.fetch_attempts=[];self.retry_sleeps=[]
         def fetch(url):
             parsed=urlparse(url);query=parse_qs(parsed.query)
             self.assertEqual(parsed.path,'/api/g11-feed');self.assertEqual(query,{'view':['wild4-readback'],'date':['2026-11-17']})
+            attempt=len(self.fetch_attempts);self.fetch_attempts.append(url)
+            if attempt<len(failures):
+                Path('.relay-output/hot-get-headers.txt').write_text('HTTP/2 '+str(failures[attempt])+'\n')
+                raise subprocess.CalledProcessError(22,['curl'])
             return feed,headers,raw
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);p=root/'goripan-public-projection.json';p.write_text(json.dumps(projection));before=p.read_bytes()
             prior=Path.cwd();output=io.StringIO()
             try:
                 os.chdir(root)
-                with patch.dict(os.environ,{'RUNNER_TEMP':str(root),'OPERATIONAL_DATE':'2026-11-17'}),patch.dict(sys.modules,{'hot_delta_transport_v1':type('ReadOnlyTransport',(),{'fetch':staticmethod(fetch)})}),redirect_stdout(output):
+                with patch.dict(os.environ,{'RUNNER_TEMP':str(root),'OPERATIONAL_DATE':'2026-11-17'}),patch.dict(sys.modules,{'hot_delta_transport_v1':type('ReadOnlyTransport',(),{'fetch':staticmethod(fetch)})}),patch('time.sleep',side_effect=self.retry_sleeps.append),redirect_stdout(output):
                     exec(compile(code,'<exact-saved-readback-verifier>','exec'),{})
                 self.assertEqual(p.read_bytes(),before)
                 return output.getvalue()
@@ -398,6 +444,23 @@ class SavedReadbackTransportTests(unittest.TestCase):
           ({'change':lambda f:f['goripan']['observation'].update(lifecycle={})},'SITE_LIFECYCLE_READBACK_MISMATCH')]
         for kwargs,reason in cases:
             with self.subTest(reason=reason),self.assertRaisesRegex(SystemExit,reason):self.exercise(**kwargs)
+
+    def test_transient_saved_get_failure_retries_reads_but_still_requires_exact_bytes(self):
+        self.assertIn('GORIPAN_SITE_GET_READBACK=PASS',self.exercise(failures=(500,503)))
+        self.assertEqual(len(self.fetch_attempts),3);self.assertEqual(self.retry_sleeps,[3,10])
+        with self.assertRaisesRegex(SystemExit,'SITE_GET_SHA'):self.exercise(failures=(500,),bad_sha=True)
+        self.assertEqual(len(self.fetch_attempts),2)
+
+    def test_auth_failure_or_persistent_overload_cannot_become_success(self):
+        with self.assertRaises(subprocess.CalledProcessError):self.exercise(failures=(401,))
+        self.assertEqual(len(self.fetch_attempts),1);self.assertEqual(self.retry_sleeps,[])
+        with self.assertRaises(subprocess.CalledProcessError):self.exercise(failures=(500,503,500))
+        self.assertEqual(len(self.fetch_attempts),3);self.assertEqual(self.retry_sleeps,[3,10])
+
+    def test_slow_first_failure_exhausts_retry_window_without_more_requests(self):
+        with patch('time.monotonic',side_effect=[0,25]),self.assertRaises(subprocess.CalledProcessError):
+            self.exercise(failures=(500,))
+        self.assertEqual(len(self.fetch_attempts),1);self.assertEqual(self.retry_sleeps,[])
 
 
 class ProtectedLogicTests(unittest.TestCase):

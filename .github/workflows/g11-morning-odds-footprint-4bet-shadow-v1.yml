@@ -58,7 +58,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ ((github.event_name == 'push' && !contains(github.event.head_commit.message, '[footprint-storage-check]')) || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-recover-20261013' || inputs.mode == 'wild4-republish-20261103')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || 'footprint' }}
+  group: g11-morning-odds-footprint-4bet-shadow-v1-${{ ((github.event_name == 'push' && contains(github.event.head_commit.message, '[goripan-promotion]') && !contains(github.event.head_commit.message, '[footprint-storage-check]')) || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle' || inputs.mode == 'wild4-recover-20261013' || inputs.mode == 'wild4-republish-20261103')) || (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *'))) && 'wild4' || github.event_name == 'workflow_run' && (startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-') && 'wild4' || 'ignored') || github.event_name == 'push' && !contains(github.event.head_commit.message, '[footprint-storage-check]') && 'source-only' || 'footprint' }}
   cancel-in-progress: false
 
 jobs:
@@ -455,7 +455,7 @@ jobs:
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
       (
-        (github.event_name == 'push' && !contains(github.event.head_commit.message, '[footprint-storage-check]')) ||
+        (github.event_name == 'push' && contains(github.event.head_commit.message, '[goripan-promotion]') && !contains(github.event.head_commit.message, '[footprint-storage-check]')) ||
         (github.event_name == 'workflow_dispatch' && (inputs.mode == 'wild4' || inputs.mode == 'wild4-settle')) ||
         (github.event_name == 'schedule' && (github.event.schedule == '1-56/5 0-12 * * *' || github.event.schedule == '25,40,55 13 * * *')) ||
         (
@@ -467,7 +467,7 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@59829c1c182055f9e74b79a749a1cae24bf20813
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@0575399b44989a830c2ccd290c1af4910a8e6ece
     with:
       predeadline_checkpoint_key: ${{ inputs.predeadline_checkpoint_key || '' }}
       predeadline_delta_key: ${{ inputs.predeadline_delta_key || '' }}
