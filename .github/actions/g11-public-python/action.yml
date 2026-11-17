@@ -13,6 +13,10 @@ runs:
     - name: Locate the immutable public helpers
       shell: bash
       run: echo "G11_PUBLIC_RUNTIME_HELPERS=${GITHUB_ACTION_PATH}/../../../scripts" >> "${GITHUB_ENV}"
+    - name: Prepare optional standard gzip for complete state restoration
+      if: inputs.enabled == 'true' && inputs.profile == 'runtime'
+      shell: bash
+      run: python3 "${G11_PUBLIC_RUNTIME_HELPERS}/encrypt_runtime_state_v1.py" --prepare-gzip
     - name: Bind packages to the exact runner and interpreter
       if: inputs.enabled == 'true'
       id: identity
