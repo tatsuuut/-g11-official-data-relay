@@ -88,6 +88,9 @@ class ExactReadbackRetryTests(unittest.TestCase):
         def expression(value):
             value = value.removeprefix('${{').removesuffix('}}').strip()
             value = value.replace('inputs.wild4-day', repr(''))
+            # This fixture supplies an already encrypted checkpoint, retaining
+            # the composite action's default (no new encryption requested).
+            value = value.replace('inputs.encrypt-full', repr('false'))
             value = re.sub(r'steps\.([\w-]+)\.outputs\.([\w-]+)',
                            lambda match: repr(outputs.get(match[1], '') if match[2] == 'cache-hit' else ''), value)
             value = re.sub(r'steps\.[\w-]+\.outcome', repr(''), value)

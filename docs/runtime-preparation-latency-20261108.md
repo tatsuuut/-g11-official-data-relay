@@ -125,3 +125,33 @@ pin, models, inference, learning, settlement, official acquisition cadence and
 saved LOCKs are unchanged. Observe the next normal LIVE parent/child pair for
 the overlap marker and actual odds-to-notification delay; no universal latency
 or phone-delivery improvement is claimed from source changes or tests alone.
+
+## November 17: remove full-encryption and full-feed waits from the early handoff
+
+PR209's actual new-input run 44048503771 still checked its odds at age 189s;
+its final saved projection readback passed. Native decompression alone did not
+shorten complete extraction sufficiently. Do not call that freshness repaired.
+
+The critical writer can now prepare only the authenticated complete delta,
+retaining the exact base ciphertext unchanged. The existing checkpoint action
+saves and reads back that delta and attempts its one exact dispatch first.
+It then performs ordinary full encryption, full save, exact full readback and
+byte comparison before the original canonical publication gate can open. The
+encryption secret is scoped to that action's encryption step. No background
+process, removed state, relaxed inventory or changed odds timestamp is used.
+Missing/invalid compact evidence still uses the ordinary full path; full
+encryption failure never yields a ready canonical-publication output.
+
+The WILD4 child changes only its two saved day GET URLs to
+`view=wild4-day-binding`. Site version478 hashes the original saved source,
+uses the identical public feed projection, and returns the binder's exact
+date/stage/status/counts and every original deadline. The response and source
+hashes are retained. Actual saved Nov16 and Nov17 reads returned 5,885 and
+6,428 bytes, respectively, with verified hashes. This is a read-only view;
+no official request, model binding, forecast or settlement is generated.
+The child guard normalizes exactly these two URL changes before comparing all
+seven original prediction/learning/settlement blocks to their frozen hashes.
+
+Source deployment and deterministic tests are not end-to-end freshness or
+device delivery evidence. Observe a new normal compact parent/child pair and
+the unchanged notification screening age before claiming completion.
