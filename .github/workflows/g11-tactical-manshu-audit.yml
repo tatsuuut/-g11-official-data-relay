@@ -1,0 +1,50 @@
+name: tactical Manshu saved two-ticket contract
+on:
+  pull_request:
+    paths:
+      - .github/workflows/g11-isolated-live-research.yml
+      - .github/workflows/g11-tactical-manshu-audit.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/g11-isolated-live-research.yml
+      - .github/workflows/g11-tactical-manshu-audit.yml
+permissions:
+  contents: read
+jobs:
+  immutable-saved-observer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Check out the observation-only Deme source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 9c265a5433b81d501d6f1d35a32287bf79c2447b
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .manshu-observer
+          persist-credentials: false
+          sparse-checkout: |
+            g11/canonical/deme_discovery*
+            g11/canonical/test_deme_discovery_tactical_manshu.py
+          sparse-checkout-cone-mode: false
+      - name: Check out only the existing saved-output validators
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: c8eb2bb0fb40f9a8c13065a5a1c98f4f85da51c3
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .manshu-validator
+          persist-credentials: false
+          sparse-checkout: |
+            g11/growth_p3/v1_1/tactical_forward_v1.py
+            g11/growth_p3/v1_1/head_selection_diagnostics_v1.py
+          sparse-checkout-cone-mode: false
+      - name: Verify real receipt and saved-output contracts without prediction or acquisition
+        env:
+          PYTHONPATH: .manshu-observer/g11/canonical:.manshu-validator
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest test_deme_discovery_tactical_manshu -v

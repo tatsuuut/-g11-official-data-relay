@@ -9,6 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    '.github/workflows/g11-tactical-manshu-audit.yml',
     'scripts/predeadline_input_health_v1.py',
     'scripts/test_predeadline_input_health_v1.py',
     'docs/predeadline-input-health-20261117.md',
