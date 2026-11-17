@@ -18,6 +18,11 @@ on:
         type: string
         required: false
         default: ""
+      prewarm_base_key:
+        description: Optional exact encrypted base prepared before new official input
+        type: string
+        required: false
+        default: ""
       night_checkpoint_key:
         description: Exact saved and read-back NIGHT checkpoint; no fallback when supplied
         type: string
@@ -48,9 +53,13 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@5241f15a67497463db892b454d073136f2338912
+        id: preparation
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@b116c9b158882db67fa862d68eb4028ca767008f
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
+          prewarm-base-key: ${{ inputs.prewarm_base_key }}
+          checkpoint-key: ${{ inputs.predeadline_checkpoint_key }}
+          encryption-secret: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
       - name: Checkout isolated research branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -66,6 +75,7 @@ jobs:
           NIGHT_CHECKPOINT_KEY: ${{ inputs.night_checkpoint_key }}
           PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
           PREDEADLINE_DELTA_KEY: ${{ inputs.predeadline_delta_key }}
+          PREWARM_BASE_KEY: ${{ inputs.prewarm_base_key }}
         run: |
           python3 - <<'PY'
           import os, re
@@ -120,6 +130,13 @@ jobs:
           delta=os.environ.get('PREDEADLINE_DELTA_KEY','')
           if delta and (not live_checkpoint or delta!=live_checkpoint.replace('g11-state-v4-critical-','g11-state-v4-delta-',1)):
               raise SystemExit('PREDEADLINE_DELTA_IDENTITY')
+          warm=os.environ.get('PREWARM_BASE_KEY','')
+          if warm:
+              import sys
+              sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
+              from encrypt_runtime_state_v1 import prewarm_identity
+              if not delta or checkpoint or readback: raise SystemExit('PREWARM_LIVE_ONLY')
+              if prewarm_identity(warm,live_checkpoint)!=day: raise SystemExit('PREWARM_DAY')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
               output.write('night_rollover='+str(night_rollover or historical_night_repair).lower()+'\n')
@@ -131,9 +148,25 @@ jobs:
           print('WILD4_CANDIDATE_REVIEW_HELD='+str('2026-11-13'<=day<'2026-11-14').lower())
           print('WILD4_HISTORICAL_NIGHT_REPAIR='+str(historical_night_repair).lower())
           PY
+      - name: Wait only for the exact new saved handoff after preparation
+        id: handoff
+        if: inputs.prewarm_base_key != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREWARM_BASE_KEY: ${{ inputs.prewarm_base_key }}
+          CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
+          DELTA_KEY: ${{ inputs.predeadline_delta_key }}
+        run: |
+          python3 - <<'PY'
+          import os,sys
+          sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
+          from encrypt_runtime_state_v1 import wait_for_compact
+          available=wait_for_compact(os.environ['PREWARM_BASE_KEY'],os.environ['CHECKPOINT_KEY'],os.environ['DELTA_KEY'])
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('available='+str(available).lower()+'\n')
+          PY
       - name: Restore exact authenticated complete reconstruction delta
         id: compact-cache
-        if: inputs.predeadline_delta_key != ''
+        if: inputs.predeadline_delta_key != '' && (inputs.prewarm_base_key == '' || steps.handoff.outputs.available == 'true')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-output/early-delta.tgz.gpg
@@ -141,12 +174,13 @@ jobs:
           fail-on-cache-miss: true
       - name: Authenticate compact manifest before choosing its exact base
         id: compact
-        if: inputs.predeadline_delta_key != ''
+        if: inputs.predeadline_delta_key != '' && (inputs.prewarm_base_key == '' || steps.handoff.outputs.available == 'true')
         env:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
           PREDEADLINE_DELTA_KEY: ${{ inputs.predeadline_delta_key }}
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          PREPARED_BASE_KEY: ${{ steps.preparation.outputs.prewarm-base-key }}
         run: |
           set -euo pipefail
           test '${{ steps.compact-cache.outputs.cache-hit }}' = true
@@ -161,11 +195,20 @@ jobs:
           value=inspect_delta(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-compact.tgz',
               day=os.environ['OPERATIONAL_DATE'],checkpoint_key=os.environ['PREDEADLINE_CHECKPOINT_KEY'])
           require(value['delta_key']==os.environ['PREDEADLINE_DELTA_KEY'],'REQUESTED_KEY')
-          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('base_key='+value['base_key']+'\n')
+          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
+          reuse=(value['base_key']==os.environ.get('PREPARED_BASE_KEY')
+              and (temp/'g11-prewarm-base').is_dir() and (temp/'g11-prewarm-cipher.tgz.gpg').is_file())
+          if not reuse:
+              import shutil
+              shutil.rmtree(temp/'g11-prewarm-base',ignore_errors=True)
+              (temp/'g11-prewarm-cipher.tgz.gpg').unlink(missing_ok=True)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write('base_key='+value['base_key']+'\nuse_prewarm='+str(reuse).lower()+'\n')
           print('WILD4_AUTHENTICATED_DELTA=PASS BASE='+value['base_key'])
           PYCOMPACT
       - name: Restore current encrypted canonical state
         id: canonical-cache
+        if: (inputs.predeadline_delta_key == '' || steps.compact.outputs.base_key != '') && steps.compact.outputs.use_prewarm != 'true'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
@@ -174,11 +217,16 @@ jobs:
       - name: Verify current canonical state availability
         id: state-ready
         run: |
-          if [ -n '${{ inputs.predeadline_checkpoint_key || inputs.night_checkpoint_key }}' ] && [ '${{ steps.canonical-cache.outputs.cache-hit }}' != true ]; then
+          if [ -n '${{ inputs.prewarm_base_key }}' ] && [ -z '${{ steps.compact.outputs.base_key }}' ]; then
+            echo 'ready=false' >> "${GITHUB_OUTPUT}"
+            echo 'WILD4_PREWARM_NO_AUTHENTICATED_NEW_HANDOFF; no inference attempted'
+            exit 0
+          fi
+          if [ -n '${{ inputs.predeadline_checkpoint_key || inputs.night_checkpoint_key }}' ] && [ '${{ steps.canonical-cache.outputs.cache-hit }}' != true ] && [ '${{ steps.compact.outputs.use_prewarm }}' != true ]; then
             echo 'WILD4_REQUESTED_CHECKPOINT_MISSING' >&2
             exit 1
           fi
-          if [ -s .relay-cache/state.tgz.gpg ]; then
+          if [ -s .relay-cache/state.tgz.gpg ] || [ '${{ steps.compact.outputs.use_prewarm }}' = true ]; then
             echo 'ready=true' >> "${GITHUB_OUTPUT}"
           else
             echo 'ready=false' >> "${GITHUB_OUTPUT}"
@@ -325,14 +373,17 @@ jobs:
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
           PREDEADLINE_DELTA_KEY: ${{ inputs.predeadline_delta_key }}
+          USE_PREWARM: ${{ steps.compact.outputs.use_prewarm }}
         run: |
           set -euo pipefail
-          test -s .relay-cache/state.tgz.gpg
           test -n "${STATE_PASSPHRASE}"
-          exec 3<<<"${STATE_PASSPHRASE}"
-          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-            --decrypt --output "${RUNNER_TEMP}/g11-state.tgz" .relay-cache/state.tgz.gpg
-          exec 3<&-
+          if [ "${USE_PREWARM}" != true ]; then
+            test -s .relay-cache/state.tgz.gpg
+            exec 3<<<"${STATE_PASSPHRASE}"
+            gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+              --decrypt --output "${RUNNER_TEMP}/g11-state.tgz" .relay-cache/state.tgz.gpg
+            exec 3<&-
+          fi
           if [ -s .candidate-encrypted/g11-wild4-candidate.tgz.gpg ]; then
           exec 3<<<"${STATE_PASSPHRASE}"
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
@@ -344,7 +395,15 @@ jobs:
           sys.path.insert(0, os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
           from extract_runtime_state_v1 import extract_complete_state
           root=pathlib.Path(os.environ['RUNNER_TEMP'])
-          extract_complete_state(root/'g11-state.tgz', pathlib.Path('.relay-state'))
+          if os.environ.get('USE_PREWARM')=='true':
+              from encrypt_runtime_state_v1 import require
+              require(not pathlib.Path('.relay-state').exists(),'PREWARM_TARGET_EXISTS')
+              pathlib.Path('.relay-cache').mkdir(exist_ok=True)
+              os.replace(root/'g11-prewarm-cipher.tgz.gpg',pathlib.Path('.relay-cache/state.tgz.gpg'))
+              os.rename(root/'g11-prewarm-base',pathlib.Path('.relay-state'))
+              print('WILD4_PREWARM_BASE=REUSED_BEFORE_FULL_DELTA_VALIDATION',flush=True)
+          else:
+              extract_complete_state(root/'g11-state.tgz', pathlib.Path('.relay-state'))
           if os.environ.get('PREDEADLINE_DELTA_KEY'):
               from encrypt_runtime_state_v1 import apply_delta
               apply_delta(root/'g11-compact.tgz',pathlib.Path('.relay-state'),day=os.environ['OPERATIONAL_DATE'],
