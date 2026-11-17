@@ -1760,11 +1760,12 @@ jobs:
           import hashlib,json,os,pathlib,sys,urllib.parse
           base='https://g11-race-lab.higatatsunori2.chatgpt.site'
           projection=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'goripan-public-projection.json').read_bytes())
-          query=urllib.parse.urlencode({'view':'v53-final','date':os.environ['OPERATIONAL_DATE']})
+          query=urllib.parse.urlencode({'view':'wild4-readback','date':os.environ['OPERATIONAL_DATE']})
           sys.path.insert(0,'scripts')
           import hot_delta_transport_v1 as hot
           pathlib.Path('.relay-output').mkdir(exist_ok=True)
           feed,readback_headers,data=hot.fetch(base+'/api/g11-feed?'+query)
+          if readback_headers.get('x-g11-readback-scope')!='WILD4_SAVED_PROJECTION': raise SystemExit('SITE_READBACK_SCOPE')
           expected=readback_headers['x-g11-feed-sha256']
           if hashlib.sha256(data).hexdigest()!=expected: raise SystemExit('SITE_GET_SHA')
           feed=json.loads(data)
