@@ -12,7 +12,28 @@ import unittest
 from unittest.mock import Mock, patch
 
 import extract_runtime_state_v1 as restore
+import encrypt_runtime_state_v1 as archive
 import public_python_runtime_v1 as runtime
+
+
+class NativeRestorePreparationTests(unittest.TestCase):
+    def test_existing_accelerator_is_reused_without_package_install(self):
+        with patch.object(archive.shutil,'which',return_value='/usr/bin/igzip'),patch.object(archive.subprocess,'run') as command:
+            self.assertTrue(archive.prepare_gzip_acceleration());command.assert_not_called()
+
+    def test_unavailable_or_slow_optional_package_preserves_standard_gzip_fallback(self):
+        for result in (Mock(returncode=100),subprocess.TimeoutExpired('apt-get',10)):
+            with self.subTest(result=type(result).__name__),patch.object(archive.shutil,'which',return_value=None), \
+                    patch.object(archive.subprocess,'run',side_effect=result if isinstance(result,Exception) else None,return_value=result) as command:
+                self.assertFalse(archive.prepare_gzip_acceleration())
+                self.assertEqual(command.call_args.kwargs['timeout'],10)
+
+    def test_public_runtime_action_prepares_it_before_restore_and_keeps_parser_readbacks_dependency_free(self):
+        action=(Path(__file__).resolve().parents[1]/'.github/actions/g11-public-python/action.yml').read_text()
+        block=action.split('    - name: Prepare optional standard gzip for complete state restoration\n',1)[1].split('    - name:',1)[0]
+        self.assertIn("inputs.enabled == 'true' && inputs.profile == 'runtime'",block)
+        self.assertIn('encrypt_runtime_state_v1.py" --prepare-gzip',block)
+        self.assertLess(action.index('--prepare-gzip'),action.index('name: Restore only the exact public environment'))
 
 
 class StateRestoreTests(unittest.TestCase):

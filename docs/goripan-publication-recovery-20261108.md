@@ -191,3 +191,30 @@ failure, original-state retention, exact cache readback and ambiguous dispatch.
 No official requests or artificial phone notifications are used by these tests.
 Only subsequent normal runs can establish actual odds age and device delivery;
 source changes and synthetic speed measurements are not that evidence.
+
+
+### First production reconstruction and remaining elapsed time
+
+PR207 merged as 325aa9f9139efb7c16c63234ed03cc8e8eb884b3.
+PR contract run 44043365331 and post-merge 44043769923 both passed.
+Normal parent 44044101429 saved a 6,979,591-byte compact checkpoint with
+18 changed files at 17:10:35 JST and dispatched before full upload at
+17:10:56. Child 44044543673 authenticated its exact base, restored all
+60,623 archive members and reconstructed all 56,191 files. Both runs
+succeeded; exact Site LOCK/lifecycle readback passed at 17:14:47 JST.
+
+The first real input check was still age 209 seconds (odds 17:10:04,
+check 17:13:33), so freshness is NOT resolved by PR207 alone.
+Complete extraction took 28.567 seconds, reconstruction 8.242 seconds.
+Do not turn the early dispatch into a counterfactual total speed claim.
+
+The public runtime action now prepares the already reviewed standard-gzip
+accelerator before WILD4 restores private state. Its optional signed OS
+package preparation has a 10-second timeout and retains the standard gzip
+fallback. Parser/readback-only preparations remain unchanged. Complete
+extraction logs the actual chosen decompressor; CRC/truncation, complete
+inventory and all original authority/LOCK checks remain mandatory.
+The public helper is pinned at 15f9a05e and the child at dcb08118, changing
+only the helper pin from 66184402. Current prediction/learning/settlement
+blocks remain byte-identical. Compare subsequent NORMAL input age; do not
+claim universal 3-minute compliance or phone delivery before that evidence.

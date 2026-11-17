@@ -87,7 +87,8 @@ def extract_complete_state(archive: Path, destination: Path, *, decompressor='au
         if staging.exists():
             shutil.rmtree(staging)
     print(f'G11_COMPLETE_STATE_EXTRACT=PASS MEMBERS={count} '
-          f'SECONDS={time.monotonic() - started:.3f} PASSES=1')
+          f'SECONDS={time.monotonic() - started:.3f} PASSES=1 '
+          f'DECOMPRESSOR={"IGZIP" if decompressor != "python" and shutil.which("igzip") else "PYTHON"}')
     if inventory_path is not None:
         try:
             from encrypt_runtime_state_v1 import save_base_inventory
