@@ -7,7 +7,8 @@ from unittest import mock
 
 from predeadline_watchdog_v1 import (_last_deadline, decide, main,
     runner_retry_decision, morning_watchdog_decision,
-    morning_predeadline_handoff_decision, RUNNER_NOT_ACQUIRED)
+    morning_predeadline_handoff_decision, RUNNER_NOT_ACQUIRED,
+    morning_arm_plan, arm_morning_handoff, REPOSITORY)
 
 DAY = "2026-10-01"
 NOW = datetime.fromisoformat("2026-10-01T18:20:00+09:00")
@@ -18,6 +19,152 @@ def feed():
             "counts": {"races": 1},
             "canonical_authorities": {"growth_p3": {"status": "LOCKED"}},
             "races": [{"deadline_jst": "2026-10-01T22:41:00+09:00"}]}
+
+
+class MorningArmTests(unittest.TestCase):
+    def setUp(self):
+        self.day = '2026-11-18'
+        self.authority = 'a' * 64
+        self.feed = {'operational_date_jst': self.day, 'stage': 'MORNING', 'status': 'PASS',
+            'counts': {'races': 2},
+            'daily_runtime': {'immutable': True, 'operational_date_jst': self.day,
+                              'authority_sha256': self.authority},
+            'canonical_authorities': {'growth_p3': {'status': 'LOCKED', 'app_readback_status': 'PASS'}},
+            'races': [{'deadline_jst': self.day + 'T08:35:00+09:00'},
+                      {'deadline_jst': self.day + 'T08:58:00+09:00'}]}
+        self.event = {'workflow_run': {'name': 'runtime sync', 'path': '.github/workflows/g11-free-runner.yml',
+            'head_branch': 'main', 'head_repository': {'full_name': REPOSITORY}, 'status': 'completed',
+            'conclusion': 'success', 'event': 'schedule', 'created_at': '2026-11-17T20:44:46Z'}}
+
+    def exercise(self, at='05:57:31', *, continuation=False, fresh=None, active=False,
+                 incomplete=False, event=None, env_extra=None, jump_day=False, summary_stage='MORNING'):
+        import copy, io, json, os, tempfile
+        from contextlib import redirect_stdout
+        from datetime import timedelta
+        from pathlib import Path
+        state = [datetime.fromisoformat(self.day + 'T' + at + '+09:00')]
+        sleeps, urls = [], []
+        def sleep(seconds):
+            self.assertTrue(0 < seconds <= 60)
+            sleeps.append(seconds)
+            state[0] += timedelta(days=1) if jump_day else timedelta(seconds=seconds)
+        full_reads = []
+        def get(url, token=None):
+            urls.append(url)
+            if '/api/g11-feed?view=wild4-day-binding' in url:
+                return {'operational_date_jst': self.day, 'status': 'PASS', 'stage': summary_stage}
+            if '/api/g11-feed?date=' in url:
+                full_reads.append(url)
+                return copy.deepcopy(self.feed if len(full_reads) == 1 or fresh is None else fresh)
+            self.assertIn('/actions/workflows/g11-free-runner.yml/runs?', url)
+            self.assertIn('status=', url)
+            if incomplete:
+                return {'total_count': 1, 'workflow_runs': []}
+            if active:
+                status = url.split('status=')[1].split('&')[0]
+                return {'total_count': 1, 'workflow_runs': [{'head_branch': 'main', 'status': status}]}
+            return {'total_count': 0, 'workflow_runs': []}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'event.json';path.write_text(json.dumps(event or self.event))
+            env = {'GITHUB_REPOSITORY': REPOSITORY, 'GITHUB_REF': 'refs/heads/main', 'GITHUB_RUN_ATTEMPT': '1',
+                'GITHUB_RUN_ID': '500', 'GITHUB_RUN_NUMBER': '12', 'GH_TOKEN': 'fixture-only',
+                'G11_APP_ORIGIN': 'https://example.invalid', 'GITHUB_EVENT_NAME': 'workflow_run',
+                'GITHUB_EVENT_PATH': str(path), 'G11_ARM_MORNING_DAY': '', 'G11_ARM_MORNING_AUTHORITY': ''}
+            if continuation:
+                env.update(GITHUB_EVENT_NAME='workflow_dispatch', G11_ARM_MORNING_DAY=self.day,
+                           G11_ARM_MORNING_AUTHORITY=self.authority)
+            env.update(env_extra or {})
+            with mock.patch.dict(os.environ, env), mock.patch('predeadline_watchdog_v1._get', side_effect=get), \
+                 mock.patch('predeadline_watchdog_v1._post') as post, \
+                 mock.patch('predeadline_dispatch_v1.Client') as client, \
+                 mock.patch('predeadline_dispatch_v1.dispatch', return_value={'status': 'DISPATCH_ACCEPTED'}) as dispatch, \
+                 redirect_stdout(io.StringIO()):
+                result = arm_morning_handoff(clock=lambda: state[0], sleep=sleep)
+                return result, sleeps, post.call_args_list, dispatch.call_args_list, client.call_count, urls
+
+    def test_actual_0557_morning_completion_wakes_before_first_race_without_cron(self):
+        import copy
+        before = copy.deepcopy(self.feed)
+        result, sleeps, posts, dispatches, clients, urls = self.exercise()
+        self.assertEqual(result, 'DISPATCH_ACCEPTED')
+        self.assertEqual(sum(sleeps), (datetime.fromisoformat(self.day+'T08:15:00+09:00') -
+                                      datetime.fromisoformat(self.day+'T05:57:31+09:00')).total_seconds())
+        self.assertEqual(posts, []);self.assertEqual(clients, 1);self.assertEqual(len(dispatches), 1)
+        self.assertEqual(dispatches[0].args[1:], (self.day, 500, 12, 'bootstrap'))
+        self.assertEqual(self.feed, before)
+        self.assertTrue(all('/api/g11-feed?' in u or '/actions/workflows/' in u for u in urls))
+
+    def test_long_early_morning_wait_has_one_bounded_metadata_only_continuation(self):
+        result, sleeps, posts, dispatches, clients, _ = self.exercise('02:20:00')
+        self.assertEqual(result, 'ARM_CONTINUATION_ACCEPTED');self.assertEqual(sum(sleeps), 3*60*60)
+        self.assertEqual(len(posts), 1);self.assertIn('g11-predeadline-critical-watchdog.yml/dispatches', posts[0].args[0])
+        self.assertEqual(posts[0].args[2]['inputs'], {'morning_handoff_day': self.day,
+                                                     'morning_handoff_authority': self.authority})
+        self.assertEqual(dispatches, []);self.assertEqual(clients, 0)
+        result, sleeps, posts, dispatches, _, _ = self.exercise('05:20:00', continuation=True)
+        self.assertEqual(result, 'DISPATCH_ACCEPTED');self.assertEqual(sum(sleeps), 2*3600+55*60)
+        self.assertEqual(posts, []);self.assertEqual(len(dispatches), 1)
+
+    def test_active_or_already_live_runtime_is_never_dispatched_again(self):
+        result, _, posts, dispatches, _, _ = self.exercise(active=True)
+        self.assertEqual(result, 'ACTIVE_RUNTIME');self.assertEqual((posts, dispatches), ([], []))
+        for stage in ('PREDEADLINE', 'NIGHT'):
+            result, sleeps, posts, dispatches, _, urls = self.exercise(summary_stage=stage)
+            self.assertEqual(result, 'ALREADY_LIVE_OR_CLOSED');self.assertEqual(sleeps, [])
+            self.assertEqual((posts, dispatches), ([], []));self.assertEqual(len(urls), 1)
+
+    def test_missing_or_changed_authority_and_wrong_morning_binding_are_held(self):
+        import copy
+        for field, value in (('immutable', False), ('operational_date_jst', '2026-11-17'),
+                             ('authority_sha256', 'bad')):
+            candidate = copy.deepcopy(self.feed);candidate['daily_runtime'][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                morning_arm_plan(candidate, datetime.fromisoformat(self.day+'T05:57:31+09:00'))
+        for field, value in (('stage','NIGHT'), ('status','FAIL'), ('counts',{'races':1}),
+                             ('SNAPSHOT_CLASS','SAME_DAY_RESCUE_BOUNDARY')):
+            candidate = copy.deepcopy(self.feed);candidate[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                morning_arm_plan(candidate, datetime.fromisoformat(self.day+'T05:57:31+09:00'))
+        candidate = copy.deepcopy(self.feed);candidate['daily_runtime']['authority_sha256'] = 'b'*64
+        with self.assertRaisesRegex(ValueError, 'MORNING_ARM_AUTHORITY'):self.exercise(fresh=candidate)
+        candidate = copy.deepcopy(self.feed);candidate['races'][0]['deadline_jst'] = self.day+'T08:30:00+09:00'
+        with self.assertRaisesRegex(ValueError, 'MORNING_ARM_DEADLINE_CHANGED'):self.exercise(fresh=candidate)
+
+    def test_continuation_replay_rollover_and_incomplete_run_list_cannot_post(self):
+        for extra in ({'G11_ARM_MORNING_DAY':'2026-11-17'}, {'G11_ARM_MORNING_AUTHORITY':'b'*64},
+                      {'GITHUB_RUN_ATTEMPT':'2'}, {'GITHUB_REF':'refs/heads/unreviewed'}):
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                self.exercise(continuation=True, env_extra=extra)
+        with self.assertRaisesRegex(ValueError,'MORNING_ARM_DAY'):self.exercise(jump_day=True)
+        with self.assertRaisesRegex(ValueError,'MORNING_ARM_RUN_LIST_INCOMPLETE'):self.exercise(incomplete=True)
+
+    def test_failure_fork_previous_day_and_other_workflow_do_not_arm(self):
+        import copy
+        for field, value in (('conclusion','failure'), ('head_branch','unreviewed'),
+                             ('path','.github/workflows/other.yml'), ('created_at','2026-11-16T20:44:46Z'),
+                             ('head_repository',{'full_name':'someone/fork'})):
+            event = copy.deepcopy(self.event);event['workflow_run'][field] = value
+            with self.subTest(field=field):
+                result, sleeps, posts, dispatches, _, urls = self.exercise(event=event)
+                self.assertEqual(result,'NOT_VERIFIED_MORNING_EVENT');self.assertEqual(sleeps, [])
+                self.assertEqual((posts,dispatches,urls),([],[],[]))
+
+    def test_delayed_wake_keeps_future_races_in_existing_runtime_and_night_stops(self):
+        result, sleeps, posts, dispatches, _, _ = self.exercise('08:40:00')
+        self.assertEqual(result,'DISPATCH_ACCEPTED');self.assertEqual(sleeps, [])
+        self.assertEqual(posts,[]);self.assertEqual(len(dispatches),1)
+        result, sleeps, posts, dispatches, _, _ = self.exercise('09:00:00')
+        self.assertEqual(result,'NIGHT_HANDOFF');self.assertEqual((sleeps,posts,dispatches),([],[],[]))
+
+    def test_timer_has_independent_concurrency_and_no_private_runtime(self):
+        from pathlib import Path
+        wf=(Path(__file__).resolve().parents[1]/'.github/workflows/g11-predeadline-critical-watchdog.yml').read_text()
+        self.assertNotIn('\nconcurrency:', wf)
+        inspect, arm = wf.split('  inspect:',1)[1].split('  arm-first-race:',1)
+        self.assertIn('group: g11-predeadline-critical-watchdog', inspect)
+        self.assertIn('group: g11-verified-morning-first-race-handoff', arm)
+        self.assertIn('timeout-minutes: 190', arm)
+        self.assertNotIn('PRIVATE_SOURCE', arm);self.assertNotIn('g11-free-official-data-runner', arm)
 
 
 class WatchdogTests(unittest.TestCase):

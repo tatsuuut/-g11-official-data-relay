@@ -298,3 +298,23 @@ unchanged authority/phase checks and writes its ordinary immutable receipt.
 There is no cross-invocation cache, no omitted readback, and the legacy fallback
 still performs its original GET if no verified response is returned. MORNING,
 NIGHT, rescue, encryption and full checkpoint readback paths remain unchanged.
+
+On November 18, the verified MORNING run finished at 05:57 JST. Its existing
+06:00 bootstrap cutoff returned OUTSIDE_WINDOW, and no subsequent scheduled
+runtime arrived before the first 08:35 race. A fresh ordinary PREDEADLINE
+invocation restored that morning's original authority and published the first
+race's saved 08:27 inputs before deadline; no past prediction was regenerated.
+
+The existing lightweight watchdog now also reacts to a successful trusted
+runtime completion. A separate job arms from the verified current MORNING
+feed and the earliest saved race deadline, twenty minutes before that deadline.
+Waiting uses bounded three-hour metadata-only legs with the exact day and
+daily-authority hash; rollover or changed authority/deadlines are refused.
+After rechecking the saved feed and complete active-run metadata, it uses the
+existing read-before-retry dispatcher to start one fresh normal invocation.
+No model, official acquisition, state archive or prediction is opened here.
+Its separate concurrency group cannot occupy the ordinary watchdog or runtime.
+The existing cron/failure watchdog and all normal capture/cutoff/LOCK/NIGHT
+guards remain. Simulated clock/network tests cover the actual 05:57 gap,
+long early waits, existing LIVE runs, ambiguous metadata, wrong authority and
+rollover; tomorrow's automatic first-race wake remains an operational check.
