@@ -16,6 +16,9 @@ inputs:
     description: Existing checkpoint passphrase, scoped to the encryption step.
     required: false
     default: ""
+  prewarm:
+    description: Optional sent/attempted preparation dispatch; do not post the same compact handoff twice.
+    default: ''
 outputs:
   ready:
     description: True only after an exact cache hit and byte comparison.
@@ -60,12 +63,19 @@ runs:
         OPERATIONAL_DATE: ${{ inputs.wild4-day }}
         CHECKPOINT_KEY: ${{ inputs.cache-key }}
         DELTA_KEY: ${{ steps.compact.outputs.key }}
+        PREWARM_STATUS: ${{ inputs.prewarm }}
       run: |
         set -euo pipefail
         test "${CHECKPOINT_KEY}" = "g11-state-v4-critical-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
         test "${DELTA_KEY}" = "g11-state-v4-delta-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
         python3 -c 'import os,sys;sys.path.insert(0,"scripts");from encrypt_runtime_state_v1 import compact_ready,require;v=compact_ready(os.environ["CHECKPOINT_KEY"]);require(v is not None and v["delta_key"]==os.environ["DELTA_KEY"],"REMOTE_READBACK")'
         jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS" and .CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0' .relay-output/result.json >/dev/null
+        if [ "${PREWARM_STATUS:-}" = sent ] || [ "${PREWARM_STATUS:-}" = attempted ]; then
+          echo 'attempted=true' >> "${GITHUB_OUTPUT}"
+          if [ "${PREWARM_STATUS}" = sent ]; then echo 'sent=true' >> "${GITHUB_OUTPUT}"; fi
+          echo 'WILD4_COMPACT_HANDOFF=EXISTING_PREWARM_DISPATCH'
+          exit 0
+        fi
         echo 'attempted=true' >> "${GITHUB_OUTPUT}"
         timeout --signal=TERM --kill-after=2s 12s gh workflow run 364923281 \
           -f mode=wild4 -f operational_date="${OPERATIONAL_DATE}" \

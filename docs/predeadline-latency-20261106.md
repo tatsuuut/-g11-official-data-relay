@@ -214,3 +214,39 @@ adopted on CPU timing alone. The final comparison evaluates standard-compatible
 ISA-L levels 1 and 2 to account for cache transfer cost. Native corruption and
 full real encryption roundtrip tests are required by the public-runtime gate
 on future PRs, independent from the one-off saved-state benchmark.
+
+## November 17: prepare the exact base before fresh odds are captured
+
+The first bound-day run on November 17 reached the new saved input in 171
+seconds, but its Marugame 8 notification screen was stored about 229 seconds
+after the original 18:36:36 JST capture. Successful job completion and a fast
+input read do not demonstrate timely notification eligibility.
+
+The LIVE relay can now start one bounded WILD4 preparation from its exactly
+restored same-day encrypted base before decrypting/capturing. The child prepares
+the same pinned packages, authenticates and completely extracts that exact
+base, then polls only GitHub's exact saved compact-checkpoint metadata. It exits
+without inference if the parent finishes without a compact checkpoint or the
+bounded wait expires. It never requests official inputs or advances timestamps.
+
+Preparation never authorizes a forecast. Only the authenticated new compact
+manifest can select the base for inference. Reuse requires the manifest's exact
+base key to match the fully prepared key. The original ciphertext SHA256, full
+base inventory, full target inventory, store digest, day, parent run and daily
+authority checks still run before the original prediction and learning steps.
+An absent/mismatched preparation uses the ordinary exact authenticated restore;
+missing new input cannot fall back to an old packet. Ciphertext and the complete
+prepared tree are retained in runner temporary storage across checkout cleanup.
+
+After an exact compact readback, an accepted or ambiguous preparation dispatch
+is propagated without a duplicate dispatch. If compact creation/readback fails,
+the original complete encryption, backup, exact readback and full-checkpoint
+fallback remain. Canonical publication still requires its independent full
+checkpoint readback. All model, odds eligibility, immutable LOCK, settlement
+and learning blocks remain byte-identical to the deployed fixed-day version.
+
+Tests cover dispatch identity/ambiguity, bounded metadata-only waits, wrong
+cache refs/keys, missing new input, authenticated prewarm corruption, complete
+reconstruction equivalence and the original protected runtime blocks. Production
+acceptance still requires timing a genuinely new race through the actual saved
+notification screen, with the 180-second gate unchanged.

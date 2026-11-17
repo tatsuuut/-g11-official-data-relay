@@ -475,6 +475,7 @@ class CompleteDeltaTests(unittest.TestCase):
             self.skipTest('local gpg-agent unavailable; mandatory in contract CI')
         workspace=self.root/'work';workspace.mkdir();output=workspace/'.relay-cache/state.tgz.gpg';output.parent.mkdir()
         env={**os.environ,'GNUPGHOME':str(home),'GITHUB_RUN_ID':'43'}
+        (self.base/'relay-state.json').write_text(json.dumps({'OPERATIONAL_DATE_JST':DAY,'MORNING_COMPLETE':True}))
         try:
             with patch.dict(os.environ,env),archive.secret_pipe(b'synthetic-test-only\n') as fd:
                 archive.encrypt(self.base,output,passphrase_fd=fd,codec='gzip')
@@ -495,6 +496,23 @@ class CompleteDeltaTests(unittest.TestCase):
             complete=workspace/'complete.tgz'
             old=workspace/'restored-base';restore.extract_complete_state(baseline,old)
             archive.apply_delta(delta,old,day=DAY,checkpoint_key=self.key,base_cipher=original)
+            # Prewarming changes only when the exact same base is restored.
+            # Retain its authenticated ciphertext across checkout cleanup, then
+            # require the unchanged complete reconstruction and inventories.
+            warm=workspace/'warm';warm.mkdir();warm_cipher=workspace/'warm.gpg';shutil.copyfile(original,warm_cipher)
+            with patch.dict(os.environ,env):
+                self.assertEqual(self.base_key,archive.prepare_warm_base(self.base_key,self.key,
+                    secret=b'synthetic-test-only\n',folder=warm,cipher=warm_cipher))
+            self.assertFalse(warm_cipher.exists());self.assertFalse((warm/'g11-prewarm-base.tgz').exists())
+            self.assertEqual(archive.file_sha(original),archive.file_sha(warm/'g11-prewarm-cipher.tgz.gpg'))
+            archive.apply_delta(delta,warm/'g11-prewarm-base',day=DAY,checkpoint_key=self.key,
+                                base_cipher=warm/'g11-prewarm-cipher.tgz.gpg')
+            self.assertEqual(archive.snapshot_state(old),archive.snapshot_state(warm/'g11-prewarm-base'))
+            bad=workspace/'bad-warm';bad.mkdir();damaged=workspace/'damaged.gpg'
+            damaged.write_bytes(original.read_bytes()[:-10])
+            with patch.dict(os.environ,env),self.assertRaises(ValueError):
+                archive.prepare_warm_base(self.base_key,self.key,secret=b'synthetic-test-only\n',folder=bad,cipher=damaged)
+            self.assertFalse((bad/'g11-prewarm-base').exists());self.assertFalse((bad/'g11-prewarm-base.tgz').exists())
             result=subprocess.run(['bash','-c','exec 3<<<"synthetic-test-only"; exec python3 "$1" --state-root "$2" --output "$3"',
                 'full-checkpoint-test',str(ROOT/'scripts/encrypt_runtime_state_v1.py'),str(self.target),str(output)],
                 env=env,cwd=workspace,text=True,capture_output=True,timeout=60)
@@ -506,6 +524,74 @@ class CompleteDeltaTests(unittest.TestCase):
             self.assertFalse((workspace/'passphrase').exists())
         finally:
             subprocess.run(['gpgconf','--homedir',str(home),'--kill','gpg-agent'],capture_output=True)
+
+
+class PrewarmTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.output=Path(self.tmp.name)/'outputs'
+        self.base='g11-state-v4-published-'+DAY+'-42-1-checkpoint'
+        self.key='g11-state-v4-critical-'+DAY+'-43'
+        self.delta='g11-state-v4-delta-'+DAY+'-43'
+        self.env={'SELECTED_CHECKPOINT':self.base,'RESTORED_CHECKPOINT':self.base,
+            'GITHUB_RUN_ID':'43','GITHUB_RUN_ATTEMPT':'1','GITHUB_OUTPUT':str(self.output),
+            'GITHUB_REPOSITORY':'tatsuuut/-g11-official-data-relay'}
+
+    def test_current_exact_restored_base_starts_only_preparation_before_capture(self):
+        with patch.dict(os.environ,self.env),patch.object(subprocess,'run',return_value=Mock(returncode=0)) as dispatch:
+            critical.prewarm_worker(DAY,'predeadline',now=NOW)
+        self.assertEqual(self.output.read_text(),'status=attempted\nstatus=sent\n')
+        args=dispatch.call_args.args[0]
+        for field in ('prewarm_base_key='+self.base,'predeadline_checkpoint_key='+self.key,'predeadline_delta_key='+self.delta):
+            self.assertIn(field,args)
+        self.assertEqual(dispatch.call_args.kwargs['timeout'],12)
+
+    def test_wrong_restore_fails_closed_and_non_current_night_or_rerun_never_dispatches(self):
+        with patch.dict(os.environ,{**self.env,'RESTORED_CHECKPOINT':self.base+'4'}), \
+                patch.object(subprocess,'run') as dispatch,self.assertRaises(RuntimeError):
+            critical.prewarm_worker(DAY,'predeadline',now=NOW)
+        dispatch.assert_not_called()
+        for phase,day,extra in [('night',DAY,{}),('predeadline','2026-11-05',{}),
+                              ('predeadline',DAY,{'GITHUB_RUN_ATTEMPT':'2'}),
+                              ('predeadline',DAY,{'GITHUB_RUN_ID':'42'})]:
+            with self.subTest(phase=phase,day=day,extra=extra),patch.dict(os.environ,{**self.env,**extra}), \
+                    patch.object(subprocess,'run') as dispatch:
+                critical.prewarm_worker(day,phase,now=NOW)
+                dispatch.assert_not_called()
+        self.assertFalse(self.output.exists())
+
+    def test_ambiguous_dispatch_is_retained_without_claiming_acceptance(self):
+        for result in (Mock(returncode=1),subprocess.TimeoutExpired('gh',12)):
+            self.output.unlink(missing_ok=True)
+            with patch.dict(os.environ,self.env),patch.object(subprocess,'run',
+                    side_effect=result if isinstance(result,Exception) else None,return_value=result):
+                critical.prewarm_worker(DAY,'predeadline',now=NOW)
+            self.assertEqual(self.output.read_text(),'status=attempted\n')
+
+    def test_saved_metadata_wait_requires_exact_day_run_and_ref_and_is_bounded(self):
+        for hit in ('exact','prefix','wrong-ref','missing'):
+            elapsed=[0];queries=[]
+            def query(path):
+                queries.append(path)
+                if '/actions/runs/' in path:return {'id':43,'status':'in_progress'}
+                return {'actions_caches':[] if hit=='missing' else [{'key':self.delta+('4' if hit=='prefix' else ''),
+                    'ref':'refs/heads/elsewhere' if hit=='wrong-ref' else 'refs/heads/main'}]}
+            def sleep(seconds):elapsed[0]+=seconds
+            with self.subTest(hit=hit),patch.dict(os.environ,self.env):
+                available=archive.wait_for_compact(self.base,self.key,self.delta,maximum=25,
+                    clock=lambda:elapsed[0],sleeper=sleep,query=query)
+            self.assertEqual(available,hit=='exact')
+            self.assertEqual(elapsed[0],0 if hit=='exact' else 25)
+            self.assertTrue(all('/actions/caches?' in p or '/actions/runs/43' in p for p in queries))
+        with patch.dict(os.environ,self.env):
+            query=Mock(side_effect=[{'actions_caches':[]},{'id':43,'status':'completed'}])
+            sleeper=Mock()
+            self.assertFalse(archive.wait_for_compact(self.base,self.key,self.delta,query=query,sleeper=sleeper))
+            sleeper.assert_not_called()
+            for base,key,delta in [(self.base,self.key+'4',self.delta),(self.base,self.key,self.delta+'4'),
+                    (self.base.replace(DAY,'2026-11-05'),self.key,self.delta),
+                    (self.base.replace('-42-', '-44-'),self.key,self.delta)]:
+                with self.assertRaises(ValueError):archive.wait_for_compact(base,key,delta,query=query)
 
 
 if __name__ == '__main__': unittest.main()

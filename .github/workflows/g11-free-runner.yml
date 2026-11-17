@@ -1,5 +1,4 @@
-name: runtime sync # optional display research cannot gate saved prediction delivery
-# Recovery 2026-11-15.
+name: runtime sync
 run-name: ${{github.event_name == 'workflow_dispatch' && format('LIVE-{0}-{1}', inputs.phase, inputs.operational_date) || github.workflow}}
 on:
   push:
@@ -202,13 +201,13 @@ jobs:
             g11-state-v4-published-
             ${{steps.scheduled.outputs.operational_date != '2026-10-04' && 'g11-state-v3-' || ''}}
       - name: Require the selected checkpoint to be restored exactly
+        id: prewarm
         if: steps.checkpoint-choice.outputs.cache_key!=''
         env:
           SELECTED_CHECKPOINT: ${{steps.checkpoint-choice.outputs.cache_key}}
           RESTORED_CHECKPOINT: ${{steps.restore-state.outputs.cache-matched-key}}
-        run: |
-          test "${SELECTED_CHECKPOINT}" = "${RESTORED_CHECKPOINT}"
-          echo 'G11_SELECTED_CHECKPOINT_RESTORED=PASS'
+          GH_TOKEN: ${{github.token}}
+        run: python3 scripts/critical_saved_publication_v1.py --day '${{steps.scheduled.outputs.operational_date}}' --phase '${{steps.scheduled.outputs.phase}}' --prewarm
       - name: Fail closed when the private credential is absent
         env:
           G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
@@ -381,6 +380,7 @@ jobs:
           wild4-day: ${{steps.due.outputs.operational_date}}
           encrypt-full: 'true'
           encryption-secret: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          prewarm: ${{steps.prewarm.outputs.status}}
       - name: Handoff saved early inputs to WILD4
         id: wild4-early
         if: always()&&!cancelled()&&(steps.critical-save.outcome=='success'||steps.critical-save.outputs.wild4-attempted=='true')&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
@@ -1056,8 +1056,6 @@ jobs:
               -H 'Accept: application/json' \
               "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${G11_OIDC_AUDIENCE}")"
             token="$(printf '%s' "${oidc}" | jq -er '.value')"
-            # NIGHT retries transport saved checkpoint bytes. Versioned wire plans
-            # repair encoding/references without rewriting predictions or settlement.
             G11_SYNC_OIDC="${token}" python3 scripts/daily_runtime_delivery_v1.py \
               --state-root .relay-state --feed "${FEED}" --origin "${G11_APP_ORIGIN}"
             exit 0
