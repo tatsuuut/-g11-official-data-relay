@@ -8,6 +8,14 @@ inputs:
     description: Optional current LIVE day; start the independently verifying WILD4 worker after the full save.
     required: false
     default: ""
+  encrypt-full:
+    description: Complete ordinary full encryption after the verified compact dispatch.
+    required: false
+    default: "false"
+  encryption-secret:
+    description: Existing checkpoint passphrase, scoped to the encryption step.
+    required: false
+    default: ""
 outputs:
   ready:
     description: True only after an exact cache hit and byte comparison.
@@ -21,9 +29,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Record encrypted publication checkpoint digest
-      shell: bash
-      run: sha256sum .relay-cache/state.tgz.gpg > .relay-output/publication-state.sha256
     - name: Identify a complete reconstruction checkpoint
       id: compact
       if: inputs.wild4-day != ''
@@ -67,6 +72,21 @@ runs:
           -f predeadline_checkpoint_key="${CHECKPOINT_KEY}" -f predeadline_delta_key="${DELTA_KEY}"
         echo 'sent=true' >> "${GITHUB_OUTPUT}"
         echo 'WILD4_COMPACT_HANDOFF=DISPATCH_ACCEPTED_BEFORE_FULL_TRANSFER'
+    - name: Encrypt the complete state before full backup and canonical publication
+      if: inputs.encrypt-full == 'true'
+      shell: bash
+      env:
+        G11_PRIVATE_REPO_TOKEN: ${{ inputs.encryption-secret }}
+      run: |
+        set -euo pipefail
+        jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
+        exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+        python3 scripts/encrypt_runtime_state_v1.py --state-root .relay-state --output .relay-cache/state.tgz.gpg
+        exec 3<&-
+        test -s .relay-cache/state.tgz.gpg
+    - name: Record encrypted publication checkpoint digest
+      shell: bash
+      run: sha256sum .relay-cache/state.tgz.gpg > .relay-output/publication-state.sha256
     - name: Save complete encrypted state before publication
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
       with:

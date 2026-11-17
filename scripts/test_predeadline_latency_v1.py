@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import tarfile
 import time
@@ -240,7 +241,54 @@ class ArchiveTests(unittest.TestCase):
                 subprocess.run(['gpgconf', '--homedir', str(home), '--kill', 'gpg-agent'], capture_output=True)
 
 
+class SplitEncryptionTests(unittest.TestCase):
+    def exercise(self, *, delta_only, base_key):
+        secret=b'synthetic-memory-only\n'
+        duplicate=os.dup
+        with tempfile.TemporaryDirectory() as tmp, archive.secret_pipe(secret) as fd:
+            root=Path(tmp)/'state';root.mkdir()
+            output=Path(tmp)/'state.gpg';output.write_bytes(b'unchanged exact base ciphertext')
+            args=['checkpoint','--state-root',str(root),'--output',str(output),'--delta-base-key',base_key]
+            if delta_only:args.append('--delta-only')
+            with patch.object(sys,'argv',args),patch.object(archive.os,'dup',side_effect=lambda _:duplicate(fd)), \
+                    patch.object(archive,'prepare_compact_checkpoint') as prepare,patch.object(archive,'encrypt') as full:
+                archive.main()
+                prepare.assert_called_once_with(root,output,base_key,secret=secret)
+                self.assertEqual(full.call_count,0 if delta_only else 1)
+                self.assertEqual(output.read_bytes(),b'unchanged exact base ciphertext')
+
+    def test_delta_preparation_never_overwrites_base_or_runs_full_encryption_even_without_a_base_key(self):
+        for key in ('','g11-state-v4-published-'+DAY+'-41'):
+            with self.subTest(key=key):self.exercise(delta_only=True,base_key=key)
+
+    def test_existing_combined_writer_still_performs_full_encryption(self):
+        self.exercise(delta_only=False,base_key='g11-state-v4-published-'+DAY+'-41')
+
+
 class WorkflowTests(unittest.TestCase):
+    def test_compact_dispatch_precedes_full_encryption_but_canonical_publication_still_requires_full_readback(self):
+        source=(ROOT/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        names=['Start WILD4 from a verified full reconstruction before large backup transfer',
+               'Encrypt the complete state before full backup and canonical publication',
+               'Record encrypted publication checkpoint digest',
+               'Save complete encrypted state before publication',
+               'Read back complete encrypted publication checkpoint',
+               'Verify encrypted publication checkpoint bytes']
+        indexes=[source.index('    - name: '+name+'\n') for name in names]
+        self.assertEqual(indexes,sorted(indexes))
+        full=source.split('    - name: '+names[1]+'\n',1)[1].split('    - name:',1)[0]
+        self.assertIn("if: inputs.encrypt-full == 'true'",full)
+        self.assertIn('G11_PRIVATE_REPO_TOKEN: ${{ inputs.encryption-secret }}',full)
+        self.assertIn('--passphrase', (ROOT/'scripts/encrypt_runtime_state_v1.py').read_text())
+        self.assertIn('set -euo pipefail',full)
+        self.assertNotIn('continue-on-error',full)
+        self.assertIn('value: ${{ steps.verified.outputs.ready }}',source)
+        workflow=(ROOT/'.github/workflows/g11-free-runner.yml').read_text()
+        critical=workflow.split('      - name: Encrypt critical state before optional work\n',1)[1].split('      - name:',1)[0]
+        self.assertIn('--delta-only',critical)
+        save=workflow.split('      - name: Save early encrypted critical checkpoint\n',1)[1].split('      - name:',1)[0]
+        self.assertIn("encrypt-full: 'true'",save)
+
     def test_changed_archive_shell_blocks_parse(self):
         import textwrap
         text = (ROOT/'.github/workflows/g11-free-runner.yml').read_text()
@@ -432,18 +480,26 @@ class CompleteDeltaTests(unittest.TestCase):
                 archive.encrypt(self.base,output,passphrase_fd=fd,codec='gzip')
             original=workspace/'base-retained.gpg';shutil.copyfile(output,original)
             archive.save_base_inventory(self.base,workspace/'.relay-output/base-inventory.json')
-            result=subprocess.run(['bash','-c','exec 3<<<"synthetic-test-only"; exec python3 "$1" --state-root "$2" --output "$3" --delta-base-key "$4"',
+            result=subprocess.run(['bash','-c','exec 3<<<"synthetic-test-only"; exec python3 "$1" --state-root "$2" --output "$3" --delta-base-key "$4" --delta-only',
                 'checkpoint-test',str(ROOT/'scripts/encrypt_runtime_state_v1.py'),str(self.target),str(output),self.base_key],
                 env=env,cwd=workspace,text=True,capture_output=True,timeout=60)
             self.assertEqual(result.returncode,0,result.stderr);self.assertIn('G11_COMPACT_CHECKPOINT=READY',result.stdout)
+            # Dispatch can restore the complete authenticated target while the
+            # exact base ciphertext is still retained, before full encryption.
+            self.assertEqual(output.read_bytes(),original.read_bytes())
             def decrypt(source,target):
                 subprocess.run(['gpg','--batch','--yes','--pinentry-mode','loopback','--passphrase-fd','0',
                     '--decrypt','--output',str(target),str(source)],input=b'synthetic-test-only\n',env=env,capture_output=True,check=True)
             delta=workspace/'delta.tgz';decrypt(workspace/'.relay-output/early-delta.tgz.gpg',delta)
             baseline=workspace/'base.tgz';decrypt(original,baseline)
-            complete=workspace/'complete.tgz';decrypt(output,complete)
+            complete=workspace/'complete.tgz'
             old=workspace/'restored-base';restore.extract_complete_state(baseline,old)
             archive.apply_delta(delta,old,day=DAY,checkpoint_key=self.key,base_cipher=original)
+            result=subprocess.run(['bash','-c','exec 3<<<"synthetic-test-only"; exec python3 "$1" --state-root "$2" --output "$3"',
+                'full-checkpoint-test',str(ROOT/'scripts/encrypt_runtime_state_v1.py'),str(self.target),str(output)],
+                env=env,cwd=workspace,text=True,capture_output=True,timeout=60)
+            self.assertEqual(result.returncode,0,result.stderr)
+            decrypt(output,complete)
             full=workspace/'restored-full';restore.extract_complete_state(complete,full)
             self.assertEqual(archive.snapshot_state(old),archive.snapshot_state(full))
             self.assertEqual(archive.snapshot_state(full),archive.snapshot_state(self.target))

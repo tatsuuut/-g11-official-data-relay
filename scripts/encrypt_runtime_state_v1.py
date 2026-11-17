@@ -392,6 +392,7 @@ def main():
     parser.add_argument('--output', type=Path)
     parser.add_argument('--prepare-gzip', action='store_true')
     parser.add_argument('--delta-base-key')
+    parser.add_argument('--delta-only', action='store_true')
     parser.add_argument('--compact-ready')
     args = parser.parse_args()
     if args.prepare_gzip:
@@ -405,13 +406,14 @@ def main():
         return
     if args.state_root is None or args.output is None:
         parser.error('--state-root and --output are required for encryption')
-    if args.delta_base_key:
+    if args.delta_base_key is not None or args.delta_only:
         with os.fdopen(os.dup(3), 'rb') as source:
             secret = source.readline(4097)
         require(0 < len(secret) <= 4096 and secret.endswith(b'\n'), 'SECRET_INPUT')
-        prepare_compact_checkpoint(args.state_root, args.output, args.delta_base_key, secret=secret)
-        with secret_pipe(secret) as fd:
-            encrypt(args.state_root, args.output, passphrase_fd=fd)
+        prepare_compact_checkpoint(args.state_root, args.output, args.delta_base_key or '', secret=secret)
+        if not args.delta_only:
+            with secret_pipe(secret) as fd:
+                encrypt(args.state_root, args.output, passphrase_fd=fd)
     else:
         encrypt(args.state_root, args.output)
 

@@ -323,6 +323,11 @@ class CurrentCompactWorkflowTests(unittest.TestCase):
             'Continue existing BET learning after completed NIGHT':'13d0c5f33151da4f614e685da3d962974730dcf62bc03a73a47efe980aa07b6d'}
         for name,digest in expected.items():
             block=self.source().split('      - name: '+name+'\n',1)[1].split('      - name:',1)[0]
+            if name == 'Bind one model for the operational day':
+                # Only the two saved day reads use the small, source-verified
+                # transport. Every model/eligibility statement stays identical.
+                self.assertEqual(block.count('?view=wild4-day-binding&date='), 2)
+                block=block.replace('?view=wild4-day-binding&date=', '?date=')
             with self.subTest(name=name):self.assertEqual(hashlib.sha256(block.encode()).hexdigest(),digest)
 
     def test_complete_authenticated_reconstruction_precedes_original_full_store_guard(self):

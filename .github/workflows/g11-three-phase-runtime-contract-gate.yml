@@ -771,7 +771,7 @@ jobs:
       - name: Checkout exact saved-projection readback verifier
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: dcb08118f1f00462f799c12b96c75a2ec977e836
+          ref: 59829c1c182055f9e74b79a749a1cae24bf20813
           path: .g11-saved-readback-guard
           sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
           persist-credentials: false
