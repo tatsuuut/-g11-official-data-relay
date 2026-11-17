@@ -70,7 +70,7 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
             self.skipTest('private runtime is required in CI')
         return critical, official
 
-    def exercise(self, *, missing=False, corrupt=False):
+    def exercise(self, *, missing=False, corrupt=False, observe=False):
         critical, official = self.modules()
         day = '2026-11-01'
         now = datetime.fromisoformat(day + 'T07:00:00+09:00')
@@ -140,13 +140,15 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
             authority_path = state / 'daily-runtime' / day / 'authority.json'
             authority_bytes = authority_path.read_bytes()
             if corrupt: lock.write_text('changed after sealing\n')
-            with patch.object(critical, 'datetime', Clock), \
+            import predeadline_input_health_v1 as health
+            with patch.object(health, 'report', side_effect=lambda *args: order.append('INPUT_HEALTH')), \
+                 patch.object(critical, 'datetime', Clock), \
                  patch.object(critical, 'OfficialArtifactStore', Store), \
                  patch.object(critical, 'CanonicalRunner', Runner), \
                  patch.object(critical, 'capture', side_effect=lambda root:
                      order.append('OFFICIAL_CAPTURE') or {'ACQUIRED': [source_id]}), \
                  patch.object(critical.current_p3, 'publish_future', side_effect=publish), \
-                 scope.formal_lock_scope(day):
+                 scope.formal_lock_scope('2026-11-17' if observe else day):
                 if missing or corrupt:
                     with self.assertRaises(Exception) as error:
                         critical.run(state, day, 'fixture')
@@ -160,7 +162,7 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
                     self.assertEqual(result['CRITICAL']['AUTHORITY_SHA256'], authority['authority_sha256'])
                     self.assertEqual(result['CRITICAL']['POST_DEADLINE_GENERATION'], 0)
                     self.assertEqual(result['CRITICAL']['PREDICTION_LOCKED_BEFORE_DEADLINE'], [FORMAL])
-                    self.assertEqual(order, ['OFFICIAL_CAPTURE', 'P3_V53', 'CURRENT_P3'])
+                    self.assertEqual(order, ['OFFICIAL_CAPTURE'] + (['INPUT_HEALTH'] if observe else []) + ['P3_V53', 'CURRENT_P3'])
             self.assertIs(critical.run, original)
             self.assertEqual(authority_path.read_bytes(), authority_bytes)
             if not corrupt:
@@ -169,6 +171,9 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
 
     def test_excluded_race_allows_unchanged_critical_capture_publish_and_seal(self):
         self.exercise()
+
+    def test_health_observer_is_bound_to_the_compiled_runtime_globals(self):
+        self.exercise(observe=True)
 
     def test_formal_race_missing_lock_still_fails(self):
         self.exercise(missing=True)
@@ -189,3 +194,4 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

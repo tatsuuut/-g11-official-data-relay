@@ -61,15 +61,17 @@ def formal_lock_scope(day):
             projection, store, current_runtime.snapshot_name,
             current_p3.feedlib.LOCK49_FIELDS,
         )'''
-    critical.run = replace_pinned(original, RUN_SHA256, [(before, after)],
-                                  {'_missing_formal_locks': missing_formal_locks})
-    original_capture = critical.capture
+    capture = critical.capture
     if day >= '2026-11-17':
         from predeadline_input_health_v1 import observed_capture
-        critical.capture = observed_capture(original_capture, critical.OfficialArtifactStore, day)
+        capture = observed_capture(capture, critical.OfficialArtifactStore, day)
+    # replace_pinned compiles with a copy of the original globals. Bind the
+    # observer in that namespace; changing critical.capture afterward cannot
+    # affect the compiled run function.
+    critical.run = replace_pinned(original, RUN_SHA256, [(before, after)],
+        {'_missing_formal_locks': missing_formal_locks, 'capture': capture})
     try:
         yield
     finally:
-        critical.capture = original_capture
         critical.run = original
 
