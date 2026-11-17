@@ -135,7 +135,7 @@ def make_proof(engine, row, saved, receipt, odds, odds_day=None, packet=None):
                 packet["ODDS_RESPONSE_SHA256"] == receipt["SHA256"] and packet["ODDS_120"] == odds and
                 datetime.fromisoformat(packet["ODDS_CAPTURED_AT"]) == datetime.fromisoformat(receipt["CAPTURED_AT_JST"]) and
                 datetime.fromisoformat(packet["ODDS_CAPTURED_AT"]) <= datetime.fromisoformat(row["locked_at"]), "GORE_LOCK_ODDS_BINDING")
-    return {"engine": engine, "race_key": key, "lock_sha256": row["lock_sha256"], "deadline_at": row["deadline_at"],
+    proof = {"engine": engine, "race_key": key, "lock_sha256": row["lock_sha256"], "deadline_at": row["deadline_at"],
             "purpose": "BET_DECISION_INPUT" if engine == "WILD4" else "ALERT_EVALUATION_ONLY",
             "source_id": receipt["SOURCE_ID"], "snapshot_sha256": saved["SNAPSHOT_SHA256"], "response_sha256": receipt["SHA256"],
             "captured_at": receipt["CAPTURED_AT_JST"], "host": receipt["HOST"],
@@ -143,6 +143,12 @@ def make_proof(engine, row, saved, receipt, odds, odds_day=None, packet=None):
             "values": [{"combination": b, "market_odds": odds[b]} for b in bets],
             "packet_sha256": packet["BET_PACKET_HASH"] if packet else None,
             "odds_day_sha256": odds_day["CONTENT_SHA256"] if odds_day else None}
+    # Optional price-only research: reuse the same already RAW-verified 120
+    # quotes. No acquisition, predictor, bet, odds or result is changed. Closed
+    # races retain their existing compact transport; ordinary ACKs are unchanged.
+    if len(odds) == 120 and datetime.now(timezone.utc) < datetime.fromisoformat(row["deadline_at"]):
+        proof["race_odds_values"] = [{"combination": b, "market_odds": odds[b]} for b in sorted(odds)]
+    return proof
 
 def read_player_context(store_path, race_key, readback_at, cache):
     # Private runtime owns the official source schema; public relay only routes it.

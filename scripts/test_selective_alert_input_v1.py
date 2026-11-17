@@ -293,6 +293,28 @@ class EarlyNotificationOddsTest(unittest.TestCase):
         self.assertIn(('morning','official-day-input'),calls);self.assertIn(('predeadline','odds3t-'+key),calls)
         self.assertIn(('raw','odds3t-'+key),calls)
 
+    def test_optional_live_full_prices_leave_existing_proof_and_past_transport_unchanged(self):
+        # Synthetic verification fixtures; never exposed as research results.
+        key='20261117-20-01'
+        odds={f'{a}-{b}-{c}':float(10+a+b+c) for a in range(1,7) for b in range(1,7) for c in range(1,7) if len({a,b,c})==3}
+        row={'race_key':key,'bets':['1-2-3','1-3-2'],'bet_count':2,'lock_sha256':'a'*64,'deadline_at':'2026-11-17T17:10:00+09:00'}
+        saved={'SNAPSHOT_SHA256':'b'*64}
+        receipt={'SOURCE_ID':'odds3t-'+key,'SHA256':'c'*64,'CAPTURED_AT_JST':'2026-11-17T17:05:00+09:00','HOST':'www.boatrace.jp'}
+        original=copy.deepcopy((row,saved,receipt,odds))
+        clock=m.datetime
+        with patch.object(m,'datetime') as mocked:
+            mocked.fromisoformat.side_effect=clock.fromisoformat
+            mocked.now.return_value=clock.fromisoformat('2026-11-17T17:06:00+09:00')
+            live=m.make_proof('ABEKEN_V4',row,saved,receipt,odds)
+            mocked.now.return_value=clock.fromisoformat(row['deadline_at'])
+            past=m.make_proof('ABEKEN_V4',row,saved,receipt,odds)
+        self.assertEqual(120,len(live['race_odds_values']))
+        self.assertEqual(2,len(live['values']))
+        full=live.pop('race_odds_values')
+        self.assertEqual(live,past)
+        self.assertEqual({x['combination']:x['market_odds'] for x in full},odds)
+        self.assertEqual(original,(row,saved,receipt,odds))
+
 if __name__=='__main__':unittest.main()
 
 
