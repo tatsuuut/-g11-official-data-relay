@@ -276,3 +276,25 @@ same saved-only WILD4 readback and additionally checks its explicit scope;
 the existing full body SHA256, date, status and immutable row checks remain.
 CI executes the exact retained-reader function, verifies its AST fingerprint,
 and proves identical recovered rows with/without unrelated display enrichment.
+
+The first timely WILD4 screen was Wakamatsu 11: original odds 19:48:12 JST,
+screen 19:50:47.406, 155.406 seconds, with only hit/value rejection reasons.
+Kiryu 11 subsequently reached 182.166 seconds for Peel and 182.749 for WILD4,
+so the shared path still needs margin without changing the 180-second gate.
+
+Two saved-only HTTP reads of the same 5,626,813 decoded bytes and exact body
+SHA256 measured 11.135 seconds/5,626,813 wire bytes without compression, and
+7.401 seconds/472,533 wire bytes with gzip. The readback client now requests
+supported HTTP compression. Curl decodes before the existing exact body SHA256
+and JSON checks; no capture timestamp, LOCK, response checksum or state archive
+format changes. Real local HTTP tests exercise decoding, wrong body hashes and
+an interrupted transfer.
+
+The normal LIVE sender also reuses the exact verified post-write GET returned
+by its hot-delta publisher within the same invocation. That publisher has
+already checked the server ACK/source SHA, every changed field and body SHA.
+The outer daily sender rechecks the bytes/decoded object, then applies its
+unchanged authority/phase checks and writes its ordinary immutable receipt.
+There is no cross-invocation cache, no omitted readback, and the legacy fallback
+still performs its original GET if no verified response is returned. MORNING,
+NIGHT, rescue, encryption and full checkpoint readback paths remain unchanged.

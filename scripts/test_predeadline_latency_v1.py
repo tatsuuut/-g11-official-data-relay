@@ -594,5 +594,40 @@ class PrewarmTests(unittest.TestCase):
                 with self.assertRaises(ValueError):archive.wait_for_compact(base,key,delta,query=query)
 
 
+class CompressedSavedReadbackTests(unittest.TestCase):
+    def test_real_compressed_http_retains_exact_decoded_bytes_and_hash_gate(self):
+        import gzip
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        import threading
+        import hot_delta_transport_v1 as hot
+        raw=json.dumps({'captured_at':'2026-11-17T19:48:12+09:00','bets':['1-2-3'],
+                        'saved_history':'同じ保存済みデータ'*5000},ensure_ascii=False).encode()
+        compressed=gzip.compress(raw);calls=[]
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                calls.append(self.headers.get('Accept-Encoding',''))
+                body=compressed[:-8] if self.path=='/truncated' else compressed
+                self.send_response(200)
+                self.send_header('Content-Type','application/json');self.send_header('Content-Encoding','gzip')
+                self.send_header('Content-Length',str(len(compressed)))
+                self.send_header('X-G11-Feed-Sha256','0'*64 if self.path=='/wrong-hash' else hashlib.sha256(raw).hexdigest())
+                self.end_headers();self.wfile.write(body)
+            def log_message(self,*args):pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cwd=Path.cwd();os.chdir(tmp);Path('.relay-output').mkdir()
+                try:
+                    url='http://127.0.0.1:'+str(server.server_port)
+                    feed,headers,body=hot.fetch(url+'/saved')
+                    self.assertEqual(body,raw);self.assertEqual(feed,json.loads(raw))
+                    self.assertEqual(headers['x-g11-feed-sha256'],hashlib.sha256(raw).hexdigest())
+                    self.assertIn('gzip',calls[0]);self.assertLess(len(compressed),len(raw)//10)
+                    with self.assertRaisesRegex(RuntimeError,'HOT_READBACK_SHA'):hot.fetch(url+'/wrong-hash')
+                    with self.assertRaises(subprocess.CalledProcessError):hot.fetch(url+'/truncated')
+                finally:os.chdir(cwd)
+        finally:server.shutdown();server.server_close();thread.join(timeout=5)
+
+
 if __name__ == '__main__': unittest.main()
 

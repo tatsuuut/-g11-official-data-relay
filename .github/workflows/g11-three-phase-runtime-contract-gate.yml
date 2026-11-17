@@ -771,7 +771,7 @@ jobs:
       - name: Checkout exact saved-projection readback verifier
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 8c1891440c4b939b5f234d91ee5d6892f88dabf4
+          ref: bc28f2ba0f2d8b9c32672bbf361805111f82d915
           path: .g11-saved-readback-guard
           sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
           persist-credentials: false
@@ -809,6 +809,16 @@ jobs:
           sparse-checkout: g11/wild_pack/v1/goripan_public_projection_v1.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Checkout the immutable public HTTP readback helper
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 755214257eb85b1faed3c14d8187da3159ee81be
+          path: .g11-http-readback-guard
+          sparse-checkout: scripts/hot_delta_transport_v1.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Verify the frozen HTTP client matches the tested source
+        run: cmp scripts/hot_delta_transport_v1.py .g11-http-readback-guard/scripts/hot_delta_transport_v1.py
       - name: Prove saved-only readback retains the identical bound public LOCK rows
         env:
           WILD4_PUBLICATION_SOURCE_PATH: .g11-publication-source-guard/g11/wild_pack/v1/goripan_public_projection_v1.py

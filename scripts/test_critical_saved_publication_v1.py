@@ -394,7 +394,9 @@ class ExcludedNoBodyTransportTests(unittest.TestCase):
         source_sha = hot.hash_bytes(hot.compact(self.site))
         if self.posts and self.corrupt_readback:
             value['races'][0]['wild_pack']['changed'] = None
-        return value, {'x-g11-source-feed-sha256': source_sha}, hot.compact(value)
+        raw=hot.compact(value)
+        return value, {'x-g11-source-feed-sha256': source_sha,
+                       'x-g11-feed-sha256':hot.hash_bytes(raw)}, raw
 
     def send(self, args, **kwargs):
         # Substitute only the remote Site; reject missing/invalid CAS versions.
@@ -422,7 +424,10 @@ class ExcludedNoBodyTransportTests(unittest.TestCase):
              patch.dict(os.environ, {'G11_SYNC_OIDC': 'fixture-only', 'GITHUB_OUTPUT': 'output'}), \
              redirect_stdout(io.StringIO()) as output:
             try:
-                hot.publish(self.feed_path, 'https://example.invalid')
+                verified=hot.publish(self.feed_path, 'https://example.invalid')
+                self.assertIsInstance(verified,tuple)
+                self.assertEqual(verified[0],json.loads(verified[2]))
+                self.assertEqual(verified[1]['x-g11-feed-sha256'],hot.hash_bytes(verified[2]))
             finally:
                 self.assertEqual(self.feed_path.read_bytes(), original)
                 self.assertEqual((self.incoming, self.accepted), before)
