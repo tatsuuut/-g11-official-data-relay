@@ -337,7 +337,7 @@ def fetch(url: str, *, token: str | None = None) -> tuple[dict, dict[str, str], 
     header_path = Path(".relay-output/hot-get-headers.txt")
     authorization = ["-H", "Authorization: Bearer " + token] if token else []
     subprocess.run([
-        "curl", "--fail-with-body", "--silent", "--show-error", "--location",
+        "curl", "--fail-with-body", "--silent", "--show-error", "--location", "--compressed",
         "--max-time", "35", "--dump-header", str(header_path),
         "--output", str(body_path), *authorization, url,
     ], check=True)
@@ -689,11 +689,11 @@ def publish_night_transaction(delta: dict, incoming: dict, origin: str, token: s
 
 
 def publish(feed_path: Path, origin: str, research_projection: dict | None = None,
-            *, sequence_offset: int = 1) -> None:
+            *, sequence_offset: int = 1) -> tuple[dict, dict[str, str], bytes] | None:
     incoming = json.loads(feed_path.read_text(encoding="utf-8"))
     day = incoming["operational_date_jst"]
     url = f"{origin}/api/g11-feed?date={day}"
-    accepted, headers, _ = fetch(url)
+    accepted, headers, accepted_raw = fetch(url)
     base_sha = headers["x-g11-source-feed-sha256"]
     delta = create_delta(incoming, accepted, base_sha, research_projection, sequence_offset=sequence_offset)
     data = compact(delta)
@@ -711,7 +711,7 @@ def publish(feed_path: Path, origin: str, research_projection: dict | None = Non
         print("G11_HOT_DELTA_NO_CHANGE=PASS")
         Path(".relay-output/hot-delta-accepted").write_text(base_sha + "\n")
         Path(os.environ["GITHUB_OUTPUT"]).open("a").write("feed_sha=" + base_sha + "\n")
-        return
+        return accepted, headers, accepted_raw
     token = os.environ["G11_SYNC_OIDC"]
     if incoming["stage"] == "NIGHT":
         body = publish_night_transaction(delta, incoming, origin, token)
@@ -800,6 +800,7 @@ def publish(feed_path: Path, origin: str, research_projection: dict | None = Non
     Path(".relay-output/hot-delta-readback.json").write_bytes(raw)
     Path(os.environ["GITHUB_OUTPUT"]).open("a").write("feed_sha=" + body["payload_sha256"] + "\n")
     print("G11_HOT_DELTA_READBACK=PASS SOURCE_SHA=" + body["payload_sha256"])
+    return readback, next_headers, raw
 
 
 if __name__ == "__main__":
