@@ -771,7 +771,7 @@ jobs:
       - name: Checkout exact saved-projection readback verifier
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 06073829803c731064ae2f88474d7844e1b9d6e1
+          ref: 8c1891440c4b939b5f234d91ee5d6892f88dabf4
           path: .g11-saved-readback-guard
           sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
           persist-credentials: false
@@ -799,6 +799,22 @@ jobs:
           WILD4_BOUND_WORKFLOW_PATH: .g11-saved-readback-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
           PYTHONPATH: scripts
         run: python3 -m unittest test_runtime_preparation_v1.BoundDayReadTests -v
+      - name: Checkout the exact immutable retained-publication reader
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: 7260ad5833722c2b803612507ea4fc7cc98ad91d
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-publication-source-guard
+          sparse-checkout: g11/wild_pack/v1/goripan_public_projection_v1.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Prove saved-only readback retains the identical bound public LOCK rows
+        env:
+          WILD4_PUBLICATION_SOURCE_PATH: .g11-publication-source-guard/g11/wild_pack/v1/goripan_public_projection_v1.py
+          WILD4_COMPACT_WORKFLOW_PATH: .g11-saved-readback-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
+          PYTHONPATH: scripts
+        run: python3 -m unittest test_wild4_checkpoint_handoff_v1.RetainedPublicationViewTests -v
       - name: Verify isolated future boundary uses the tested contract
         run: |
           python3 - <<'PYGUARD'

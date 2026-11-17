@@ -265,3 +265,14 @@ projection still retains that fallback; new or unpublished races are never
 suppressed. Prepared children first attempt the exact compact cache restore.
 Only an actual miss uses the bounded metadata wait and a second exact restore.
 All authenticated reconstruction and protected runtime checks remain unchanged.
+
+Marugame 10 reached the new saved input after 108 seconds but its saved screen
+still reached 190.937 seconds. The projector's prior-feed GET alone returned
+10,977,301 display-enriched bytes. Its exact frozen private implementation uses
+the published feed only to recover already accepted, fully bound WILD4 rows
+when the old packet is no longer in the rolling window. It reads no display
+enrichment or other engine's forecast from that argument. That GET now uses the
+same saved-only WILD4 readback and additionally checks its explicit scope;
+the existing full body SHA256, date, status and immutable row checks remain.
+CI executes the exact retained-reader function, verifies its AST fingerprint,
+and proves identical recovered rows with/without unrelated display enrichment.

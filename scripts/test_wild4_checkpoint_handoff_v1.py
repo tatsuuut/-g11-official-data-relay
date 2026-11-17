@@ -443,6 +443,44 @@ class CurrentCompactWorkflowTests(unittest.TestCase):
         self.assertIn('prewarm: ${{steps.prewarm.outputs.status}}',parent)
 
 
+@unittest.skipUnless(os.environ.get('WILD4_PUBLICATION_SOURCE_PATH') and os.environ.get('WILD4_COMPACT_WORKFLOW_PATH'),
+                     'exact private retained-publication reader and child are provided by CI')
+class RetainedPublicationViewTests(unittest.TestCase):
+    def test_only_retained_bound_own_rows_consume_the_published_feed(self):
+        source=Path(os.environ['WILD4_PUBLICATION_SOURCE_PATH']).read_text();tree=ast.parse(source)
+        retained=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='retained_public_row')
+        self.assertEqual(hashlib.sha256(ast.dump(retained,include_attributes=False).encode()).hexdigest(),
+                         'addcdff45ebf35c0a4c4a38e2c34f8b3d41caa8633212e857b8cf6664c893405')
+        projector=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='public_projection')
+        uses=[n for n in ast.walk(projector) if isinstance(n,ast.Name) and n.id=='published_feed' and isinstance(n.ctx,ast.Load)]
+        self.assertEqual(len(uses),1)
+        call=next(n for n in ast.walk(projector) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='retained_public_row')
+        self.assertIn(uses[0],call.args)
+        def require(ok,code):
+            if not ok:raise ValueError(code)
+        scope={'require':require}
+        exec(compile(ast.Module(body=[retained],type_ignores=[]),'<exact-retained-publication-reader>','exec'),scope)
+        display={'race_key':'20261117-15-10','bet_count':2,'bets':['1-2-3','1-3-2']}
+        lock={'INPUT_PACKET_SHA256':'a'*64,'ODDS_SNAPSHOT_SHA256':'b'*64,'CONTENT_SHA256':'c'*64}
+        row={**display,'upstream_packet_sha256':lock['INPUT_PACKET_SHA256'],'odds_snapshot_sha256':lock['ODDS_SNAPSHOT_SHA256'],
+             'lock_sha256':lock['CONTENT_SHA256'],'head':1,'head_source_stage':'PRE_RACE',
+             'second_ranking':[2,3,4,5,6],'third_ranking':[3,4,5,6],'model_versions':{k:'same-frozen-version' for k in ('HEAD','SECOND','THIRD')}}
+        feed={'status':'PASS','operational_date_jst':'2026-11-17','goripan':{'status':'VERIFIED_CANONICAL_PROJECTION'},
+              'races':[{'key':display['race_key'],'wild_pack':{'wild4':{'goripan':row}}}]}
+        enriched=copy.deepcopy(feed);enriched['optional_display_research']={'unrelated':'excluded from saved transport'}
+        enriched['races'][0]['abeken_display']={'unrelated':'never read by this projector'}
+        read=scope['retained_public_row'];self.assertEqual(read(feed,display,lock,'2026-11-17'),read(enriched,display,lock,'2026-11-17'))
+        for mutate in (lambda f:f.update(operational_date_jst='2026-11-16'),lambda f:f['races'].clear(),
+                       lambda f:f['races'][0]['wild_pack']['wild4']['goripan'].update(lock_sha256='d'*64)):
+            bad=copy.deepcopy(feed);mutate(bad)
+            with self.assertRaises(ValueError):read(bad,display,lock,'2026-11-17')
+        child=Path(os.environ['WILD4_COMPACT_WORKFLOW_PATH']).read_text()
+        code=child.split("          day=os.environ['OPERATIONAL_DATE']\n          feed,headers,raw=hot.fetch(",1)[1].split('          PYPUBLISHEDLOCK',1)[0]
+        self.assertIn('?view=wild4-readback&date=',code)
+        self.assertIn("headers.get('x-g11-readback-scope')!='WILD4_SAVED_PROJECTION'",code)
+        self.assertIn("feed.get('operational_date_jst')!=day",code)
+
+
 @unittest.skipUnless(os.environ.get('WILD4_READBACK_WORKFLOW_PATH'), 'exact publisher workflow is provided by CI')
 class SavedReadbackTransportTests(unittest.TestCase):
     def exercise(self, change=None, scope='WILD4_SAVED_PROJECTION', bad_sha=False, failures=()):
