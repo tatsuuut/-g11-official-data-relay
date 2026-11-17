@@ -89,11 +89,15 @@ class CheckpointBindingTests(unittest.TestCase):
 
 
 class EarlyDispatchTests(unittest.TestCase):
-    def exercise(self, count, dispatch_status=0):
+    def exercise(self, count, dispatch_status=0, early_attempted=None, early_sent=''):
+        if early_attempted is None:
+            return OverlappedCheckpointDispatchTests().exercise(count=count, dispatch_status=dispatch_status)
         workflow = (ROOT / '.github/workflows/g11-free-runner.yml').read_text()
         step = workflow.split('        id: wild4-early\n', 1)[1].split(
             '      - name:', 1)[0]
         script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        script = script.replace('${{steps.critical-save.outputs.wild4-attempted}}', early_attempted).replace(
+            '${{steps.critical-save.outputs.wild4-sent}}', early_sent)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); (root / '.relay-output').mkdir()
             (root / '.relay-output/result.json').write_text(json.dumps({'CRITICAL': {
@@ -153,6 +157,102 @@ class EarlyDispatchTests(unittest.TestCase):
         self.assertIn("inputs.predeadline_checkpoint_key == '' && inputs.night_checkpoint_key == ''", source)
         self.assertIn("inputs.predeadline_checkpoint_key || inputs.night_checkpoint_key || format(", source)
         self.assertIn("steps.canonical-cache.outputs.cache-hit }}' != true", source)
+
+
+    def test_accepted_overlap_is_propagated_without_another_dispatch(self):
+        result, output, calls = self.exercise(2, early_attempted='true', early_sent='true')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('sent=true', output)
+        self.assertEqual(calls, '')
+
+    def test_ambiguous_overlap_is_not_reposted_immediately(self):
+        result, output, calls = self.exercise(2, early_attempted='true')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('sent=true', output)
+        self.assertEqual(calls, '')
+
+
+class OverlappedCheckpointDispatchTests(unittest.TestCase):
+    def exercise(self, count=2, status='PASS', key=KEY, dispatch_status=0, corrupt=False, fallback=False):
+        action = (ROOT / '.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        name = 'Start WILD4 after verified delayed checkpoint visibility' if fallback else 'Start independently verified WILD4 worker after checkpoint save'
+        block = action.split('    - name: '+name+'\n', 1)[1].split('    - name:', 1)[0]
+        code = textwrap.dedent(block.split('      run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / '.relay-cache').mkdir(); (root / '.relay-output').mkdir(); (root / 'bin').mkdir()
+            archive = root / '.relay-cache/state.tgz.gpg'
+            original = b'complete authenticated encrypted state'
+            archive.write_bytes(b'corrupt' if corrupt else original)
+            (root / '.relay-output/publication-state.sha256').write_text(
+                hashlib.sha256(original).hexdigest() + '  .relay-cache/state.tgz.gpg\n')
+            (root / '.relay-output/result.json').write_text(json.dumps({'CRITICAL': {
+                'CRITICAL_CHECKPOINT_STATUS': status, 'LAST_TIMELY_SOURCE_COUNT': count}}))
+            gh = root / 'bin/gh'
+            gh.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$TEST_CALLS"\nexit "$TEST_STATUS"\n')
+            gh.chmod(0o755)
+            output, calls = root / 'output', root / 'calls'
+            env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
+                OPERATIONAL_DATE=DAY, CHECKPOINT_KEY=key, GITHUB_RUN_ID='123', GITHUB_OUTPUT=str(output),
+                TEST_CALLS=str(calls), TEST_STATUS=str(dispatch_status), DISPATCH_STAGE='AFTER_DELAYED_VISIBILITY' if fallback else 'DURING_READBACK')
+            result = subprocess.run(['bash', '-c', code], cwd=root, env=env, capture_output=True, text=True, timeout=15)
+            return result, output.read_text() if output.exists() else '', calls.read_text() if calls.exists() else ''
+
+    def test_exact_saved_input_can_prepare_child_before_parent_readback_without_opening_publication(self):
+        result, output, calls = self.exercise()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, 'attempted=true\nsent=true\n')
+        self.assertIn('predeadline_checkpoint_key=' + KEY, calls)
+        action = (ROOT / '.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        self.assertLess(action.index('name: Save complete encrypted state'), action.index('id: wild4-dispatch'))
+        self.assertLess(action.index('id: wild4-dispatch'), action.index('id: readback\n'))
+        self.assertIn('value: ${{ steps.verified.outputs.ready }}', action)
+
+    def test_empty_capture_never_launches_an_observer(self):
+        result, output, calls = self.exercise(count=0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, ''); self.assertEqual(calls, '')
+
+    def test_bad_checkpoint_or_capture_stops_before_dispatch(self):
+        for kwargs in ({'key': KEY+'4'}, {'key': KEY.replace('critical', 'published')},
+                       {'status': 'PARTIAL'}, {'corrupt': True}):
+            with self.subTest(kwargs=kwargs):
+                result, output, calls = self.exercise(**kwargs)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(output, ''); self.assertEqual(calls, '')
+
+    def test_failed_dispatch_retains_attempt_without_claiming_acceptance(self):
+        result, output, calls = self.exercise(dispatch_status=1)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(output, 'attempted=true\n')
+        self.assertEqual(calls.splitlines().count('workflow'), 1)
+
+    def test_cache_visibility_probe_is_exact_and_does_not_download_or_use_prefix_fallback(self):
+        action = (ROOT / '.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        probe = action.split('    - name: Check exact saved checkpoint visibility without downloading\n', 1)[1].split('    - name:', 1)[0]
+        self.assertIn('lookup-only: true', probe); self.assertNotIn('restore-keys:', probe)
+        self.assertIn('key: ${{ inputs.cache-key }}', probe)
+        early = action.split('    - name: Start independently verified WILD4 worker after checkpoint save\n', 1)[1].split('    - name:', 1)[0]
+        self.assertIn("steps.wild4-visible.outputs.cache-hit == 'true'", early)
+
+    def test_delayed_visibility_falls_back_only_after_successful_full_readback(self):
+        action = (ROOT / '.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        block = action.split('    - name: Start WILD4 after verified delayed checkpoint visibility\n', 1)[1]
+        condition = next(line.split('if: ',1)[1] for line in block.splitlines() if '      if: ' in line)
+        for ready, visible, expected in [('', '', False), ('true', 'true', False), ('true', '', True)]:
+            expression = condition.replace('inputs.wild4-day',repr(DAY)).replace('steps.verified.outputs.ready',repr(ready)).replace('steps.wild4-visible.outputs.cache-hit',repr(visible))
+            self.assertEqual(eval(expression.replace('&&',' and '), {'__builtins__':{}}, {}),expected)
+        result, output, calls = self.exercise(fallback=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, 'attempted=true\nsent=true\n')
+        self.assertIn('predeadline_checkpoint_key='+KEY,calls)
+        self.assertIn('AFTER_DELAYED_VISIBILITY', result.stdout)
+
+    def test_delayed_visibility_preserves_bad_key_and_corrupt_state_rejection(self):
+        for kwargs in ({'key':KEY+'4'},{'corrupt':True},{'status':'PARTIAL'}):
+            with self.subTest(kwargs=kwargs):
+                result, output, calls = self.exercise(fallback=True, **kwargs)
+                self.assertNotEqual(result.returncode,0);self.assertEqual(output,'');self.assertEqual(calls,'')
 
 
 class ProtectedLogicTests(unittest.TestCase):

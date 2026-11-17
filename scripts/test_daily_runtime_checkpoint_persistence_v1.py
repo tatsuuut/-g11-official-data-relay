@@ -87,6 +87,7 @@ class ExactReadbackRetryTests(unittest.TestCase):
 
         def expression(value):
             value = value.removeprefix('${{').removesuffix('}}').strip()
+            value = value.replace('inputs.wild4-day', repr(''))
             value = re.sub(r'steps\.([\w-]+)\.outputs\.cache-hit',
                            lambda match: repr(outputs.get(match[1], '')), value)
             return eval(value.replace('||', ' or ').replace('&&', ' and '),
