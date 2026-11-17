@@ -730,6 +730,20 @@ jobs:
           "$(go env GOPATH)/bin/actionlint" .github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml "$WILD4_WORKFLOW_PATH"
           python3 -m unittest discover -s scripts -p test_wild4_checkpoint_handoff_v1.py -v
 
+      - name: Checkout exact saved-projection readback verifier
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 2b6f5719fc815e99b16f7b2e8ccdd18f8aeec9ea
+          path: .g11-saved-readback-guard
+          sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
+          persist-credentials: false
+      - name: Verify saved LOCK readback without optional display research
+        env:
+          WILD4_READBACK_WORKFLOW_PATH: .g11-saved-readback-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
+          PYTHONPATH: scripts
+        run: |
+          "$(go env GOPATH)/bin/actionlint" "$WILD4_READBACK_WORKFLOW_PATH"
+          python3 -m unittest test_wild4_checkpoint_handoff_v1.SavedReadbackTransportTests -v
       - name: Verify isolated future boundary uses the tested contract
         run: |
           python3 - <<'PYGUARD'

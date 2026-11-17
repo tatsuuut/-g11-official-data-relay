@@ -123,3 +123,31 @@ Any future learning action must preserve the original proof/history, use the
 existing model-specific authorization, and remain separate from completed
 prediction/settlement/publication. Do not repeat donor downloads or original
 recovery: the receipt makes subsequent normal Nov 8 runs a verified no-op.
+
+## November 17: exact saved-projection readback
+
+Run 43990062965 saved its WILD4 projection but its final full-display GET returned
+HTTP 500. The later run 43991830607 passed, so a successful projection POST and
+exact GET verification remain separate; this change does not relabel the failed
+run or omit its final verification requirement.
+
+The publisher now uses `view=wild4-readback` and requires the explicit
+`WILD4_SAVED_PROJECTION` response scope. This read-only view uses the existing
+stored-feed and WILD4 projection validation, returning the same exact LOCKs,
+lifecycle and response SHA without assembling optional research or scheduling
+intraday official acquisition. Corrupt source bytes, a wrong response scope,
+wrong status, altered LOCKs or a different lifecycle still fail verification.
+
+The child source is pinned at 2b6f5719fc815e99b16f7b2e8ccdd18f8aeec9ea, with only
+the view constant and scope check changed from b6432a78. All inference, model,
+learning, deadline and settlement code is byte-identical. Dedicated contract CI
+executes this exact verifier using synthetic saved projections and rejects the
+five corruption cases. The Site receiver must be published before this caller.
+
+A current parent/child pair confirmed dispatch at 09:57:49 JST before the
+parent's full readback at 09:58:12, but odds were still 260 seconds old when the
+child was ready. The complete encrypted cache was about 1.89 GB and its save
+step took 98.7 seconds. Compression-level microbenchmarks do not establish an
+end-to-end remedy; the existing compression is retained. These remaining full
+checkpoint transfer and restore costs are not reported as resolved by the
+readback repair, and notification quality/freshness thresholds are unchanged.
