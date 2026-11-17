@@ -180,7 +180,7 @@ def summarize(artifact, day, acquisition, *, now=None):
     details = sorted(issues.values(), key=lambda row: row['source_id'])[:MAX_DETAILS]
     for row in details:
         try: row.update(latest_rejection(artifact, tasks[row['source_id']], day, now))
-        except (ValueError, KeyError, OSError): row['evidence_status'] = 'UNVERIFIED'
+        except (ValueError, KeyError, OSError, RuntimeError, TypeError): row['evidence_status'] = 'UNVERIFIED'
     terminal = any('MISSED' in row['categories'] or 'UNAVAILABLE' in row['categories'] for row in issues.values())
     return {'schema': SCHEMA, 'operational_date_jst': day,
             'status': 'PARTIAL' if terminal else 'DEFERRED' if issues else 'PASS',

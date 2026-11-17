@@ -111,6 +111,10 @@ class HealthTests(unittest.TestCase):
         issue = self.summary()['issues'][0]
         self.assertEqual(issue['evidence_status'], 'UNVERIFIED')
         self.assertNotIn('official_deadline_jst', issue)
+        with patch.object(self.artifact, 'rejected_response_receipt', side_effect=RuntimeError('REJECTED_RESPONSE_READBACK')):
+            issue = self.summary()['issues'][0]
+        self.assertEqual(issue['evidence_status'], 'UNVERIFIED')
+        self.assertNotIn('official_deadline_jst', issue)
 
     def test_evidence_from_another_day_future_time_or_url_is_rejected(self):
         for field, value in [('CAPTURED_AT_JST', '2026-11-16T10:50:00+09:00'),
