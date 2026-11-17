@@ -1745,7 +1745,9 @@ jobs:
           import hot_delta_transport_v1 as hot
           pathlib.Path('.relay-output').mkdir(exist_ok=True)
           day=os.environ['OPERATIONAL_DATE']
-          feed,_,raw=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=v53-final&date='+day)
+          feed,headers,raw=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=wild4-readback&date='+day)
+          if headers.get('x-g11-readback-scope')!='WILD4_SAVED_PROJECTION':
+              raise SystemExit('GORIPAN_PRIOR_PUBLIC_FEED_SCOPE')
           print('GORIPAN_PRIOR_PUBLIC_FEED_BYTES='+str(len(raw))+' LIMIT='+str(16*1024*1024)+' STAGE='+str(feed.get('stage')))
           if len(raw)>16*1024*1024 or feed.get('status')!='PASS' or feed.get('operational_date_jst')!=day:
               raise SystemExit('GORIPAN_PRIOR_PUBLIC_FEED_BINDING')
