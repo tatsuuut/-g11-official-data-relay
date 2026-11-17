@@ -34,12 +34,14 @@ class NativeRestorePreparationTests(unittest.TestCase):
                 self.assertFalse(archive.prepare_gzip_acceleration())
                 self.assertEqual(command.call_args.kwargs['timeout'],10)
 
-    def test_public_runtime_action_prepares_it_before_restore_and_keeps_parser_readbacks_dependency_free(self):
+    def test_public_runtime_action_does_not_wait_for_optional_os_packages(self):
         action=(Path(__file__).resolve().parents[1]/'.github/actions/g11-public-python/action.yml').read_text()
-        block=action.split('    - name: Prepare optional standard gzip for complete state restoration\n',1)[1].split('    - name:',1)[0]
-        self.assertIn("inputs.enabled == 'true' && inputs.profile == 'runtime'",block)
-        self.assertIn('encrypt_runtime_state_v1.py" --prepare-gzip',block)
-        self.assertLess(action.index('--prepare-gzip'),action.index('name: Restore only the exact public environment'))
+        self.assertNotIn('--prepare-gzip',action)
+        self.assertIn("if: inputs.enabled == 'true'",action)
+        self.assertIn('path: .relay-cache/state.tgz.gpg',action)
+        self.assertIn('key: ${{ inputs.prewarm-base-key }}',action)
+        self.assertNotIn('restore-keys:',action)
+        self.assertIn("steps.prewarm-cache.outputs.cache-hit == 'true'",action)
 
 
 class StateRestoreTests(unittest.TestCase):

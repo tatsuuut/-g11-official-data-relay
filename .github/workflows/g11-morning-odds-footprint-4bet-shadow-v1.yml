@@ -35,6 +35,10 @@ on:
         description: Exact authenticated complete reconstruction checkpoint
         required: false
         type: string
+      prewarm_base_key:
+        description: Exact encrypted base prepared before the new official input is acquired
+        required: false
+        type: string
       night_checkpoint_key:
         description: Exact verified NIGHT publication checkpoint from the existing relay
         required: false
@@ -467,10 +471,11 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@0575399b44989a830c2ccd290c1af4910a8e6ece
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@e239c98d422a7110ec0b7f181e74f99f1e455661
     with:
       predeadline_checkpoint_key: ${{ inputs.predeadline_checkpoint_key || '' }}
       predeadline_delta_key: ${{ inputs.predeadline_delta_key || '' }}
+      prewarm_base_key: ${{ inputs.prewarm_base_key || '' }}
       night_checkpoint_key: ${{ inputs.night_checkpoint_key || '' }}
       lineage_readback_date: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[goripan-promotion]') && '2026-10-07' || '' }}
     secrets: inherit

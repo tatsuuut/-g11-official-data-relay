@@ -78,6 +78,78 @@ def checkpoint_day(key):
     return match.group(1)
 
 
+def prewarm_identity(base_key, checkpoint_key):
+    """A preparation key never authorizes inference or prefix fallback."""
+    day = checkpoint_day(base_key)
+    match = re.fullmatch(r'g11-state-v4-critical-' + re.escape(day) + r'-([0-9]+)', checkpoint_key)
+    require(match is not None and int(base_key.split(day + '-')[1].split('-')[0])
+            < int(match.group(1)), 'PREWARM_IDENTITY')
+    return day
+
+
+def prepare_warm_base(base_key, checkpoint_key, *, secret, folder, cipher):
+    from extract_runtime_state_v1 import extract_complete_state
+    day = prewarm_identity(base_key, checkpoint_key)
+    folder = Path(folder)
+    root, archive = folder / 'g11-prewarm-base', folder / 'g11-prewarm-base.tgz'
+    retained = folder / 'g11-prewarm-cipher.tgz.gpg'
+    require(not root.exists() and not root.is_symlink() and not archive.exists()
+            and not retained.exists(), 'PREWARM_DESTINATION')
+    try:
+        with secret_pipe(secret) as fd:
+            result = subprocess.run(['gpg', '--batch', '--yes', '--pinentry-mode', 'loopback',
+                '--passphrase-fd', str(fd), '--decrypt', '--output', str(archive), str(cipher)],
+                pass_fds=(fd,), capture_output=True, check=False)
+        require(result.returncode == 0, 'PREWARM_AUTHENTICATION')
+        extract_complete_state(archive, root)
+        state = json.loads((root / 'relay-state.json').read_bytes())
+        require(state.get('OPERATIONAL_DATE_JST') == day and state.get('MORNING_COMPLETE') is True,
+                'PREWARM_DAY')
+        os.replace(cipher, retained)
+    except BaseException:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+    finally:
+        archive.unlink(missing_ok=True)
+    print('WILD4_PREWARM_BASE=AUTHENTICATED_COMPLETE', flush=True)
+    return base_key
+
+
+def wait_for_compact(base_key, checkpoint_key, delta_key, *, maximum=420, clock=None, sleeper=None, query=None):
+    """Poll only exact saved cache metadata; never fetch official race inputs."""
+    day = prewarm_identity(base_key, checkpoint_key)
+    run = checkpoint_key.split(day + '-')[1]
+    require(delta_key == f'g11-state-v4-delta-{day}-{run}' and 0 < maximum <= 420, 'PREWARM_WAIT')
+    clock, sleeper = clock or time.monotonic, sleeper or time.sleep
+    repository = os.environ['GITHUB_REPOSITORY']
+    require(repository == 'tatsuuut/-g11-official-data-relay', 'PREWARM_REPOSITORY')
+    def read(path):
+        response = subprocess.run(['gh', 'api', 'repos/' + repository + path],
+            capture_output=True, text=True, timeout=8, check=True)
+        return json.loads(response.stdout)
+    query = query or read
+    end = clock() + maximum
+    while clock() < end:
+        try:
+            caches = query('/actions/caches?key=' + delta_key + '&ref=refs%2Fheads%2Fmain&per_page=100')
+            if any(row.get('key') == delta_key and row.get('ref') == 'refs/heads/main'
+                   for row in caches.get('actions_caches', [])):
+                print('WILD4_PREWARM_HANDOFF=EXACT_CACHE_VISIBLE', flush=True)
+                return True
+            parent = query('/actions/runs/' + run)
+            require(str(parent.get('id')) == run, 'PREWARM_PARENT_RUN')
+            if parent.get('status') == 'completed':
+                print('WILD4_PREWARM_HANDOFF=NO_COMPACT_INPUT', flush=True)
+                return False
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            print('WILD4_PREWARM_HANDOFF=METADATA_RETRY', flush=True)
+        remaining = end - clock()
+        if remaining > 0:
+            sleeper(min(10, remaining))
+    print('WILD4_PREWARM_HANDOFF=BOUNDED_WAIT_EXPIRED', flush=True)
+    return False
+
+
 def validate_inventory(value):
     require(isinstance(value, dict) and set(value) == {'files', 'directories'}, 'INVENTORY')
     files, dirs = value['files'], value['directories']

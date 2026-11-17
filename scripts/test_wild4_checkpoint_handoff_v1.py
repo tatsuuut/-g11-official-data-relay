@@ -300,7 +300,7 @@ class OverlappedCheckpointDispatchTests(unittest.TestCase):
 
 
 class CompactDispatchTests(unittest.TestCase):
-    def exercise(self, *, corrupt=False, status='PASS', count=1, dispatch_status=0):
+    def exercise(self, *, corrupt=False, status='PASS', count=1, dispatch_status=0, prewarm=''):
         import encrypt_runtime_state_v1 as archive
         action=(ROOT/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
         block=action.split('    - name: Start WILD4 from a verified full reconstruction before large backup transfer\n',1)[1].split('    - name:',1)[0]
@@ -316,7 +316,8 @@ class CompactDispatchTests(unittest.TestCase):
             if corrupt:cipher.write_bytes(b'corrupt remote readback')
             output=root/'output';calls=root/'calls'
             env={**os.environ,'GITHUB_OUTPUT':str(output),'TEST_CALLS':str(calls),'GITHUB_RUN_ID':'123',
-                'OPERATIONAL_DATE':DAY,'CHECKPOINT_KEY':KEY,'DELTA_KEY':delta_key,'TEST_STATUS':str(dispatch_status)}
+                'OPERATIONAL_DATE':DAY,'CHECKPOINT_KEY':KEY,'DELTA_KEY':delta_key,'TEST_STATUS':str(dispatch_status),
+                'PREWARM_STATUS':prewarm}
             stub='gh() { printf "%s\\n" "$@" >> "$TEST_CALLS"; return "$TEST_STATUS"; }\n timeout() { shift 3; "$@"; }\n'
             result=subprocess.run(['bash','-c',stub+script],cwd=root,env=env,text=True,capture_output=True,timeout=10)
             return result,output.read_text() if output.exists() else '',calls.read_text() if calls.exists() else ''
@@ -343,6 +344,14 @@ class CompactDispatchTests(unittest.TestCase):
         for name in ('Start independently verified WILD4 worker after checkpoint save','Start WILD4 after verified delayed checkpoint visibility'):
             block=action.split('    - name: '+name+'\n',1)[1].split('    - name:',1)[0]
             self.assertIn("steps.wild4-compact.outputs.attempted != 'true'",block)
+
+    def test_prewarmed_compact_handoff_is_not_dispatched_twice_and_still_checks_input_integrity(self):
+        for prewarm,expected in [('sent','attempted=true\nsent=true\n'),('attempted','attempted=true\n')]:
+            result,output,calls=self.exercise(prewarm=prewarm)
+            self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(output,expected);self.assertEqual(calls,'')
+            for kwargs in ({'corrupt':True},{'count':0},{'status':'PARTIAL'}):
+                result,output,calls=self.exercise(prewarm=prewarm,**kwargs)
+                self.assertNotEqual(result.returncode,0);self.assertEqual(output,'');self.assertEqual(calls,'')
 
 
 @unittest.skipUnless(os.environ.get('WILD4_COMPACT_WORKFLOW_PATH'), 'exact compact child is provided by CI')
@@ -397,6 +406,31 @@ class CurrentCompactWorkflowTests(unittest.TestCase):
                 if ok:exec(compile(code,'<exact-compact-binding>','exec'),scope)
                 else:
                     with self.assertRaises(SystemExit):exec(compile(code,'<exact-compact-binding>','exec'),scope)
+
+    def test_prepared_base_cannot_open_inference_without_new_authenticated_exact_handoff(self):
+        source=self.source()
+        block=source.split('      - name: Verify current canonical state availability\n',1)[1].split('      - name:',1)[0]
+        script=textwrap.dedent(block.split('        run: |\n',1)[1])
+        for warm,base,reuse,hit,ready,ok in [('base','','','',False,True),
+                ('base','verified-base','true','',True,True),
+                ('base','verified-base','false','',False,False),
+                ('','','','',False,False)]:
+            values={'inputs.prewarm_base_key':warm,'steps.compact.outputs.base_key':base,
+                'steps.compact.outputs.use_prewarm':reuse,'steps.canonical-cache.outputs.cache-hit':hit,
+                'inputs.predeadline_checkpoint_key || inputs.night_checkpoint_key':KEY}
+            code=script
+            for key,value in values.items():code=code.replace('${{ '+key+' }}',value)
+            with tempfile.TemporaryDirectory() as tmp:
+                output=Path(tmp)/'outputs'
+                result=subprocess.run(['bash','-e','-c',code],cwd=tmp,env={**os.environ,'GITHUB_OUTPUT':str(output)},capture_output=True,text=True)
+                self.assertEqual(result.returncode==0,ok,result.stderr)
+                self.assertEqual('ready=true' in (output.read_text() if output.exists() else ''),ready)
+        decrypt=source.split('      - name: Decrypt verified state and candidate\n',1)[1].split('      - name:',1)[0]
+        self.assertIn("os.replace(root/'g11-prewarm-cipher.tgz.gpg'",decrypt)
+        self.assertLess(decrypt.index("os.rename(root/'g11-prewarm-base'"),decrypt.index('apply_delta('))
+        parent=(ROOT/'.github/workflows/g11-free-runner.yml').read_text()
+        self.assertLess(parent.index('id: prewarm'),parent.index('name: Decrypt and validate restored state'))
+        self.assertIn('prewarm: ${{steps.prewarm.outputs.status}}',parent)
 
 
 @unittest.skipUnless(os.environ.get('WILD4_READBACK_WORKFLOW_PATH'), 'exact publisher workflow is provided by CI')

@@ -59,6 +59,41 @@ def require(ok, code):
         raise RuntimeError(code)
 
 
+def prewarm_worker(day, phase, *, now=None):
+    """Start preparation only; the child still waits for authenticated new input."""
+    import subprocess
+    selected = os.environ.get('SELECTED_CHECKPOINT', '')
+    require(selected and selected == os.environ.get('RESTORED_CHECKPOINT'),
+            'G11_SELECTED_CHECKPOINT_MISMATCH')
+    print('G11_SELECTED_CHECKPOINT_RESTORED=PASS', flush=True)
+    now = now or datetime.now(JST)
+    run = os.environ.get('GITHUB_RUN_ID', '')
+    match = re.fullmatch(r'g11-state-v4-(?:critical|published)-' + re.escape(day)
+                        + r'-([0-9]+)(?:-[0-9]+-checkpoint)?', selected)
+    if (phase != 'predeadline' or now.date().isoformat() != day or not match
+            or not run.isdigit() or int(match.group(1)) >= int(run)
+            or os.environ.get('GITHUB_RUN_ATTEMPT') != '1'):
+        print('WILD4_PREWARM=NOT_CURRENT_LIVE')
+        return
+    def status(value):
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+            output.write('status=' + value + '\n')
+    status('attempted')
+    try:
+        result = subprocess.run(['gh', 'workflow', 'run', '364923281',
+            '-f', 'mode=wild4', '-f', 'operational_date=' + day,
+            '-f', f'predeadline_checkpoint_key=g11-state-v4-critical-{day}-{run}',
+            '-f', f'predeadline_delta_key=g11-state-v4-delta-{day}-{run}',
+            '-f', 'prewarm_base_key=' + selected], capture_output=True, timeout=12, check=False)
+        if result.returncode == 0:
+            status('sent')
+            print('WILD4_PREWARM=ACCEPTED_BEFORE_CAPTURE', flush=True)
+        else:
+            print('WILD4_PREWARM=DISPATCH_UNCONFIRMED', flush=True)
+    except (OSError, subprocess.SubprocessError):
+        print('WILD4_PREWARM=DISPATCH_UNCONFIRMED', flush=True)
+
+
 def capture_boundary_delay(plan, saved_sources, now, maximum=300):
     """Wait once for the nearest capture boundary only when no race is due.
 
@@ -290,11 +325,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--day', required=True)
     parser.add_argument('--select-restore', action='store_true')
+    parser.add_argument('--prewarm', action='store_true')
+    parser.add_argument('--phase', default='')
     parser.add_argument('--continuation-delay', action='store_true')
     parser.add_argument('--rescue-continuation-delay', action='store_true')
     args = parser.parse_args()
     if args.select_restore:
         return select_restore(args.day)
+    if args.prewarm:
+        return prewarm_worker(args.day, args.phase)
     root = Path.cwd()
     if args.rescue_continuation_delay:
         result = json.loads((root / '.relay-output/result.json').read_bytes())
