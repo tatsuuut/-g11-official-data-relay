@@ -225,7 +225,9 @@ def main():
     artifact = OfficialArtifactStore(args.state_root.resolve() / 'store')
     tasks = _plan(artifact, args.day)
     verified = artifact.load_verified_snapshot('morning', 'official-day-input')
-    _, eligible, _ = CanonicalRunner._formal_prediction_scope(verified, failure_prefix='HEALTH_FORMAL_SCOPE')
+    from rescue_night_result_parser_v1 import official_input_compatibility
+    with official_input_compatibility():
+        _, eligible, _ = CanonicalRunner._formal_prediction_scope(verified, failure_prefix='HEALTH_FORMAL_SCOPE')
     tasks = {sid: task for sid, task in tasks.items() if task['RACE_KEY'] in set(eligible)}
     now = datetime.now(JST)
     # Existing saved snapshots, not current network pages, decide missingness.
