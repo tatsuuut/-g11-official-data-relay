@@ -51,3 +51,18 @@ payout aggregation, refreshed venue KPIs, missing/corrupt evidence, repair and
 retry, immutable captures, rejection of retroactive writes, future-only captures,
 and independent component failure reporting. Runtime verification must read back
 the persisted research publication and its actual result-through date.
+
+
+## Read-only candidate drill-down — November 17
+
+The existing isolated research checkout is pinned to `7e01975250f25c071208c5d418aab4fc2f78d948` for a one-day,
+read-only review of previously frozen 3-14-14 variants and the 13-15-35 follow-up.
+It runs after durable research projection construction, validates saved capture
+hashes/times and linked official outcomes, and emits a checksummed compact
+summary of every winning race, date/venue totals, fixed October 31 period split,
+largest-payout sensitivity, drawdown and losing streak. No condition is refit;
+no observation, model, prediction, LOCK, BET or canonical result is written.
+A diagnostic failure cannot block normal research persistence/publication.
+The optional diagnostic hook stops after November 17. Five focused tests pass,
+including late/corrupt captures, exact refund accounting, missing/nonestablished
+results, state immutability and failure/future-day isolation.
