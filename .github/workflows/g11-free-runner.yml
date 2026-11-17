@@ -375,26 +375,24 @@ jobs:
         if: steps.critical-encrypt.outputs.ready=='true'
         id: critical-save
         uses: ./.github/actions/g11-publication-checkpoint
+        env:
+          GH_TOKEN: ${{github.token}}
         with:
           cache-key: g11-state-v4-critical-${{steps.due.outputs.operational_date}}-${{github.run_id}}
+          wild4-day: ${{steps.due.outputs.operational_date}}
       - name: Handoff saved early inputs to WILD4
         id: wild4-early
-        if: steps.critical-save.outcome=='success'&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
+        if: always()&&!cancelled()&&(steps.critical-save.outcome=='success'||steps.critical-save.outputs.wild4-attempted=='true')&&steps.critical-encrypt.outputs.ready=='true'&&steps.due.outputs.phase=='predeadline'
         continue-on-error: true
         env:
           GH_TOKEN: ${{github.token}}
           OPERATIONAL_DATE: ${{steps.due.outputs.operational_date}}
         run: |
           set -euo pipefail
-          jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
-          if ! jq -e '.CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0' .relay-output/result.json >/dev/null; then
-            echo 'WILD4_EARLY_HANDOFF=NO_NEW_INPUT'
-            exit 0
+          if [ "${{steps.critical-save.outputs.wild4-sent}}" = "true" ]; then
+            echo 'sent=true' >> "${GITHUB_OUTPUT}"
+            echo 'WILD4_EARLY_HANDOFF=ALREADY_ACCEPTED_DURING_READBACK'
           fi
-          gh workflow run 364923281 -f mode=wild4 -f operational_date="${OPERATIONAL_DATE}" \
-            -f predeadline_checkpoint_key="g11-state-v4-critical-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
-          echo 'sent=true' >> "${GITHUB_OUTPUT}"
-          echo 'WILD4_EARLY_HANDOFF=DISPATCH_ACCEPTED'
       - name: Publish persisted critical LOCKs
         id: critical-publish
         if: steps.critical-save.outputs.ready=='true'&&steps.authority.outputs.frozen=='true'

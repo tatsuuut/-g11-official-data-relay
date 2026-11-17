@@ -98,3 +98,26 @@ delta. It must not omit history, skip persistence/readback, weaken hashes,
 change frozen models or regenerate old predictions. Resume from these timings
 and the new main source; do not repeat the November 7/8 comparison or replay
 completed operations. No NIGHT job was manually run by this repair.
+
+## 2026-11-17: overlap the independently verified WILD4 handoff
+
+The LIVE checkpoint action now starts the existing exact-key WILD4 worker after
+the complete encrypted cache save, while the parent performs its full remote
+readback. The child's existing GPG authentication, complete-store digest,
+day/run/authority checks remain before inference. The parent's readback and
+byte-comparison gate still controls canonical publication; a dispatch never
+sets that gate to ready. Other checkpoint callers leave this option disabled.
+
+The parent propagates accepted dispatches without posting twice. An ambiguous
+or failed request retains its attempted state and does not immediately repost;
+the existing later publication/retry path remains available. Empty captures,
+invalid checkpoint keys, corrupt local bytes and non-PASS capture reports do
+not start a worker. One bounded dispatch replaces the former serial dispatch.
+
+Local verification: 75 focused tests (10 private-source cases remain CI-only),
+plus all four exact-checkpoint tests against the deployed child, passed. The
+public source audit passed without raising its size limit. The reusable child
+pin, models, inference, learning, settlement, official acquisition cadence and
+saved LOCKs are unchanged. Observe the next normal LIVE parent/child pair for
+the overlap marker and actual odds-to-notification delay; no universal latency
+or phone-delivery improvement is claimed from source changes or tests alone.
