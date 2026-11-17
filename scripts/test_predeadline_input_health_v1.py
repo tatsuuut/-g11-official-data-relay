@@ -89,6 +89,17 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(value['source_issue_count'], 1)
         self.assertEqual(value['scope'], 'OFFICIAL_INPUTS_ONLY_NOT_ENGINE_OR_DEVICE_COMPLETENESS')
 
+    def test_verified_official_withdrawal_is_separate_from_input_failure(self):
+        item = {'SOURCE_ID': SID, 'RACE_KEY': KEY,
+                'REASON': 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE',
+                'AVAILABILITY_SNAPSHOT_SHA256': 'a' * 64}
+        result = self.summary({'UNAVAILABLE': [item]})
+        self.assertEqual(result['status'], 'PASS')
+        self.assertEqual(result['official_unavailable_race_count'], 1)
+        self.assertEqual(result['source_issue_count'], 0)
+        del item['AVAILABILITY_SNAPSHOT_SHA256']
+        self.assertEqual(self.summary({'UNAVAILABLE': [item]})['status'], 'PARTIAL')
+
     def test_unknown_reason_is_not_echoed_into_public_logs(self):
         self.receipt['REJECTION_REASON'] = 'private-content\n::error::secret'
         self.save_receipt()

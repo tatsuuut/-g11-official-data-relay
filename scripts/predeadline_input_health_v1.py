@@ -156,6 +156,7 @@ def summarize(artifact, day, acquisition, *, now=None):
     if now.utcoffset() != timedelta(hours=9): raise ValueError('HEALTH_CLOCK')
     tasks = _plan(artifact, day)
     issues = {}
+    official_unavailable = set()
     for category in ('MISSED', 'REJECTED', 'TASK_DEFERRED', 'RETRYABLE_FAILURES', 'UNAVAILABLE'):
         for item in acquisition.get(category, []):
             sid = item if isinstance(item, str) else item['SOURCE_ID']
@@ -163,6 +164,13 @@ def summarize(artifact, day, acquisition, *, now=None):
             task = tasks[sid]
             if isinstance(item, dict) and item.get('RACE_KEY') != task['RACE_KEY']:
                 raise ValueError('HEALTH_ISSUE_RACE')
+            if (category == 'UNAVAILABLE' and isinstance(item, dict)
+                    and item.get('REASON') == 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE'
+                    and re.fullmatch(r'[a-f0-9]{64}', str(item.get('AVAILABILITY_SNAPSHOT_SHA256', '')))):
+                # The existing collector has verified the official exclusion.
+                # Do not call a legitimate withdrawal an acquisition outage.
+                official_unavailable.add(task['RACE_KEY'])
+                continue
             issue = issues.setdefault(sid, {'source_id': sid, 'race_key': task['RACE_KEY'],
                 'kind': task['KIND'], 'saved_deadline_jst': task['MUST_FINISH_BEFORE_JST'],
                 'categories': [], 'reasons': []})
@@ -179,6 +187,7 @@ def summarize(artifact, day, acquisition, *, now=None):
             'scope': 'OFFICIAL_INPUTS_ONLY_NOT_ENGINE_OR_DEVICE_COMPLETENESS',
             'source_issue_count': len(issues),
             'race_issue_count': len({row['race_key'] for row in issues.values()}),
+            'official_unavailable_race_count': len(official_unavailable),
             'omitted_source_details': max(0, len(issues) - len(details)), 'issues': details,
             'prediction_boundary_changed': False, 'prediction_generated': False}
 
