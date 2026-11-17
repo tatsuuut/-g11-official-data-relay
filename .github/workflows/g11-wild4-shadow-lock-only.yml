@@ -13,6 +13,11 @@ on:
         type: string
         required: false
         default: ""
+      predeadline_delta_key:
+        description: Exact authenticated full reconstruction transport; no stale fallback
+        type: string
+        required: false
+        default: ""
       night_checkpoint_key:
         description: Exact saved and read-back NIGHT checkpoint; no fallback when supplied
         type: string
@@ -43,7 +48,7 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@57883a3ba0a77d674f749acfaba0bbc2054a05ee
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@5241f15a67497463db892b454d073136f2338912
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
       - name: Checkout isolated research branch
@@ -60,6 +65,7 @@ jobs:
           LINEAGE_READBACK_DATE: ${{ inputs.lineage_readback_date }}
           NIGHT_CHECKPOINT_KEY: ${{ inputs.night_checkpoint_key }}
           PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
+          PREDEADLINE_DELTA_KEY: ${{ inputs.predeadline_delta_key }}
         run: |
           python3 - <<'PY'
           import os, re
@@ -111,6 +117,9 @@ jobs:
           if live_checkpoint and (checkpoint or readback or os.environ.get('REQUESTED_MODE')!='wild4'
               or re.fullmatch(r'g11-state-v4-critical-'+re.escape(day)+r'-[0-9]+',live_checkpoint) is None):
               raise SystemExit('PREDEADLINE_CHECKPOINT_IDENTITY')
+          delta=os.environ.get('PREDEADLINE_DELTA_KEY','')
+          if delta and (not live_checkpoint or delta!=live_checkpoint.replace('g11-state-v4-critical-','g11-state-v4-delta-',1)):
+              raise SystemExit('PREDEADLINE_DELTA_IDENTITY')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
               output.write('night_rollover='+str(night_rollover or historical_night_repair).lower()+'\n')
@@ -122,12 +131,45 @@ jobs:
           print('WILD4_CANDIDATE_REVIEW_HELD='+str('2026-11-13'<=day<'2026-11-14').lower())
           print('WILD4_HISTORICAL_NIGHT_REPAIR='+str(historical_night_repair).lower())
           PY
+      - name: Restore exact authenticated complete reconstruction delta
+        id: compact-cache
+        if: inputs.predeadline_delta_key != ''
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-output/early-delta.tgz.gpg
+          key: ${{ inputs.predeadline_delta_key }}
+          fail-on-cache-miss: true
+      - name: Authenticate compact manifest before choosing its exact base
+        id: compact
+        if: inputs.predeadline_delta_key != ''
+        env:
+          OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
+          PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
+          PREDEADLINE_DELTA_KEY: ${{ inputs.predeadline_delta_key }}
+          STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test '${{ steps.compact-cache.outputs.cache-hit }}' = true
+          exec 3<<<"${STATE_PASSPHRASE}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+            --decrypt --output "${RUNNER_TEMP}/g11-compact.tgz" .relay-output/early-delta.tgz.gpg
+          exec 3<&-
+          python3 - <<'PYCOMPACT'
+          import os,pathlib,sys
+          sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
+          from encrypt_runtime_state_v1 import inspect_delta,require
+          value=inspect_delta(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-compact.tgz',
+              day=os.environ['OPERATIONAL_DATE'],checkpoint_key=os.environ['PREDEADLINE_CHECKPOINT_KEY'])
+          require(value['delta_key']==os.environ['PREDEADLINE_DELTA_KEY'],'REQUESTED_KEY')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('base_key='+value['base_key']+'\n')
+          print('WILD4_AUTHENTICATED_DELTA=PASS BASE='+value['base_key'])
+          PYCOMPACT
       - name: Restore current encrypted canonical state
         id: canonical-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .relay-cache/state.tgz.gpg
-          key: ${{ inputs.predeadline_checkpoint_key || inputs.night_checkpoint_key || format('g11-state-v4-{0}-isolated-shadow-no-exact-match', steps.day.outputs.day) }}
+          key: ${{ steps.compact.outputs.base_key || inputs.predeadline_checkpoint_key || inputs.night_checkpoint_key || format('g11-state-v4-{0}-isolated-shadow-no-exact-match', steps.day.outputs.day) }}
           restore-keys: ${{ inputs.predeadline_checkpoint_key == '' && inputs.night_checkpoint_key == '' && format('g11-state-v4-published-{0}-', steps.day.outputs.day) || '' }}
       - name: Verify current canonical state availability
         id: state-ready
@@ -282,6 +324,7 @@ jobs:
           OPERATIONAL_DATE: ${{ steps.day.outputs.day }}
           STATE_PASSPHRASE: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           PREDEADLINE_CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
+          PREDEADLINE_DELTA_KEY: ${{ inputs.predeadline_delta_key }}
         run: |
           set -euo pipefail
           test -s .relay-cache/state.tgz.gpg
@@ -302,6 +345,10 @@ jobs:
           from extract_runtime_state_v1 import extract_complete_state
           root=pathlib.Path(os.environ['RUNNER_TEMP'])
           extract_complete_state(root/'g11-state.tgz', pathlib.Path('.relay-state'))
+          if os.environ.get('PREDEADLINE_DELTA_KEY'):
+              from encrypt_runtime_state_v1 import apply_delta
+              apply_delta(root/'g11-compact.tgz',pathlib.Path('.relay-state'),day=os.environ['OPERATIONAL_DATE'],
+                  checkpoint_key=os.environ['PREDEADLINE_CHECKPOINT_KEY'],base_cipher=pathlib.Path('.relay-cache/state.tgz.gpg'))
           for archive,dest in ((root/'candidate.tgz',root),):
               if not archive.is_file(): continue
               dest.mkdir(exist_ok=True)
@@ -1806,4 +1853,5 @@ jobs:
             echo 'WILD4_NIGHT_PUBLICATION_NOT_VERIFIED' >&2
             exit 1
           fi
+
 
