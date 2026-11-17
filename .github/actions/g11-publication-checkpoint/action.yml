@@ -14,10 +14,10 @@ outputs:
     value: ${{ steps.verified.outputs.ready }}
   wild4-sent:
     description: True only when the exact-checkpoint WILD4 dispatch was accepted.
-    value: ${{ steps.wild4-dispatch.outputs.sent }}
+    value: ${{ steps.wild4-dispatch.outputs.sent || steps.wild4-fallback.outputs.sent }}
   wild4-attempted:
     description: Retain an ambiguous dispatch without immediately posting it twice.
-    value: ${{ steps.wild4-dispatch.outputs.attempted }}
+    value: ${{ steps.wild4-dispatch.outputs.attempted || steps.wild4-fallback.outputs.attempted }}
 runs:
   using: composite
   steps:
@@ -29,14 +29,24 @@ runs:
       with:
         path: .relay-cache/state.tgz.gpg
         key: ${{ inputs.cache-key }}
+    - name: Check exact saved checkpoint visibility without downloading
+      id: wild4-visible
+      if: inputs.wild4-day != ''
+      continue-on-error: true
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .relay-cache/state.tgz.gpg
+        key: ${{ inputs.cache-key }}
+        lookup-only: true
     - name: Start independently verified WILD4 worker after checkpoint save
       id: wild4-dispatch
-      if: inputs.wild4-day != ''
+      if: inputs.wild4-day != '' && steps.wild4-visible.outputs.cache-hit == 'true'
       continue-on-error: true
       shell: bash
       env:
         OPERATIONAL_DATE: ${{ inputs.wild4-day }}
         CHECKPOINT_KEY: ${{ inputs.cache-key }}
+        DISPATCH_STAGE: DURING_READBACK
       run: |
         set -euo pipefail
         [[ "${OPERATIONAL_DATE}" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]
@@ -56,7 +66,7 @@ runs:
           -f mode=wild4 -f operational_date="${OPERATIONAL_DATE}" \
           -f predeadline_checkpoint_key="${CHECKPOINT_KEY}"
         echo 'sent=true' >> "${GITHUB_OUTPUT}"
-        echo 'WILD4_EARLY_HANDOFF=DISPATCH_ACCEPTED_DURING_READBACK'
+        echo "WILD4_EARLY_HANDOFF=DISPATCH_ACCEPTED_${DISPATCH_STAGE}"
     - name: Read back complete encrypted publication checkpoint
       id: readback
       continue-on-error: true
@@ -102,3 +112,32 @@ runs:
         sha256sum -c .relay-output/publication-state.sha256
         echo 'ready=true' >> "${GITHUB_OUTPUT}"
         echo 'G11_PUBLICATION_STATE_READBACK=PASS'
+    - name: Start WILD4 after verified delayed checkpoint visibility
+      id: wild4-fallback
+      if: inputs.wild4-day != '' && steps.verified.outputs.ready == 'true' && steps.wild4-visible.outputs.cache-hit != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        OPERATIONAL_DATE: ${{ inputs.wild4-day }}
+        CHECKPOINT_KEY: ${{ inputs.cache-key }}
+        DISPATCH_STAGE: AFTER_DELAYED_VISIBILITY
+      run: |
+        set -euo pipefail
+        [[ "${OPERATIONAL_DATE}" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]
+        [[ "${GITHUB_RUN_ID}" =~ ^[0-9]+$ ]]
+        test "${CHECKPOINT_KEY}" = "g11-state-v4-critical-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
+        sha256sum -c .relay-output/publication-state.sha256
+        jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
+        if ! jq -e '.CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0' .relay-output/result.json >/dev/null; then
+          echo 'WILD4_EARLY_HANDOFF=NO_NEW_INPUT'
+          exit 0
+        fi
+        # The child restores this exact key and verifies GPG, the complete store
+        # digest, day, run and daily authority before inference. The parent's
+        # independent readback gate below still controls canonical publication.
+        echo 'attempted=true' >> "${GITHUB_OUTPUT}"
+        timeout --signal=TERM --kill-after=2s 12s gh workflow run 364923281 \
+          -f mode=wild4 -f operational_date="${OPERATIONAL_DATE}" \
+          -f predeadline_checkpoint_key="${CHECKPOINT_KEY}"
+        echo 'sent=true' >> "${GITHUB_OUTPUT}"
+        echo "WILD4_EARLY_HANDOFF=DISPATCH_ACCEPTED_${DISPATCH_STAGE}"

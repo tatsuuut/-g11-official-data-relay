@@ -173,9 +173,10 @@ class EarlyDispatchTests(unittest.TestCase):
 
 
 class OverlappedCheckpointDispatchTests(unittest.TestCase):
-    def exercise(self, count=2, status='PASS', key=KEY, dispatch_status=0, corrupt=False):
+    def exercise(self, count=2, status='PASS', key=KEY, dispatch_status=0, corrupt=False, fallback=False):
         action = (ROOT / '.github/actions/g11-publication-checkpoint/action.yml').read_text()
-        block = action.split('    - name: Start independently verified WILD4 worker after checkpoint save\n', 1)[1].split('    - name:', 1)[0]
+        name = 'Start WILD4 after verified delayed checkpoint visibility' if fallback else 'Start independently verified WILD4 worker after checkpoint save'
+        block = action.split('    - name: '+name+'\n', 1)[1].split('    - name:', 1)[0]
         code = textwrap.dedent(block.split('      run: |\n', 1)[1])
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -193,7 +194,7 @@ class OverlappedCheckpointDispatchTests(unittest.TestCase):
             output, calls = root / 'output', root / 'calls'
             env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
                 OPERATIONAL_DATE=DAY, CHECKPOINT_KEY=key, GITHUB_RUN_ID='123', GITHUB_OUTPUT=str(output),
-                TEST_CALLS=str(calls), TEST_STATUS=str(dispatch_status))
+                TEST_CALLS=str(calls), TEST_STATUS=str(dispatch_status), DISPATCH_STAGE='AFTER_DELAYED_VISIBILITY' if fallback else 'DURING_READBACK')
             result = subprocess.run(['bash', '-c', code], cwd=root, env=env, capture_output=True, text=True, timeout=15)
             return result, output.read_text() if output.exists() else '', calls.read_text() if calls.exists() else ''
 
@@ -225,6 +226,33 @@ class OverlappedCheckpointDispatchTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(output, 'attempted=true\n')
         self.assertEqual(calls.splitlines().count('workflow'), 1)
+
+    def test_cache_visibility_probe_is_exact_and_does_not_download_or_use_prefix_fallback(self):
+        action = (ROOT / '.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        probe = action.split('    - name: Check exact saved checkpoint visibility without downloading\n', 1)[1].split('    - name:', 1)[0]
+        self.assertIn('lookup-only: true', probe); self.assertNotIn('restore-keys:', probe)
+        self.assertIn('key: ${{ inputs.cache-key }}', probe)
+        early = action.split('    - name: Start independently verified WILD4 worker after checkpoint save\n', 1)[1].split('    - name:', 1)[0]
+        self.assertIn("steps.wild4-visible.outputs.cache-hit == 'true'", early)
+
+    def test_delayed_visibility_falls_back_only_after_successful_full_readback(self):
+        action = (ROOT / '.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        block = action.split('    - name: Start WILD4 after verified delayed checkpoint visibility\n', 1)[1]
+        condition = next(line.split('if: ',1)[1] for line in block.splitlines() if '      if: ' in line)
+        for ready, visible, expected in [('', '', False), ('true', 'true', False), ('true', '', True)]:
+            expression = condition.replace('inputs.wild4-day',repr(DAY)).replace('steps.verified.outputs.ready',repr(ready)).replace('steps.wild4-visible.outputs.cache-hit',repr(visible))
+            self.assertEqual(eval(expression.replace('&&',' and '), {'__builtins__':{}}, {}),expected)
+        result, output, calls = self.exercise(fallback=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, 'attempted=true\nsent=true\n')
+        self.assertIn('predeadline_checkpoint_key='+KEY,calls)
+        self.assertIn('AFTER_DELAYED_VISIBILITY', result.stdout)
+
+    def test_delayed_visibility_preserves_bad_key_and_corrupt_state_rejection(self):
+        for kwargs in ({'key':KEY+'4'},{'corrupt':True},{'status':'PARTIAL'}):
+            with self.subTest(kwargs=kwargs):
+                result, output, calls = self.exercise(fallback=True, **kwargs)
+                self.assertNotEqual(result.returncode,0);self.assertEqual(output,'');self.assertEqual(calls,'')
 
 
 class ProtectedLogicTests(unittest.TestCase):

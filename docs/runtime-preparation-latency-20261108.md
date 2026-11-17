@@ -102,8 +102,12 @@ completed operations. No NIGHT job was manually run by this repair.
 ## 2026-11-17: overlap the independently verified WILD4 handoff
 
 The LIVE checkpoint action now starts the existing exact-key WILD4 worker after
-the complete encrypted cache save, while the parent performs its full remote
-readback. The child's existing GPG authentication, complete-store digest,
+the complete encrypted cache save and an exact-key metadata visibility check,
+while the parent performs its full remote readback. The metadata lookup does
+not download the archive or accept prefix matches. If visibility is delayed,
+the original serial handoff runs only after successful full readback instead
+of starting a child that cannot yet restore its required key. The child's
+existing GPG authentication, complete-store digest,
 day/run/authority checks remain before inference. The parent's readback and
 byte-comparison gate still controls canonical publication; a dispatch never
 sets that gate to ready. Other checkpoint callers leave this option disabled.
@@ -114,7 +118,7 @@ the existing later publication/retry path remains available. Empty captures,
 invalid checkpoint keys, corrupt local bytes and non-PASS capture reports do
 not start a worker. One bounded dispatch replaces the former serial dispatch.
 
-Local verification: 75 focused tests (10 private-source cases remain CI-only),
+Local verification: 78 focused tests (10 private-source cases remain CI-only),
 plus all four exact-checkpoint tests against the deployed child, passed. The
 public source audit passed without raising its size limit. The reusable child
 pin, models, inference, learning, settlement, official acquisition cadence and

@@ -391,7 +391,7 @@ jobs:
           set -euo pipefail
           if [ "${{steps.critical-save.outputs.wild4-sent}}" = "true" ]; then
             echo 'sent=true' >> "${GITHUB_OUTPUT}"
-            echo 'WILD4_EARLY_HANDOFF=ALREADY_ACCEPTED_DURING_READBACK'
+            echo 'WILD4_EARLY_HANDOFF=ACCEPTED_CHECKPOINT_DISPATCH'
           fi
       - name: Publish persisted critical LOCKs
         id: critical-publish
