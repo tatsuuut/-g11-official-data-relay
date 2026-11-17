@@ -647,12 +647,20 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
                 ack, headers, raw = send_morning(feed_path, feed, authority, origin, token)
             elif phase == "PREDEADLINE":
                 if include_optional_inputs:
-                    hot.publish(feed_path, origin, optional_deme_projection(day))
+                    verified = hot.publish(feed_path, origin, optional_deme_projection(day))
                 else:
                     # Reserve slot zero for the saved critical projection;
                     # the regular update in this same run still uses slot one.
-                    hot.publish(feed_path, origin, sequence_offset=0)
-                readback, headers, raw = hot.fetch(origin + "/api/g11-feed?date=" + day)
+                    verified = hot.publish(feed_path, origin, sequence_offset=0)
+                if verified is None:
+                    readback, headers, raw = hot.fetch(origin + "/api/g11-feed?date=" + day)
+                else:
+                    # publish already verified its exact post-write GET, source
+                    # ACK, every changed field and body SHA. Reuse those bytes;
+                    # the daily authority/phase gate below still runs unchanged.
+                    readback, headers, raw = verified
+                    require(hot.hash_bytes(raw) == headers.get('x-g11-feed-sha256')
+                            and json.loads(raw) == readback, 'DAILY_REUSED_READBACK_HASH_MISMATCH')
                 identity(readback, authority, "PREDEADLINE")
                 ack = {"payload_sha256": headers["x-g11-source-feed-sha256"]}
             else:

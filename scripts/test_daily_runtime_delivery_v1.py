@@ -158,6 +158,24 @@ class DailyDeliveryTests(unittest.TestCase):
         with patch.dict(os.environ, env), self.assertRaises(ValueError):
             research.publish_persisted_live(self.s.state, self.s.feed_path, opener=opener)
 
+    def test_live_reuses_the_exact_verified_post_write_readback_and_still_binds_daily_authority(self):
+        site=StagedSite(self.s);self.s.feed_path.write_bytes(hot.compact(site.feed))
+        verified=site.fetch('read-only-fixture')
+        with patch.object(hot,'publish',return_value=verified),patch.object(hot,'fetch') as extra:
+            receipt=delivery.deliver(self.s.state,self.s.feed_path,delivery.ORIGIN,include_optional_inputs=False)
+        extra.assert_not_called();self.assertEqual(receipt['site_get_readback'],'PASS')
+        self.assertEqual(receipt['site_get_sha256'],hot.hash_bytes(verified[2]))
+        for change in ('raw-hash','daily-authority'):
+            feed,headers,raw=copy.deepcopy(verified)
+            if change=='raw-hash':raw+=b' '
+            else:
+                feed['daily_runtime']['authority_sha256']='0'*64;raw=hot.compact(feed)
+                headers['x-g11-feed-sha256']=hot.hash_bytes(raw)
+            with self.subTest(change=change),patch.object(hot,'publish',return_value=(feed,headers,raw)), \
+                    patch.object(hot,'fetch') as extra,self.assertRaises(RuntimeError):
+                delivery.deliver(self.s.state,self.s.feed_path,delivery.ORIGIN,attempts=1,include_optional_inputs=False)
+            extra.assert_not_called()
+
     def test_C_chunk_failure_retries_checkpoint_transport_only(self):
         site = StagedSite(self.s, failure="chunk")
         # Any attempt to settle after checkpoint creation is a regression.
