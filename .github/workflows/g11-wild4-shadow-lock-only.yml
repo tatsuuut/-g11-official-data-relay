@@ -48,7 +48,7 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@15f9a05e93a4ca45d68e3921d44263b4d192da8a
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@5241f15a67497463db892b454d073136f2338912
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
       - name: Checkout isolated research branch
@@ -941,7 +941,7 @@ jobs:
                   if p.is_absolute() or '..' in p.parts or m.issym() or m.islnk() or not (m.isfile() or m.isdir()): raise SystemExit('UNSAFE_CALIBRATION_ARCHIVE')
               a.extractall(temp,filter='data')
           prior_complete=False
-          if day>='2026-10-13':
+          if day>='2026-10-13' and not (temp/'g11-wild4-future-locks/day-model-binding.json').is_file():
               previous=(date.fromisoformat(day)-timedelta(days=1)).isoformat()
               try:
                   feed,_,_=hot.fetch('https://g11-race-lab.higatatsunori2.chatgpt.site/api/g11-feed?view=wild4-day-binding&date='+previous)
