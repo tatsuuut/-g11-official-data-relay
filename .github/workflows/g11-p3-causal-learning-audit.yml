@@ -22,6 +22,8 @@ jobs:
           path: .relay-cache/state.tgz.gpg
           key: g11-state-v4-published-2026-11-16-cause-audit-unused
           restore-keys: |
+            g11-state-v4-published-2026-11-17-
+            g11-state-v4-critical-2026-11-17-
             g11-state-v4-published-2026-11-16-
             g11-state-v4-critical-2026-11-16-
           fail-on-cache-miss: true
