@@ -48,7 +48,7 @@ jobs:
       TZ: Asia/Tokyo
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@5241f15a67497463db892b454d073136f2338912
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@15f9a05e93a4ca45d68e3921d44263b4d192da8a
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
       - name: Checkout isolated research branch
