@@ -765,10 +765,12 @@ class PublishedGoripanTests(unittest.TestCase):
         import hashlib
         raw = json.dumps(self.feed).encode()
         def response(command, **kwargs):
+            self.assertIn('?view=wild4-readback&date='+DAY,command[-1])
+            self.assertNotIn('v53-final',command[-1])
             Path(command[command.index('--output')+1]).write_bytes(raw)
             Path(command[command.index('--dump-header')+1]).write_text(
                 'HTTP/1.1 200 Connection established\nX-G11-Feed-Sha256: invalid\n\n'
-                'HTTP/2 200\nX-G11-Feed-Sha256: ' + hashlib.sha256(raw).hexdigest() + '\n')
+                'HTTP/2 200\nX-G11-Readback-Scope: WILD4_SAVED_PROJECTION\nX-G11-Feed-Sha256: ' + hashlib.sha256(raw).hexdigest() + '\n')
         with patch.object(handoff.subprocess, 'run', side_effect=response):
             self.assertEqual([], handoff.without_published_goripan([self.row], DAY))
         def wrong_hash(command, **kwargs):
@@ -776,6 +778,12 @@ class PublishedGoripanTests(unittest.TestCase):
             Path(command[command.index('--dump-header')+1]).write_text('HTTP/2 200\n')
         with patch.object(handoff.subprocess, 'run', side_effect=wrong_hash):
             self.assertEqual([self.row], handoff.without_published_goripan([self.row], DAY))
+        def wrong_scope(command, **kwargs):
+            response(command,**kwargs)
+            path=Path(command[command.index('--dump-header')+1])
+            path.write_text(path.read_text().replace('WILD4_SAVED_PROJECTION','DISPLAY_ENRICHMENT'))
+        with patch.object(handoff.subprocess,'run',side_effect=wrong_scope):
+            self.assertEqual([self.row],handoff.without_published_goripan([self.row],DAY))
         with patch.object(handoff.subprocess, 'run', side_effect=subprocess.TimeoutExpired('curl', 8)):
             self.assertEqual([self.row], handoff.without_published_goripan([self.row], DAY))
 

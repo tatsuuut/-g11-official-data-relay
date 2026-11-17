@@ -384,7 +384,7 @@ class CurrentCompactWorkflowTests(unittest.TestCase):
         source=self.source()
         authenticate=source.split('      - name: Authenticate compact manifest before choosing its exact base\n',1)[1].split('      - name:',1)[0]
         self.assertLess(authenticate.index('--decrypt'),authenticate.index('value=inspect_delta('));self.assertIn('set -euo pipefail',authenticate)
-        self.assertIn("steps.compact-cache.outputs.cache-hit }}' = true",authenticate)
+        self.assertIn("steps.compact-cache.outputs.cache-hit == 'true' || steps.compact-cache-retry.outputs.cache-hit == 'true' }}' = true",authenticate)
         restore=source.split('      - name: Restore current encrypted canonical state\n',1)[1].split('      - name:',1)[0]
         self.assertIn('key: ${{ steps.compact.outputs.base_key || inputs.predeadline_checkpoint_key',restore)
         decrypt=source.split('      - name: Decrypt verified state and candidate\n',1)[1].split('      - name:',1)[0]
@@ -393,6 +393,16 @@ class CurrentCompactWorkflowTests(unittest.TestCase):
         self.assertIn("base_cipher=pathlib.Path('.relay-cache/state.tgz.gpg')",decrypt)
         self.assertIn("critical.get('CRITICAL_CHECKPOINT_SHA')",decrypt)
         self.assertIn("critical.get('AUTHORITY_SHA256')",decrypt)
+
+    def test_exact_cache_restore_precedes_optional_metadata_wait_and_never_uses_prefix_fallback(self):
+        source=self.source()
+        self.assertLess(source.index('id: compact-cache\n'),source.index('id: handoff\n'))
+        wait=source.split('      - name: Wait only for the exact new saved handoff after preparation\n',1)[1].split('      - name:',1)[0]
+        self.assertIn("steps.compact-cache.outputs.cache-hit != 'true'",wait)
+        for name in ('Restore exact authenticated complete reconstruction delta','Restore the exact handoff after bounded visibility wait'):
+            block=source.split('      - name: '+name+'\n',1)[1].split('      - name:',1)[0]
+            self.assertIn('key: ${{ inputs.predeadline_delta_key }}',block)
+            self.assertNotIn('restore-keys:',block)
 
     def test_executable_child_binding_rejects_delta_without_exact_current_capture(self):
         source=self.source();start=source.index('          live_checkpoint=');end=source.index('          with open(os.environ[\'GITHUB_OUTPUT\']',start)
