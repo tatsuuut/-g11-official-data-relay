@@ -771,7 +771,7 @@ jobs:
       - name: Checkout exact saved-projection readback verifier
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 59829c1c182055f9e74b79a749a1cae24bf20813
+          ref: 0575399b44989a830c2ccd290c1af4910a8e6ece
           path: .g11-saved-readback-guard
           sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
           persist-credentials: false
@@ -782,7 +782,23 @@ jobs:
           PYTHONPATH: scripts
         run: |
           "$(go env GOPATH)/bin/actionlint" "$WILD4_READBACK_WORKFLOW_PATH"
-          python3 -m unittest test_wild4_checkpoint_handoff_v1.SavedReadbackTransportTests test_wild4_checkpoint_handoff_v1.CurrentCompactWorkflowTests -v
+          python3 -m unittest test_wild4_checkpoint_handoff_v1.SavedReadbackTransportTests test_wild4_checkpoint_handoff_v1.CurrentCompactWorkflowTests test_wild4_checkpoint_handoff_v1.SourcePushRoutingTests -v
+      - name: Checkout the exact frozen daily binder for read-elision proof
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{secrets.PRIVATE_SOURCE_REPO}}
+          ref: b30031c6b9500a7e7bcf0391ced0d85df8575850
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: .g11-bound-model-guard
+          sparse-checkout: g11/wild_pack/v1/wild4_lifecycle_v1.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Prove bound-day model validation and lifecycle updates stay unchanged
+        env:
+          WILD4_BOUND_DAY_SOURCE_PATH: .g11-bound-model-guard/g11/wild_pack/v1/wild4_lifecycle_v1.py
+          WILD4_BOUND_WORKFLOW_PATH: .g11-saved-readback-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
+          PYTHONPATH: scripts
+        run: python3 -m unittest test_runtime_preparation_v1.BoundDayReadTests -v
       - name: Verify isolated future boundary uses the tested contract
         run: |
           python3 - <<'PYGUARD'

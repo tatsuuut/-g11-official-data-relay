@@ -155,3 +155,42 @@ seven original prediction/learning/settlement blocks to their frozen hashes.
 Source deployment and deterministic tests are not end-to-end freshness or
 device delivery evidence. Observe a new normal compact parent/child pair and
 the unchanged notification screening age before claiming completion.
+
+## November 17: retain daily binding validation without unused prebinding reads
+
+The first post-210 observations still included old packets and cannot prove
+freshness. One mixed old-parent/new-child run spent 30s in daily binding.
+The exact frozen private binder b30031c6 uses `previous_night_complete` only
+inside `choose_day`, reached when no daily binding and no earlier LOCK exist.
+When the immutable daily binding file already exists, omit only its two
+prebinding day GETs. Still call the original binder, generation/scope refresh,
+update qualification, model identity verification and every prior LOCK check.
+An unbound day keeps its original reads and selection policy.
+
+CI checks the actual frozen private function's AST fingerprint and executes
+it with both values of the now-unused flag. Saved model and lifecycle updates
+must be identical; wrong-day and wrong-model bindings must still fail. The
+source guard permits exactly this read-elision condition and the two earlier
+transport URLs, then compares all original model/learning/settlement code.
+
+The child reuses public helper5241f15a. Its encryption, inventories, complete
+delta reconstruction and dependency packages match the later helper; it does
+not wait for optional OS package installation before restoring runtime. The
+later extractor differed only in its decompressor log text. Actual native
+preparation sometimes waited its ten-second limit without establishing the
+accelerator; complete extraction remained about26-31s.
+
+Ordinary source pushes no longer start an unkeyed WILD4 forecast worker or
+share its exact-handoff concurrency group. The normal exact dispatch, fallback
+workflow-run, LIVE cron and NIGHT cron remain. Explicit retained promotion
+readback and footprint-storage-check routes keep their original categories.
+This avoids a deployment-only cached-state worker sitting ahead of fresh
+input; it is not a change to official acquisition or prediction rules.
+
+Actual new-input run44053857200 still checked at age190s before the bound-day
+read elision. Projection storage succeeded but final saved GET returned500.
+Retry only that saved GET on500/502/503/504, at most three attempts with3s/10s
+delays admitted inside a20s retry window. Authentication failures, integrity
+failures and expired retry budgets fail closed. Each request retains its35s
+timeout and every successful read still verifies the complete saved LOCKs,
+lifecycle and response digest. No write, official fetch or inference is retried.
