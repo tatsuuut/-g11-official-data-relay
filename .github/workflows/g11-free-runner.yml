@@ -2131,6 +2131,22 @@ jobs:
           test "$(python3 scripts/dynamic_last_race_heartbeat.py --result .relay-output/result.json --operational-date "$d")" = CONTINUE || exit 0
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/g11-free-runner.yml/runs" -q '[.workflow_runs[]|select(.status|test("^(queued|in_progress)$"))|select(.event!="push" or (.head_commit.message//""|contains("[daily-runtime-freeze]")|not))]|length')" -le 1 || exit 0
           python3 scripts/predeadline_dispatch_v1.py --day "$d" --mode continuation
+      - name: Request fixed-study settlement after the verified final NIGHT publication
+        if: >-
+          always() && !cancelled() && steps.runtime.outcome=='success' && steps.due.outputs.phase=='night'
+          && steps.night-ready.outputs.allowed=='true' && steps.publication-state-verified.outputs.ready=='true'
+          && (steps.readback.outcome=='success' || steps.immutable-readback.outcome=='success')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{github.token}}
+          STUDY_DAY: ${{steps.due.outputs.operational_date}}
+        run: |
+          set -euo pipefail
+          [[ "$STUDY_DAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          if [[ "$STUDY_DAY" < 2026-11-17 || "$STUDY_DAY" > 2026-12-14 ]]; then exit 0; fi
+          gh workflow run g11-isolated-live-research.yml --ref main \
+            -f "operational_date=${STUDY_DAY}" \
+            -f "source_key=g11-state-v4-published-${STUDY_DAY}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-checkpoint"
       - name: WILD4 shadow
         if: always()&&!cancelled()&&steps.runtime.outcome=='success'&&steps.publication-state-verified.outputs.ready=='true'&&((steps.publish.outcome!='success'&&steps.wild4-followup.outputs.needed!='false'&&steps.wild4-followup.outputs.sent!='true'&&(steps.wild4-early.outputs.sent!='true'||steps.wild4-followup.outputs.needed=='true')&&steps.due.outputs.phase=='predeadline')||(steps.due.outputs.phase=='night'&&steps.night-ready.outputs.allowed=='true'&&(steps.readback.outcome=='success'||steps.immutable-readback.outcome=='success')))
         continue-on-error: true
