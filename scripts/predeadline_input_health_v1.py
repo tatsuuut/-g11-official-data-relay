@@ -12,7 +12,9 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
+import tempfile
 from urllib.parse import parse_qs, urlsplit
 
 JST = timezone(timedelta(hours=9))
@@ -255,6 +257,23 @@ def report(artifact, day, acquisition):
     return value
 
 
+def send_pause_to_site(origin, token, pause):
+    with tempfile.TemporaryDirectory(prefix='g11-pause-') as directory:
+        body = Path(directory) / 'pause.json'
+        body.write_text(json.dumps(pause))
+        headers = 'Authorization: Bearer ' + token + '\nContent-Type: application/json\n'
+        sent = subprocess.run([
+            'curl', '--silent', '--show-error', '--max-time', '8', '--request', 'POST',
+            origin + '/api/g11-input-pause', '--header', '@-', '--data-binary', '@' + str(body),
+            '--write-out', '\n%{http_code}',
+        ], input=headers, capture_output=True, text=True)
+    response, _, status = sent.stdout.rpartition('\n')
+    if sent.returncode or status != '200':
+        print('G11_INPUT_PAUSE_HTTP=' + (status if re.fullmatch(r'[0-9]{3}', status) else 'UNVERIFIED'), flush=True)
+        raise RuntimeError('INPUT_HEALTH_PUBLICATION_HTTP')
+    return json.loads(response)
+
+
 def publish_host_pause(day, token=None):
     from urllib.parse import urlencode
     from urllib.request import Request, urlopen
@@ -272,11 +291,10 @@ def publish_host_pause(day, token=None):
                        headers={'Authorization': 'bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
         with urlopen(oidc, timeout=5) as response:
             token = json.load(response)['value']
-    request = Request(ORIGIN + '/api/g11-input-pause', data=json.dumps(pause).encode(),
-                      headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
-    with urlopen(request, timeout=6) as response:
-        saved = json.load(response)
-    if saved.get('retry_at_jst') != pause['retry_at_jst'] or saved.get('date') != day:
+    saved = send_pause_to_site(ORIGIN, token, pause)
+    if (saved.get('retry_at_jst') != pause['retry_at_jst'] or saved.get('date') != day
+            or not isinstance(saved.get('observed_at_jst'), str)
+            or saved['observed_at_jst'][:10] != day or saved['observed_at_jst'] > pause['observed_at_jst']):
         raise ValueError('INPUT_HEALTH_PUBLICATION_READBACK')
     print('G11_INPUT_PAUSE_PUBLISHED=' + pause['retry_at_jst'], flush=True)
 
