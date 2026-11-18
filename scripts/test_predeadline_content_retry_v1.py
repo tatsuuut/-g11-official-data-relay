@@ -136,6 +136,27 @@ class RetryTests(unittest.TestCase):
         return retry.collect_with_retry(self.original, self.runner,
             max_requests=8, early_wait_seconds=wait)
 
+    def test_official_denial_is_observed_once_without_an_extra_fetch(self):
+        from urllib.error import HTTPError
+        failure = PipelineError('HTTP_403')
+        failure.__cause__ = HTTPError('https://www.boatrace.jp/',403,'Forbidden',{},io.BytesIO(b'Forbidden'))
+        before, odds = [task['SOURCE_ID'] for task in self.plan]
+        self.responses[before] = [failure]
+        self.runner.store.response_receipt = lambda _: None
+        def ledger_state():
+            return {'STOPPED': bool(self.attempts), 'PAUSE_UNTIL': {}}
+        self.runner.store.ledger = types.SimpleNamespace(state=ledger_state)
+        collect = retry._restricted_collector(self.original, None, None, isolate_host=True)
+        with patch('predeadline_refusal_evidence_v1.Thread') as thread:
+            result = collect(self.runner, max_requests=8, early_wait_seconds=0)
+            thread.return_value.start.assert_called_once()
+        self.assertIn('G11_OFFICIAL_REFUSAL=',self.log.getvalue())
+        self.assertEqual(self.attempts,[(before,BASE)])
+        self.assertEqual(result['RETRYABLE_FAILURES'][0]['REASON'],'HTTP_403')
+        self.assertTrue(any(row['SOURCE_ID']==odds and row['REASON']=='PIPELINE_STOPPED'
+                            for row in result['TASK_DEFERRED']))
+        self.assertEqual(self.writes,[])
+
     def test_transient_empty_pair_retries_in_process_and_saves_before_cutoff(self):
         result = self.run_capture()
         self.assertEqual(len(result['ACQUIRED']), 2)

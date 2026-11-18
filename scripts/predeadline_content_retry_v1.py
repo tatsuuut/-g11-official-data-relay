@@ -108,6 +108,8 @@ def _isolate_host(source):
          '                delay = max(0.0, (exc.retry_at - now).total_seconds())\n'),
         ('                reason = str(exc)\n',
          '                reason = str(exc)\n'
+         '                if reason in ("HTTP_403", "HTTP_429"):\n'
+         '                    _observe_refusal(task["SOURCE_ID"], exc)\n'
          '                if reason in ("HTTP_403", "HTTP_429", "PIPELINE_STOPPED"):\n'
          '                    deferred = _host_guard(self.store, self.client.clock()) or deferred\n'
          '                if reason == "PIPELINE_STOPPED" and deferred and deferred["REASON"] == reason:\n'
@@ -148,6 +150,8 @@ def _restricted_collector(original, selected, stop_at, *, early_capture=False, i
         namespace['_capture_due'] = effective_due
     if isolate_host:
         source = _isolate_host(source)
+        from predeadline_refusal_evidence_v1 import observe
+        namespace['_observe_refusal'] = observe
         namespace['_host_guard'] = official_host_guard
     exec(compile(textwrap.dedent(source), collector.__code__.co_filename,
                  'exec'), namespace)
