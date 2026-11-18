@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from urllib.request import Request, urlopen
@@ -472,6 +473,55 @@ def recover_failed_live(now: datetime, token: str, repository: str, origin: str)
     print("G11_FAILED_LIVE_RECOVERY=" + json.dumps(result, sort_keys=True))
 
 
+def published_official_input_state(receipt: dict, day: str, now: datetime) -> str:
+    def timestamp(value):
+        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+09:00", value):
+            raise ValueError("OFFICIAL_INPUT_TIME")
+        return datetime.fromisoformat(value)
+
+    def observed(row):
+        start = timestamp(row["observed_at_jst"])
+        if row["date"] != day or start.date().isoformat() != day or start > now:
+            raise ValueError("OFFICIAL_INPUT_DAY")
+        return start
+
+    if (now.utcoffset() != timedelta(hours=9) or now.date().isoformat() != day or receipt["date"] != day
+            or not isinstance(receipt["pauses"], list) or len(receipt["pauses"]) > 48):
+        raise ValueError("OFFICIAL_INPUT_RECEIPT")
+    stop = receipt["stop"]
+    if stop is not None:
+        observed(stop)
+        if stop["reason"] != "PIPELINE_STOPPED" or "retry_at_jst" in stop:
+            raise ValueError("OFFICIAL_INPUT_STOP")
+        return "PIPELINE_STOPPED"
+    active = False
+    for pause in receipt["pauses"]:
+        start, until = observed(pause), timestamp(pause["retry_at_jst"])
+        if not timedelta(0) < until - start <= timedelta(days=1):
+            raise ValueError("OFFICIAL_INPUT_PAUSE")
+        active |= now < until
+    return "HOST_PAUSED" if active else "NO_RECORDED_ACTIVE_HOLD"
+
+
+def check_published_official_inputs(day, now=None):
+    from daily_runtime_delivery_v1 import ORIGIN
+    now = now or datetime.now(JST)
+    if day != now.date().isoformat() or os.environ.get("G11_APP_ORIGIN", "").rstrip("/") != ORIGIN:
+        raise ValueError("WATCHDOG_INPUT_ORIGIN_OR_DAY")
+    try:
+        result = subprocess.run(["curl", "--fail", "--silent", "--show-error", "--max-time", "8",
+            "--max-filesize", "16384", "--proto", "=https", ORIGIN + "/api/g11-input-pause?date=" + day],
+            check=True, capture_output=True, timeout=10)
+        status = published_official_input_state(json.loads(result.stdout), day, now)
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
+        status = "UNVERIFIED"
+    print("G11_OFFICIAL_INPUT_WATCHDOG=" + status, flush=True)
+    if status != "NO_RECORDED_ACTIVE_HOLD":
+        print("::error title=G11 official input availability::" + status, flush=True)
+        return 1
+    return 0
+
+
 def main(now: datetime | None = None) -> None:
     if os.environ.get("G11_ARM_MORNING") == "true":
         print("G11_MORNING_ARM=" + arm_morning_handoff())
@@ -510,6 +560,9 @@ def main(now: datetime | None = None) -> None:
     if now >= _last_deadline(feed, day):
         print("G11_CRITICAL_WATCHDOG=NIGHT_HANDOFF")
         return
+    if day >= "2026-11-18" and os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            print("official_input_day=" + day, file=output)
     base = f"https://api.github.com/repos/{repository}/actions/workflows/g11-free-runner.yml"
     runs = _get(base + "/runs?per_page=30", token)["workflow_runs"]
     def jobs(run_id):
@@ -536,6 +589,8 @@ def main(now: datetime | None = None) -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--official-input-day":
+        sys.exit(check_published_official_inputs(sys.argv[2]))
     main()
 
 

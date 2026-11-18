@@ -57,7 +57,13 @@ jobs:
       - name: Audit public production firewall
         run: python3 scripts/audit_public_surface.py
       - name: Recover absent critical checkpoint without a model runtime
+        id: checkpoint
         run: python3 scripts/predeadline_watchdog_v1.py
+      - name: Check official input availability independently of checkpoint success
+        if: ${{ !cancelled() && steps.checkpoint.outputs.official_input_day != '' }}
+        env:
+          OPERATIONAL_DATE: ${{ steps.checkpoint.outputs.official_input_day }}
+        run: python3 scripts/predeadline_watchdog_v1.py --official-input-day "${OPERATIONAL_DATE}"
 
   arm-first-race:
     if: >-
