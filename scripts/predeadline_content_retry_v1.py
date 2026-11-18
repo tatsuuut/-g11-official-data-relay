@@ -25,6 +25,7 @@ MAX_WAIT_SECONDS = 30
 MIN_REMAINING_SECONDS = 180
 RETRY_START_WINDOW_SECONDS = 60
 MAX_RETRY_SOURCES = 2
+MAX_HOST_RESUME_WAIT_SECONDS = 180
 
 
 def _report(status, **fields):
@@ -156,6 +157,42 @@ def merge_attempts(first, second):
     return result
 
 
+def resume_at_host_release(first, plan, runner, capture, max_requests, now):
+    """Use the existing worker only when the official pause is about to expire."""
+    from predeadline_input_health_v1 import host_pause
+    from predeadline_capture_window_v1 import effective_due
+    pause = host_pause(first['DEFERRED'], now.date().isoformat(), now)
+    if not pause or first['ACQUIRED'] or first['RETRYABLE_FAILURES'] or first['REJECTED']:
+        return None
+    release = datetime.fromisoformat(first['DEFERRED']['RETRY_AT_JST'])
+    delay = (release - now).total_seconds()
+    if delay > MAX_HOST_RESUME_WAIT_SECONDS or release.date() != now.date():
+        return None
+    def eligible_at(at):
+        for task in plan:
+            due = datetime.fromisoformat(task['DUE_AT_JST'])
+            deadline = datetime.fromisoformat(task['MUST_FINISH_BEFORE_JST'])
+            if effective_due(due, deadline) <= at < deadline:
+                saved = runner.store.root / 'snapshots' / 'predeadline' / (task['SOURCE_ID'] + '.json')
+                if not saved.exists():
+                    return True
+        return False
+    if not eligible_at(release):
+        return None
+    _report('WAIT_FOR_HOST_RELEASE', retry_at_jst=pause['retry_at_jst'])
+    runner.sleeper(delay)
+    wake = runner.client.clock()
+    if wake < release or wake.date() != now.date() or not eligible_at(wake):
+        return first
+    # The original admission code rechecks host backoff, pacing, stored
+    # receipts, daily limits and each deadline. It may defer again.
+    second = capture(runner, max_requests=max_requests, early_wait_seconds=0)
+    result = merge_attempts(first, second)
+    result['DEFERRED'] = second['DEFERRED']
+    _report('HOST_RELEASE_CHECK', acquired=len(second['ACQUIRED']), deferred=bool(second['DEFERRED']))
+    return result
+
+
 def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, early_capture=False):
     capture = _restricted_collector(original,None,None,early_capture=True) if early_capture else original
     first = capture(runner, max_requests=max_requests,
@@ -169,10 +206,15 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, ea
             return first
         morning = runner.store.load_verified_snapshot('morning', 'official-day-input')
         plan = morning['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN']
-        selected, delay, status = select_retry(first, plan, runner.client.clock(),early_capture=early_capture)
+        now = runner.client.clock()
+        selected, delay, status = select_retry(first, plan, now,early_capture=early_capture)
     except (KeyError, TypeError, ValueError) as exc:
         _report('SELECTION_SKIPPED', error_type=type(exc).__name__)
         return first
+    if early_capture and first['DEFERRED'] and now.date().isoformat() >= '2026-11-18':
+        resumed = resume_at_host_release(first, plan, runner, capture, max_requests, now)
+        if resumed is not None:
+            return resumed
     if not selected:
         _report(status)
         return first

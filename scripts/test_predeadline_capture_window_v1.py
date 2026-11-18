@@ -44,6 +44,41 @@ def actual_formal_binding():
 
 
 class EarlyAcquisitionTests(unittest.TestCase):
+    def host_fixture(self, seconds):
+        fixture = self.f
+        fixture.now = datetime.fromisoformat('2026-11-18T14:14:00+09:00')
+        release = fixture.now + timedelta(seconds=seconds)
+        key = '20261118-18-12'
+        for task in fixture.plan:
+            task.update(RACE_KEY=key, SOURCE_ID=task['KIND'].lower()+'-'+key,
+                        DUE_AT_JST='2026-11-18T14:14:00+09:00', MUST_FINISH_BEFORE_JST='2026-11-18T14:21:00+09:00')
+        self.complete()
+        fetch = fixture.fetch
+        def admitted(*args):
+            if fixture.now < release:
+                raise old.Deferred(release,'HOST_PAUSED')
+            return fetch(*args)
+        fixture.runner.client.fetch_validated_once = admitted
+        return release
+
+    def test_recent_host_release_resumes_original_capture_once_with_real_times(self):
+        release = self.host_fixture(90)
+        result = self.collect()
+        self.assertIsNone(result['DEFERRED'])
+        self.assertEqual(len(result['ACQUIRED']),2)
+        self.assertEqual(self.f.sleeps,[90])
+        self.assertTrue(all(at == release for _,at in self.f.attempts+self.f.writes))
+
+    def test_long_host_pause_is_kept_and_late_wakeup_does_not_capture(self):
+        self.host_fixture(30*60)
+        result = self.collect()
+        self.assertEqual(result['DEFERRED']['REASON'],'HOST_PAUSED')
+        self.assertEqual(self.f.sleeps+self.f.attempts,[])
+        self.host_fixture(90)
+        self.f.runner.sleeper = lambda seconds: self.f.sleep(seconds+600)
+        self.assertFalse(self.collect()['ACQUIRED'])
+        self.assertFalse(self.f.attempts)
+
     def setUp(self):
         fixture=old.RetryTests(methodName='runTest');fixture.setUp()
         self.addCleanup(fixture.doCleanups)

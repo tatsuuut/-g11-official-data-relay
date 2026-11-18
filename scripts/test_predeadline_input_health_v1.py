@@ -48,6 +48,28 @@ class Artifact:
 
 
 class HealthTests(unittest.TestCase):
+    def test_only_the_bound_beforeinfo_event_can_date_a_saved_host_pause(self):
+        ledger = Mock()
+        until = NOW + health.timedelta(minutes=20)
+        start = until - health.timedelta(minutes=30)
+        ledger.state.return_value = {'STOPPED':False,'GENERAL_HTTP_403_COUNT':1,'PAUSE_UNTIL':{'www.boatrace.jp':until}}
+        events = [{'TYPE':'REQUEST_STARTED','PAYLOAD':{'HOST':'www.boatrace.jp','SOURCE_ID':SID,'REQUEST_ID':'one'}},
+                  {'TYPE':'OUTCOME_RECORDED','AT_JST':start.isoformat(),'PAYLOAD':{'OUTCOME':'HTTP_403','REQUEST_ID':'one'}}]
+        ledger.events.return_value = events
+        for at in (NOW, until+health.timedelta(minutes=1)):
+            self.assertEqual(health.saved_beforeinfo_pause(ledger,DAY,at,1800)['observed_at_jst'],start.isoformat())
+        events[0]['PAYLOAD']['SOURCE_ID'] = 'odds3t-'+KEY
+        self.assertIsNone(health.saved_beforeinfo_pause(ledger,DAY,NOW,1800))
+
+    def test_host_pause_remains_visible_even_without_a_new_per_source_error(self):
+        result = self.summary({'DEFERRED': {'REASON': 'HOST_PAUSED','RETRY_AT_JST': DAY+'T16:29:00+09:00'}})
+        self.assertEqual((result['status'],result['source_issue_count']), ('DEFERRED',0))
+        self.assertEqual(result['host_pause'], {'date':DAY, 'reason':'HOST_PAUSED',
+            'observed_at_jst':NOW.isoformat(), 'retry_at_jst':DAY+'T16:29:00+09:00'})
+        for deferred in ({'REASON':'HOST_PAUSED','RETRY_AT_JST':'bad'}, {'REASON':'SERIAL_PACING'},
+                         {'REASON':'HOST_PAUSED','RETRY_AT_JST':DAY+'T15:00:00+09:00'}):
+            self.assertIsNone(self.summary({'DEFERRED':deferred})['host_pause'])
+
     def setUp(self):
         t = tempfile.TemporaryDirectory()
         self.addCleanup(t.cleanup)
