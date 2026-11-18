@@ -23,6 +23,7 @@ on:
   schedule:
     # Recovery 22:00-01:55 JST; no-op after complete app readback.
     - cron: "*/5 13-16 * * *"
+    - cron: "15 18-20 * * *"
 
 permissions:
   actions: write
@@ -50,6 +51,10 @@ jobs:
 
       - name: Test night date and completion decisions without live mutation
         run: python3 scripts/audit_three_phase_runtime_contract.py --night-self-test
+
+      - name: Reconcile the previous race day during morning recovery
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[reconcile-previous-night]')
+        run: OPERATIONAL_DATE="$(date +%F)" python3 scripts/previous_night_dispatch_v1.py
 
       - name: Dispatch explicitly authorized October 13 settlement recovery
         if: github.event_name == 'push' && contains(github.event.head_commit.message, '[wild4-recover-20261013-v2]')

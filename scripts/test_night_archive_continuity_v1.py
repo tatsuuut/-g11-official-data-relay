@@ -1,7 +1,7 @@
 from datetime import datetime
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from night_archive_continuity_v1 import separate_result_host
 from previous_night_dispatch_v1 import reconcile, JST
 
@@ -31,18 +31,22 @@ class TestContinuity(unittest.TestCase):
 
     def test_previous_day_only_no_competing_run_or_duplicate(self):
         now=datetime(2026,11,19,2,40,tzinfo=JST)
-        def run(stage='PREDEADLINE',other=None,prior=None):
+        def run(stage='PREDEADLINE',other=None,prior=None,complete=True):
             client=Mock()
             def request(method,url,*data):
                 if method=='POST': return None
                 rows=(other if 'status=' in url else prior) or []
                 return {'workflow_runs':rows,'total_count':len(rows)}
             client.request.side_effect=request
-            status=reconcile(now,'2026-11-19','10',lambda d:{'date':d,'stage':stage,'races':132},client)
+            feed = {'operational_date_jst': DAY, 'stage': stage, 'status': 'PASS',
+                    'counts': {'races': 1}, 'races': [{'key':'20261118-01-01'}]}
+            with patch('previous_night_dispatch_v1.night_feed_ready', return_value={'ready': complete}):
+                status = reconcile(now,'2026-11-19','10',lambda d:feed,client)
             return status,client
         status,client=run()
         self.assertEqual(status,'DISPATCHED_'+DAY)
         self.assertEqual(client.request.call_args.args[-1]['inputs'],{'phase':'night','operational_date':DAY})
         self.assertEqual(run('NIGHT')[0],'ALREADY_PUBLISHED')
+        self.assertEqual(run('NIGHT',complete=False)[0],'DISPATCHED_'+DAY)
         self.assertEqual(run(other=[{'id':11}])[0],'OTHER_RUN_ACTIVE')
         self.assertEqual(run(prior=[{'display_title':'LIVE-night-'+DAY}])[0],'RECOVERY_ALREADY_REQUESTED')
