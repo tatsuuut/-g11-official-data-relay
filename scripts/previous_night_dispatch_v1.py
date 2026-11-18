@@ -6,10 +6,11 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from audit_three_phase_runtime_contract import night_feed_ready
 from predeadline_dispatch_v1 import ACTIVE, Client, JST, WORKFLOW
 
 
-def reconcile(now, today, current_run, site, client):
+def reconcile(now, today, current_run, site, client, verified_night):
     if today != now.date().isoformat() or not (2 <= now.hour < 6):
         return 'OUTSIDE_MORNING_WINDOW'
     day = (now.date() - timedelta(days=1)).isoformat()
@@ -18,9 +19,9 @@ def reconcile(now, today, current_run, site, client):
         return 'NO_SAVED_DAY'
     if meta.get('date') != day or not isinstance(meta.get('races'), int) or meta['races'] <= 0:
         raise ValueError('INVALID_DAY_METADATA')
-    if meta.get('stage') == 'NIGHT':
+    if meta.get('stage') == 'NIGHT' and verified_night(day):
         return 'ALREADY_PUBLISHED'
-    if meta.get('stage') not in ('MORNING','PREDEADLINE'):
+    if meta.get('stage') not in ('MORNING','PREDEADLINE','NIGHT'):
         raise ValueError('UNEXPECTED_STAGE')
     path = '/actions/workflows/' + WORKFLOW
     # Check pending runs before adding to the existing serial mutation queue.
@@ -49,6 +50,12 @@ def overview(day):
         raise
 
 
+def verified_night(day):
+    url = os.environ['G11_APP_ORIGIN'].rstrip('/') + '/api/g11-feed?' + urlencode({'date': day})
+    with urlopen(Request(url, headers={'Accept': 'application/json'}), timeout=30) as response:
+        return night_feed_ready(json.load(response), day)['ready']
+
+
 if __name__=='__main__':
-    result=reconcile(datetime.now(JST),os.environ['OPERATIONAL_DATE'],os.environ['GITHUB_RUN_ID'],overview,Client(os.environ['GH_TOKEN']))
+    result=reconcile(datetime.now(JST),os.environ['OPERATIONAL_DATE'],os.environ['GITHUB_RUN_ID'],overview,Client(os.environ['GH_TOKEN']),verified_night)
     print('G11_PREVIOUS_NIGHT='+result,flush=True)

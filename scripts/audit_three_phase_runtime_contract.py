@@ -248,6 +248,34 @@ def night_operational_date(now):
     return None
 
 
+def saved_zero_ticket_abstention(race):
+    """A verified pre-race decision to skip has valid zero-stake NIGHT accounting."""
+    from datetime import datetime
+
+    decision = race.get("trifecta_confidence")
+    if not isinstance(decision, dict):
+        return False
+    if (decision.get("race_id") != race.get("key")
+            or decision.get("status") != "ABSTAIN"
+            or decision.get("reason") != "ZERO_TICKET_ABSTAIN_NO_CONFIDENCE"
+            or race.get("p3_status") != "PASS"
+            or race.get("p3_production_bets") != [] or race.get("practical_bets") != []
+            or decision.get("production_bet_order") != []
+            or type(decision.get("production_bet_count")) is not int
+            or decision["production_bet_count"] != 0
+            or type(race.get("production_points")) is not int or race["production_points"] != 0
+            or not re.fullmatch(r"[0-9a-f]{64}", str(race.get("p3_morning_snapshot_sha256")))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(decision.get("bet_artifact_sha")))):
+        return False
+    try:
+        locked = datetime.fromisoformat(decision["prediction_locked_at"])
+        deadline = datetime.fromisoformat(race["deadline_jst"])
+        return (locked.tzinfo is not None and deadline.tzinfo is not None and locked < deadline
+                and deadline == datetime.fromisoformat(decision["race_deadline_at"]))
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def night_feed_ready(feed, operational_date):
     """Read-only stop decision, not a replacement for the Site validator.
 
@@ -352,7 +380,7 @@ def night_feed_ready(feed, operational_date):
                 or (type(canonical_bets) is list and len(canonical_bets) == 8))):
             return no("DISPLAY_SPECIAL8_TRUNCATED:" + key)
         if race["research_eligible"]:
-            if not bets:
+            if not bets and not saved_zero_ticket_abstention(race):
                 return no("FORMAL_BETS_MISSING:" + key)
             finance = race.get("research_finance")
             if race.get("formal_status") != "FORMAL" or not valid_finance(finance, bets, settlements, "VERIFIED"):
@@ -469,6 +497,21 @@ def test_night_policy():
     refund["races"][0]["research_finance"].update(refund_amount=300, net_investment=0, prize_return=0, profit=0)
     refund["research_db"].update(practical_return=300, practical_profit=0)
     check(night_feed_ready(refund, "2026-09-25")["ready"], "full_refund_final")
+    abstention = deepcopy(feed)
+    zero = abstention["races"][0]
+    zero.update(practical_bets=[], p3_production_bets=[], p3_status="PASS", production_points=0,
+                p3_morning_snapshot_sha256="a"*64, deadline_jst="2026-09-25T10:00:00+09:00")
+    zero["research_finance"].update(gross_stake=0, net_investment=0, prize_return=0, profit=0)
+    abstention["research_db"].update(practical_investment=0, practical_return=0, practical_profit=0)
+    check(not night_feed_ready(abstention, "2026-09-25")["ready"], "empty_bets_without_decision")
+    zero["trifecta_confidence"] = {
+        "race_id": zero["key"], "status": "ABSTAIN", "reason": "ZERO_TICKET_ABSTAIN_NO_CONFIDENCE",
+        "production_bet_count": 0, "production_bet_order": [], "bet_artifact_sha": "b"*64,
+        "prediction_locked_at": "2026-09-25T05:40:00+09:00", "race_deadline_at": zero["deadline_jst"],
+    }
+    check(night_feed_ready(abstention, "2026-09-25")["ready"], "saved_no_bet_zero_stake")
+    zero["trifecta_confidence"]["prediction_locked_at"] = zero["deadline_jst"]
+    check(not night_feed_ready(abstention, "2026-09-25")["ready"], "late_abstention")
     # A published 8-point set must remain 8 points; the stop decision never truncates.
     eight = deepcopy(feed)
     eight["races"][0]["practical_bets"] += ["2-3-1", "3-1-2", "3-2-1", "4-1-2", "4-2-1"]
