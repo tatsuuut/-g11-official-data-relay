@@ -56,6 +56,19 @@ jobs:
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[reconcile-previous-night]')
         run: OPERATIONAL_DATE="$(date +%F)" python3 scripts/previous_night_dispatch_v1.py
 
+      - name: Settle the saved November 18 Goripan LOCKs from the successful NIGHT
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[goripan-night-20261118]')
+        run: |
+          set -euo pipefail
+          test "$(date +%F)" = 2026-11-19
+          test "${GITHUB_RUN_ATTEMPT}" = 1
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/44365272981" | jq -e '
+            .conclusion == "success" and .head_branch == "main" and .run_attempt == 1
+            and .display_title == "LIVE-night-2026-11-18"
+            and .path == ".github/workflows/g11-free-runner.yml"' >/dev/null
+          gh workflow run 364923281 --ref main -f mode=wild4-settle -f operational_date=2026-11-18 \
+            -f night_checkpoint_key=g11-state-v4-published-2026-11-18-44365272981-1-checkpoint
+
       - name: Dispatch explicitly authorized October 13 settlement recovery
         if: github.event_name == 'push' && contains(github.event.head_commit.message, '[wild4-recover-20261013-v2]')
         run: |
