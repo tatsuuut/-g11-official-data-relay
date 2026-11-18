@@ -158,7 +158,13 @@ def run_relay():
                     return
                 # Use the same imported module that owns the isolated reader.
                 from g11.relay import v1 as relay
-                return relay.main(original_argv[2:])
+                arguments = original_argv[2:]
+                if '--phase' in arguments and arguments[arguments.index('--phase')+1] == 'night':
+                    from g11.canonical import official_pipeline
+                    from night_archive_continuity_v1 import isolated_night_archive
+                    with isolated_night_archive(official_pipeline):
+                        return relay.main(arguments)
+                return relay.main(arguments)
             runpy.run_module(target, run_name='__main__')
     finally:
         sys.argv = original_argv

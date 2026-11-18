@@ -140,6 +140,9 @@ class ScheduledPhaseRoutingTests(unittest.TestCase):
         ):
             with self.subTest(step=name):
                 step = workflow.split(f"      - name: {name}\n",1)[1].split("\n      - name:",1)[0]
+                if mode == "bootstrap":
+                    self.assertIn("run: bash scripts/bootstrap_after_morning.sh", step)
+                    step += (WORKFLOW.parents[2] / "scripts/bootstrap_after_morning.sh").read_text()
                 self.assertIn('python3 scripts/predeadline_dispatch_v1.py',step)
                 self.assertIn('--mode '+mode,step)
                 self.assertNotIn('-X POST',step)
