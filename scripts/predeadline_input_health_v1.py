@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from html.parser import HTMLParser
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -19,6 +20,41 @@ SCHEMA = 'G11_PREDEADLINE_INPUT_HEALTH_V1'
 MAX_DETAILS = 24
 KEY = re.compile(r'\d{8}-(?:0[1-9]|1\d|2[0-4])-(?:0[1-9]|1[0-2])')
 CODE = re.compile(r'[A-Z][A-Z0-9_:.-]{0,159}')
+
+
+def host_pause(deferred, day, now):
+    if not isinstance(deferred, dict) or deferred.get('REASON') != 'HOST_PAUSED':
+        return None
+    try:
+        retry = datetime.fromisoformat(deferred['RETRY_AT_JST'])
+    except (KeyError, ValueError, TypeError):
+        return None
+    if (now.utcoffset() != timedelta(hours=9) or now.date().isoformat() != day
+            or retry.utcoffset() != timedelta(hours=9) or retry <= now):
+        return None
+    return {'date': day, 'reason': 'HOST_PAUSED', 'observed_at_jst': now.isoformat(timespec='seconds'),
+            'retry_at_jst': retry.isoformat(timespec='seconds')}
+
+
+def saved_beforeinfo_pause(ledger, day, now, duration):
+    """Recover the observed start from the checked request chain, including just after release."""
+    state = ledger.state()
+    retry = state['PAUSE_UNTIL'].get('www.boatrace.jp')
+    if (state['STOPPED'] or state['GENERAL_HTTP_403_COUNT'] != 1 or retry is None
+            or retry < now - timedelta(minutes=15)):
+        return None
+    start = retry - timedelta(seconds=duration)
+    if start.date().isoformat() != day or start > now:
+        return None
+    events = ledger.events()
+    for i in range(len(events) - 1, 0, -1):
+        event, prior = events[i], events[i-1]
+        if (event['TYPE'] == 'OUTCOME_RECORDED' and event['PAYLOAD']['OUTCOME'] == 'HTTP_403'
+                and datetime.fromisoformat(event['AT_JST']) == start and prior['TYPE'] == 'REQUEST_STARTED'
+                and prior['PAYLOAD']['REQUEST_ID'] == event['PAYLOAD']['REQUEST_ID']
+                and prior['PAYLOAD']['HOST'] == 'www.boatrace.jp' and prior['PAYLOAD']['SOURCE_ID'].startswith('beforeinfo-')):
+            return host_pause({'REASON':'HOST_PAUSED', 'RETRY_AT_JST':retry.isoformat()}, day, start)
+    return None
 
 
 class ScheduleTable(HTMLParser):
@@ -183,7 +219,8 @@ def summarize(artifact, day, acquisition, *, now=None):
         except (ValueError, KeyError, OSError, RuntimeError, TypeError): row['evidence_status'] = 'UNVERIFIED'
     terminal = any('MISSED' in row['categories'] or 'UNAVAILABLE' in row['categories'] for row in issues.values())
     return {'schema': SCHEMA, 'operational_date_jst': day,
-            'status': 'PARTIAL' if terminal else 'DEFERRED' if issues else 'PASS',
+            'status': 'PARTIAL' if terminal else 'DEFERRED' if issues or acquisition.get('DEFERRED') else 'PASS',
+            'host_pause': host_pause(acquisition.get('DEFERRED'), day, now),
             'scope': 'OFFICIAL_INPUTS_ONLY_NOT_ENGINE_OR_DEVICE_COMPLETENESS',
             'source_issue_count': len(issues),
             'race_issue_count': len({row['race_key'] for row in issues.values()}),
@@ -195,10 +232,61 @@ def summarize(artifact, day, acquisition, *, now=None):
 def report(artifact, day, acquisition):
     value = summarize(artifact, day, acquisition)
     print('G11_PREDEADLINE_INPUT_HEALTH=' + json.dumps(value, ensure_ascii=False, sort_keys=True), flush=True)
+    pause = value['host_pause']
+    if pause or acquisition.get('MISSED'):
+        try:
+            from g11.canonical.official_pipeline import FIRST_403_PAUSE_SECONDS
+            recorded = saved_beforeinfo_pause(artifact.ledger, day, datetime.now(JST), FIRST_403_PAUSE_SECONDS)
+            if recorded and (not pause or pause['retry_at_jst'] == recorded['retry_at_jst']):
+                pause = recorded
+        except (ImportError, AttributeError, KeyError, ValueError, OSError, RuntimeError, TypeError):
+            pass
+    if pause:
+        print('G11_VERIFIED_HOST_PAUSE=' + json.dumps(pause, sort_keys=True), flush=True)
+        if value['host_pause']:
+            print('::warning title=G11 official input paused::Next eligible request at ' + pause['retry_at_jst'], flush=True)
+        workspace = os.environ.get('GITHUB_WORKSPACE')
+        if workspace and os.environ.get('GITHUB_RUN_ID'):
+            path = Path(workspace) / '.relay-output' / 'host-pause.json'
+            path.write_text(json.dumps({**pause, 'run_id': os.environ['GITHUB_RUN_ID']}))
     if value['status'] == 'PARTIAL':
         print('::warning title=G11 predeadline input gaps::' +
               str(value['race_issue_count']) + ' races have missing or unavailable official inputs; checkpoint success is not full operation success.', flush=True)
     return value
+
+
+def publish_host_pause(day, token=None):
+    from urllib.parse import urlencode
+    from urllib.request import Request, urlopen
+    from daily_runtime_delivery_v1 import ORIGIN
+    root = Path(os.environ['GITHUB_WORKSPACE'])
+    pause = json.loads((root / '.relay-output' / 'host-pause.json').read_bytes())
+    state = json.loads((root / '.relay-state' / 'relay-state.json').read_bytes())['CRITICAL']
+    if (os.environ['G11_APP_ORIGIN'] != ORIGIN or pause['date'] != day or state['OPERATIONAL_DATE'] != day
+            or pause['run_id'] != os.environ['GITHUB_RUN_ID'] or state['LAST_CRITICAL_RUN_ID'] != pause['run_id']
+            or state['CRITICAL_CHECKPOINT_STATUS'] != 'PASS' or not re.fullmatch('[0-9a-f]{64}', state['AUTHORITY_SHA256'])):
+        raise ValueError('INPUT_HEALTH_PUBLICATION_BINDING')
+    pause['authority_sha256'] = state['AUTHORITY_SHA256']
+    if token is None:
+        oidc = Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&' + urlencode({'audience': os.environ['G11_OIDC_AUDIENCE']}),
+                       headers={'Authorization': 'bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+        with urlopen(oidc, timeout=5) as response:
+            token = json.load(response)['value']
+    request = Request(ORIGIN + '/api/g11-input-pause', data=json.dumps(pause).encode(),
+                      headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+    with urlopen(request, timeout=6) as response:
+        saved = json.load(response)
+    if saved.get('retry_at_jst') != pause['retry_at_jst'] or saved.get('date') != day:
+        raise ValueError('INPUT_HEALTH_PUBLICATION_READBACK')
+    print('G11_INPUT_PAUSE_PUBLISHED=' + pause['retry_at_jst'], flush=True)
+
+
+def publish_pause_if_observed(root, day, token=None):
+    if (root / '.relay-output' / 'host-pause.json').is_file():
+        try:
+            publish_host_pause(day, token)
+        except Exception as exc:
+            print('::warning title=G11 official input pause::Status publication unverified: ' + type(exc).__name__, flush=True)
 
 
 def observed_capture(original, artifact_factory, day):

@@ -350,7 +350,9 @@ def main():
             'EARLY_PUBLICATION_PERSISTENCE_REQUIRED')
     ready = project_saved(root / '.relay-state', args.day, os.environ['GITHUB_RUN_ID'],
                           root / '.g11-private', output)
+    from predeadline_input_health_v1 import publish_pause_if_observed
     if not ready:
+        publish_pause_if_observed(root, args.day)
         print('G11_EARLY_PUBLICATION=NO_NEW_LOCKS')
         return
     request = Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' +
@@ -373,6 +375,7 @@ def main():
     if fresh['races']:
         from selective_alert_input_v1 import deliver_optional
         deliver_optional(root / '.relay-state/store', fresh, ORIGIN, token=token)
+    publish_pause_if_observed(root, args.day, token)
     print('G11_EARLY_PUBLICATION=' + json.dumps({
         'status': receipt['site_get_readback'], 'at': datetime.now(JST).isoformat(),
         'authority': receipt['authority_sha256'], 'prediction_recalculation': 0}, sort_keys=True))
