@@ -187,6 +187,26 @@ class HealthTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'HEALTH_SOURCE_IDENTITY'):
                 health.official_schedule(page(), url, DAY, '03')
 
+    def test_site_pause_uses_the_relay_transport_and_keeps_bearer_off_argv(self):
+        receipt = {'date': DAY, 'observed_at_jst': DAY + 'T15:00:00+09:00', 'retry_at_jst': DAY + 'T15:30:00+09:00'}
+        def send(argv, *, input, **kwargs):
+            self.assertEqual(argv[0], 'curl')
+            self.assertIn('https://example.invalid/api/g11-input-pause', argv)
+            self.assertIn('Authorization: Bearer fixture-token\n', input)
+            self.assertNotIn('fixture-token', str(argv))
+            path = Path(argv[argv.index('--data-binary') + 1][1:])
+            self.assertEqual(json.loads(path.read_bytes()), receipt)
+            return Mock(returncode=0, stdout=json.dumps(receipt) + '\n200')
+        with patch.object(health.subprocess, 'run', side_effect=send):
+            self.assertEqual(health.send_pause_to_site('https://example.invalid','fixture-token',receipt), receipt)
+
+    def test_rejected_site_pause_records_only_the_http_status(self):
+        output = io.StringIO()
+        with patch.object(health.subprocess, 'run', return_value=Mock(returncode=0, stdout='private body\n409')), redirect_stdout(output):
+            with self.assertRaisesRegex(RuntimeError, 'INPUT_HEALTH_PUBLICATION_HTTP'):
+                health.send_pause_to_site('https://example.invalid', 'fixture-token', {})
+        self.assertEqual(output.getvalue().strip(), 'G11_INPUT_PAUSE_HTTP=409')
+
     def test_observer_calls_capture_once_and_returns_identical_evidence(self):
         acquisition = {'MISSED': [SID]}
         original = Mock(return_value=acquisition)
