@@ -9,6 +9,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/bootstrap_after_morning.sh",
+    "scripts/night_archive_continuity_v1.py",
+    "scripts/test_night_archive_continuity_v1.py",
+    "scripts/previous_night_dispatch_v1.py",
     '.github/workflows/g11-tactical-manshu-audit.yml',
     'scripts/predeadline_input_health_v1.py',
     'scripts/test_predeadline_input_health_v1.py',
