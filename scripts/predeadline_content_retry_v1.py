@@ -78,7 +78,51 @@ def select_retry(first, plan, now, *, early_capture=False):
     return selected, max(delays), 'READY'
 
 
-def _restricted_collector(original, selected, stop_at, *, early_capture=False):
+def official_host_guard(store, now):
+    state = store.ledger.state()
+    if state['STOPPED'] is True:
+        return {'REASON': 'PIPELINE_STOPPED'}
+    until = state['PAUSE_UNTIL'].get('www.boatrace.jp')
+    if until and now < until:
+        return {'REASON': 'HOST_PAUSED', 'RETRY_AT_JST': until.isoformat(timespec='seconds')}
+    return None
+
+
+def _isolate_host(source):
+    # Only the two reviewed collector hashes get here. Keep validation, source
+    # receipt verification, race scope, immutable writes and cutoff in the original.
+    changes = [
+        ('        task_index = 0\n', '        deferred = _host_guard(self.store, self.client.clock())\n        task_index = 0\n'),
+        ('            try:\n                receipt, parsed = ',
+         '            if deferred and self.store.response_receipt(task["SOURCE_ID"]) is None:\n'
+         '                task_deferred.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"], **deferred})\n'
+         '                task_index += 1\n'
+         '                continue\n'
+         '            try:\n                receipt, parsed = '),
+        ('                delay = max(0.0, (exc.retry_at - now).total_seconds())\n',
+         '                if exc.reason == "HOST_PAUSED":\n'
+         '                    deferred = {"REASON": exc.reason, "RETRY_AT_JST": _format_jst(exc.retry_at)}\n'
+         '                    task_deferred.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"], **deferred})\n'
+         '                    task_index += 1\n'
+         '                    continue\n'
+         '                delay = max(0.0, (exc.retry_at - now).total_seconds())\n'),
+        ('                reason = str(exc)\n',
+         '                reason = str(exc)\n'
+         '                if reason in ("HTTP_403", "HTTP_429", "PIPELINE_STOPPED"):\n'
+         '                    deferred = _host_guard(self.store, self.client.clock()) or deferred\n'
+         '                if reason == "PIPELINE_STOPPED" and deferred and deferred["REASON"] == reason:\n'
+         '                    task_deferred.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"], **deferred})\n'
+         '                    task_index += 1\n'
+         '                    continue\n'),
+    ]
+    for anchor, replacement in changes:
+        if source.count(anchor) != 1:
+            raise ValueError('HOST_GUARD_COLLECTOR_CONTRACT')
+        source = source.replace(anchor, replacement, 1)
+    return source
+
+
+def _restricted_collector(original, selected, stop_at, *, early_capture=False, isolate_host=False):
     collector = inspect.unwrap(original)
     source = inspect.getsource(collector)
     if hashlib.sha256(source.encode()).hexdigest() not in COLLECTOR_SHAS:
@@ -102,6 +146,9 @@ def _restricted_collector(original, selected, stop_at, *, early_capture=False):
             raise ValueError('EARLY_CAPTURE_COLLECTOR_CONTRACT')
         source = source.replace(anchor, anchor+'            due = _capture_due(due, deadline)\n', 1)
         namespace['_capture_due'] = effective_due
+    if isolate_host:
+        source = _isolate_host(source)
+        namespace['_host_guard'] = official_host_guard
     exec(compile(textwrap.dedent(source), collector.__code__.co_filename,
                  'exec'), namespace)
     restricted = namespace[collector.__name__]
@@ -194,7 +241,9 @@ def resume_at_host_release(first, plan, runner, capture, max_requests, now):
 
 
 def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, early_capture=False):
-    capture = _restricted_collector(original,None,None,early_capture=True) if early_capture else original
+    isolate = early_wait_seconds == 0 and runner.client.clock().date().isoformat() >= '2026-11-18'
+    capture = (_restricted_collector(original, None, None, early_capture=early_capture, isolate_host=isolate)
+               if early_capture or isolate else original)
     first = capture(runner, max_requests=max_requests,
                      early_wait_seconds=early_wait_seconds)
     # The existing nowait caller must opt in. Other callers retain their policy.
@@ -228,7 +277,7 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, ea
         _report('WAKEUP_SKIPPED', reason=status)
         return first
     restricted = _restricted_collector(original, selected,
-        now + timedelta(seconds=RETRY_START_WINDOW_SECONDS),early_capture=early_capture)
+        now + timedelta(seconds=RETRY_START_WINDOW_SECONDS),early_capture=early_capture, isolate_host=isolate)
     second = restricted(runner, max_requests=min(max_requests, MAX_RETRY_SOURCES),
                         early_wait_seconds=0)
     _report('ATTEMPTED_ONCE', source_ids=selected, acquired=second['ACQUIRED'],

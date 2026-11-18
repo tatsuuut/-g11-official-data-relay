@@ -38,9 +38,10 @@ def host_pause(deferred, day, now):
             'retry_at_jst': retry.isoformat(timespec='seconds')}
 
 
-def saved_beforeinfo_pause(ledger, day, now, duration):
+def saved_beforeinfo_pause(ledger, day, now, duration, *, state=None):
     """Recover the observed start from the checked request chain, including just after release."""
-    state = ledger.state()
+    if state is None:
+        state = ledger.state()
     retry = state['PAUSE_UNTIL'].get('www.boatrace.jp')
     if (state['STOPPED'] or state['GENERAL_HTTP_403_COUNT'] != 1 or retry is None
             or retry < now - timedelta(minutes=15)):
@@ -56,6 +57,34 @@ def saved_beforeinfo_pause(ledger, day, now, duration):
                 and prior['PAYLOAD']['REQUEST_ID'] == event['PAYLOAD']['REQUEST_ID']
                 and prior['PAYLOAD']['HOST'] == 'www.boatrace.jp' and prior['PAYLOAD']['SOURCE_ID'].startswith('beforeinfo-')):
             return host_pause({'REASON':'HOST_PAUSED', 'RETRY_AT_JST':retry.isoformat()}, day, start)
+    return None
+
+
+def saved_pipeline_stop(ledger, day, now, state):
+    """Date the first terminal transition in the already verified daily request chain."""
+    if state['STOPPED'] is not True or now.date().isoformat() != day or now.utcoffset() != timedelta(hours=9):
+        return None
+    counts = {'HTTP_403': 0, 'HTTP_429': 0}
+    thresholds = {'HTTP_403': 2, 'HTTP_429': 3}
+    active = None
+    for event in ledger.events():
+        payload = event['PAYLOAD']
+        if event['TYPE'] == 'REQUEST_STARTED':
+            active = payload
+            continue
+        if event['TYPE'] != 'OUTCOME_RECORDED' or not active or payload['REQUEST_ID'] != active['REQUEST_ID']:
+            return None
+        source = active['SOURCE_ID']
+        active = None
+        outcome = payload['OUTCOME']
+        if outcome not in counts or source.startswith('odds3t-'):
+            continue
+        counts[outcome] += 1
+        if counts[outcome] == thresholds[outcome]:
+            at = datetime.fromisoformat(event['AT_JST'])
+            if at.utcoffset() == timedelta(hours=9) and at.date().isoformat() == day and at <= now:
+                return {'date': day, 'reason': 'PIPELINE_STOPPED', 'observed_at_jst': at.isoformat(timespec='seconds')}
+            return None
     return None
 
 
@@ -221,7 +250,8 @@ def summarize(artifact, day, acquisition, *, now=None):
         except (ValueError, KeyError, OSError, RuntimeError, TypeError): row['evidence_status'] = 'UNVERIFIED'
     terminal = any('MISSED' in row['categories'] or 'UNAVAILABLE' in row['categories'] for row in issues.values())
     return {'schema': SCHEMA, 'operational_date_jst': day,
-            'status': 'PARTIAL' if terminal else 'DEFERRED' if issues or acquisition.get('DEFERRED') else 'PASS',
+            'status': ('STOPPED' if (acquisition.get('DEFERRED') or {}).get('REASON') == 'PIPELINE_STOPPED'
+                       else 'PARTIAL' if terminal else 'DEFERRED' if issues or acquisition.get('DEFERRED') else 'PASS'),
             'host_pause': host_pause(acquisition.get('DEFERRED'), day, now),
             'scope': 'OFFICIAL_INPUTS_ONLY_NOT_ENGINE_OR_DEVICE_COMPLETENESS',
             'source_issue_count': len(issues),
@@ -232,25 +262,42 @@ def summarize(artifact, day, acquisition, *, now=None):
 
 
 def report(artifact, day, acquisition):
-    value = summarize(artifact, day, acquisition)
-    print('G11_PREDEADLINE_INPUT_HEALTH=' + json.dumps(value, ensure_ascii=False, sort_keys=True), flush=True)
+    now = datetime.now(JST)
+    value = summarize(artifact, day, acquisition, now=now)
     pause = value['host_pause']
-    if pause or acquisition.get('MISSED'):
-        try:
-            from g11.canonical.official_pipeline import FIRST_403_PAUSE_SECONDS
-            recorded = saved_beforeinfo_pause(artifact.ledger, day, datetime.now(JST), FIRST_403_PAUSE_SECONDS)
+    stop = None
+    try:
+        from g11.canonical.official_pipeline import FIRST_403_PAUSE_SECONDS
+        state = artifact.ledger.state()
+        if state['STOPPED'] is True:
+            value['status'] = 'STOPPED'
+            stop = saved_pipeline_stop(artifact.ledger, day, now, state)
+        else:
+            recorded = saved_beforeinfo_pause(artifact.ledger, day, now, FIRST_403_PAUSE_SECONDS, state=state)
             if recorded and (not pause or pause['retry_at_jst'] == recorded['retry_at_jst']):
                 pause = recorded
-        except (ImportError, AttributeError, KeyError, ValueError, OSError, RuntimeError, TypeError):
-            pass
-    if pause:
-        print('G11_VERIFIED_HOST_PAUSE=' + json.dumps(pause, sort_keys=True), flush=True)
+                if datetime.fromisoformat(pause['retry_at_jst']) > now:
+                    value['host_pause'] = pause
+                    if value['status'] == 'PASS':
+                        value['status'] = 'DEFERRED'
+    except (ImportError, AttributeError, KeyError, ValueError, OSError, RuntimeError, TypeError) as exc:
+        print('G11_HOST_LEDGER_READ_UNVERIFIED=' + type(exc).__name__, flush=True)
+        if value['status'] == 'PASS':
+            value['status'] = 'UNVERIFIED'
+    value['host_stop'] = stop
+    print('G11_PREDEADLINE_INPUT_HEALTH=' + json.dumps(value, ensure_ascii=False, sort_keys=True), flush=True)
+    incident = stop or pause
+    if value['status'] == 'STOPPED':
+        print('::warning title=G11 official input stopped::Daily official acquisition is stopped. Verified saved inputs remain available.', flush=True)
+    if incident:
+        marker = 'G11_VERIFIED_HOST_STOP=' if stop else 'G11_VERIFIED_HOST_PAUSE='
+        print(marker + json.dumps(incident, sort_keys=True), flush=True)
         if value['host_pause']:
             print('::warning title=G11 official input paused::Next eligible request at ' + pause['retry_at_jst'], flush=True)
         workspace = os.environ.get('GITHUB_WORKSPACE')
         if workspace and os.environ.get('GITHUB_RUN_ID'):
             path = Path(workspace) / '.relay-output' / 'host-pause.json'
-            path.write_text(json.dumps({**pause, 'run_id': os.environ['GITHUB_RUN_ID']}))
+            path.write_text(json.dumps({**incident, 'run_id': os.environ['GITHUB_RUN_ID']}))
     if value['status'] == 'PARTIAL':
         print('::warning title=G11 predeadline input gaps::' +
               str(value['race_issue_count']) + ' races have missing or unavailable official inputs; checkpoint success is not full operation success.', flush=True)
@@ -292,11 +339,14 @@ def publish_host_pause(day, token=None):
         with urlopen(oidc, timeout=5) as response:
             token = json.load(response)['value']
     saved = send_pause_to_site(ORIGIN, token, pause)
-    if (saved.get('retry_at_jst') != pause['retry_at_jst'] or saved.get('date') != day
+    terminal = pause['reason'] == 'PIPELINE_STOPPED'
+    if ((terminal and (saved.get('reason') != 'PIPELINE_STOPPED' or 'retry_at_jst' in saved))
+            or (not terminal and saved.get('retry_at_jst') != pause['retry_at_jst']) or saved.get('date') != day
             or not isinstance(saved.get('observed_at_jst'), str)
             or saved['observed_at_jst'][:10] != day or saved['observed_at_jst'] > pause['observed_at_jst']):
         raise ValueError('INPUT_HEALTH_PUBLICATION_READBACK')
-    print('G11_INPUT_PAUSE_PUBLISHED=' + pause['retry_at_jst'], flush=True)
+    print('G11_INPUT_STOP_PUBLISHED=' + saved['observed_at_jst'] if terminal
+          else 'G11_INPUT_PAUSE_PUBLISHED=' + pause['retry_at_jst'], flush=True)
 
 
 def publish_pause_if_observed(root, day, token=None):

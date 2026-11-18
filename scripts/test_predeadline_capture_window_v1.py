@@ -47,6 +47,9 @@ class EarlyAcquisitionTests(unittest.TestCase):
     def host_fixture(self, seconds):
         fixture = self.f
         fixture.now = datetime.fromisoformat('2026-11-18T14:14:00+09:00')
+        fixture.guard_state = {'STOPPED': False, 'PAUSE_UNTIL': {}}
+        fixture.runner.store.ledger = types.SimpleNamespace(state=lambda: fixture.guard_state)
+        fixture.runner.store.response_receipt = lambda source: None
         release = fixture.now + timedelta(seconds=seconds)
         key = '20261118-18-12'
         for task in fixture.plan:
@@ -68,6 +71,66 @@ class EarlyAcquisitionTests(unittest.TestCase):
         self.assertEqual(len(result['ACQUIRED']),2)
         self.assertEqual(self.f.sleeps,[90])
         self.assertTrue(all(at == release for _,at in self.f.attempts+self.f.writes))
+
+    def test_403_in_one_venue_keeps_the_earlier_input_and_another_venues_saved_pair(self):
+        release = self.host_fixture(1800)
+        first, denied = [row['SOURCE_ID'] for row in self.f.plan]
+        # Real host rejection belongs to beforeinfo, after an earlier good source.
+        self.f.plan.reverse()
+        first, denied = denied, first
+        later = [dict(row, RACE_KEY='20261118-01-09', SOURCE_ID=row['KIND'].lower()+'-20261118-01-09')
+                 for row in self.f.plan]
+        self.f.plan.extend(later)
+        cached = {row['SOURCE_ID'] for row in later}
+        self.f.runner.store.response_receipt = lambda source: {} if source in cached else None
+        self.complete()
+        seen = []
+        def admitted(source, *args):
+            seen.append(source)
+            if source == denied:
+                self.f.guard_state['PAUSE_UNTIL']['www.boatrace.jp'] = release
+                raise old.PipelineError('HTTP_403')
+            return self.f.fetch(source, *args)
+        self.f.runner.client.fetch_validated_once = admitted
+        result = self.collect()
+        self.assertEqual([first, *(r['SOURCE_ID'] for r in later)], result['ACQUIRED'])
+        self.assertEqual(result['DEFERRED']['REASON'], 'HOST_PAUSED')
+        self.assertEqual([first, denied, *(r['SOURCE_ID'] for r in later)], seen)
+        self.assertEqual(self.f.sleeps, [])
+
+    def test_stopped_ledger_never_starts_missing_sources_but_processes_saved_receipts(self):
+        self.host_fixture(1800)
+        first, second = [row['SOURCE_ID'] for row in self.f.plan]
+        self.f.guard_state['STOPPED'] = True
+        self.f.runner.store.response_receipt = lambda sid: {} if sid == second else None
+        def cached_only(source, *args):
+            self.assertEqual(source, second)
+            return self.f.fetch(source, *args)
+        self.f.runner.client.fetch_validated_once = cached_only
+        result = self.collect()
+        self.assertEqual(result['ACQUIRED'], [second])
+        self.assertEqual(result['DEFERRED'], {'REASON': 'PIPELINE_STOPPED'})
+        self.assertEqual([r['SOURCE_ID'] for r in result['TASK_DEFERRED']], [first])
+        self.assertFalse(self.f.sleeps)
+        self.f.now = datetime.fromisoformat('2026-11-18T14:21:00+09:00')
+        self.assertEqual(self.collect()['MISSED'], [first])
+        self.assertEqual(len(self.f.writes), 1)
+
+    def test_verified_midbatch_stop_returns_partial_and_unknown_error_still_fails(self):
+        self.host_fixture(1800)
+        first, last = [row['SOURCE_ID'] for row in self.f.plan]
+        def interrupted(source, *args):
+            if source == last:
+                self.f.guard_state['STOPPED'] = True
+                raise old.PipelineError('PIPELINE_STOPPED')
+            return self.f.fetch(source, *args)
+        self.f.runner.client.fetch_validated_once = interrupted
+        result = self.collect()
+        self.assertEqual((result['ACQUIRED'], result['DEFERRED']), ([first], {'REASON':'PIPELINE_STOPPED'}))
+        self.f.guard_state['STOPPED'] = False
+        self.f.runner.client.fetch_validated_once = lambda *_: (_ for _ in ()).throw(old.PipelineError('PIPELINE_STOPPED'))
+        with self.assertRaisesRegex(old.PipelineError, 'PIPELINE_STOPPED'):
+            self.collect()
 
     def test_long_host_pause_is_kept_and_late_wakeup_does_not_capture(self):
         self.host_fixture(30*60)
