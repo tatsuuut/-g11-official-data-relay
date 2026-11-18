@@ -1,7 +1,7 @@
 from datetime import datetime
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from night_archive_continuity_v1 import separate_result_host
 from previous_night_dispatch_v1 import reconcile, JST
 
@@ -38,7 +38,10 @@ class TestContinuity(unittest.TestCase):
                 rows=(other if 'status=' in url else prior) or []
                 return {'workflow_runs':rows,'total_count':len(rows)}
             client.request.side_effect=request
-            status=reconcile(now,'2026-11-19','10',lambda d:{'date':d,'stage':stage,'races':132},client,lambda day: complete)
+            feed = {'operational_date_jst': DAY, 'stage': stage, 'status': 'PASS',
+                    'counts': {'races': 1}, 'races': [{'key':'20261118-01-01'}]}
+            with patch('previous_night_dispatch_v1.night_feed_ready', return_value={'ready': complete}):
+                status = reconcile(now,'2026-11-19','10',lambda d:feed,client)
             return status,client
         status,client=run()
         self.assertEqual(status,'DISPATCHED_'+DAY)

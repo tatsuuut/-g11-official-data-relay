@@ -46,6 +46,7 @@ jobs:
       github.repository_id == '1367703708' &&
       github.ref == 'refs/heads/main' &&
       inputs.phase != 'repair-20260928' &&
+      !(github.event_name == 'push' && contains(github.event.head_commit.message, '[reconcile-previous-night]')) &&
       !(github.event_name == 'workflow_dispatch' && inputs.phase == 'predeadline' && github.run_attempt != '1') &&
       vars.G11_RELAY_ENABLED == 'true'
     runs-on: ubuntu-24.04

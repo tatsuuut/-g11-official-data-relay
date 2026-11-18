@@ -2,26 +2,27 @@
 from datetime import datetime, timedelta
 import json
 import os
-from urllib.error import HTTPError
+import subprocess
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from audit_three_phase_runtime_contract import night_feed_ready
 from predeadline_dispatch_v1 import ACTIVE, Client, JST, WORKFLOW
 
 
-def reconcile(now, today, current_run, site, client, verified_night):
+def reconcile(now, today, current_run, site, client):
     if today != now.date().isoformat() or not (2 <= now.hour < 6):
         return 'OUTSIDE_MORNING_WINDOW'
     day = (now.date() - timedelta(days=1)).isoformat()
-    meta = site(day)
-    if not meta:
+    feed = site(day)
+    if feed is None:
         return 'NO_SAVED_DAY'
-    if meta.get('date') != day or not isinstance(meta.get('races'), int) or meta['races'] <= 0:
+    races = feed.get('races')
+    if (feed.get('operational_date_jst') != day or feed.get('status') != 'PASS'
+            or not isinstance(races, list) or not races or feed.get('counts', {}).get('races') != len(races)):
         raise ValueError('INVALID_DAY_METADATA')
-    if meta.get('stage') == 'NIGHT' and verified_night(day):
+    if feed.get('stage') == 'NIGHT' and night_feed_ready(feed, day)['ready']:
         return 'ALREADY_PUBLISHED'
-    if meta.get('stage') not in ('MORNING','PREDEADLINE','NIGHT'):
+    if feed.get('stage') not in ('MORNING','PREDEADLINE','NIGHT'):
         raise ValueError('UNEXPECTED_STAGE')
     path = '/actions/workflows/' + WORKFLOW
     # Check pending runs before adding to the existing serial mutation queue.
@@ -39,23 +40,21 @@ def reconcile(now, today, current_run, site, client, verified_night):
     return 'DISPATCHED_'+day
 
 
-def overview(day):
-    url=os.environ['G11_APP_ORIGIN'].rstrip('/')+'/api/g11-overview?'+urlencode({'date':day,'view':'home'})
-    try:
-        with urlopen(Request(url,headers={'Accept':'application/json'}),timeout=20) as r:
-            return json.load(r)['meta']
-    except HTTPError as error:
-        if error.code==404:
-            return None
-        raise
-
-
-def verified_night(day):
+def read_feed(day):
+    # Use the relay's date-bound publication endpoint and the same transport as its NIGHT handoff.
     url = os.environ['G11_APP_ORIGIN'].rstrip('/') + '/api/g11-feed?' + urlencode({'date': day})
-    with urlopen(Request(url, headers={'Accept': 'application/json'}), timeout=30) as response:
-        return night_feed_ready(json.load(response), day)['ready']
+    reply = subprocess.run(['curl', '--silent', '--show-error', '--location',
+                            '--connect-timeout', '10', '--max-time', '30',
+                            '--write-out', '\n%{http_code}', url], check=True, stdout=subprocess.PIPE)
+    body, status = reply.stdout.rsplit(b'\n', 1)
+    if status == b'404':
+        return None
+    if status != b'200':
+        raise RuntimeError('NIGHT_FEED_HTTP_' + status.decode('ascii'))
+    return json.loads(body)
 
 
-if __name__=='__main__':
-    result=reconcile(datetime.now(JST),os.environ['OPERATIONAL_DATE'],os.environ['GITHUB_RUN_ID'],overview,Client(os.environ['GH_TOKEN']),verified_night)
-    print('G11_PREVIOUS_NIGHT='+result,flush=True)
+if __name__ == '__main__':
+    result = reconcile(datetime.now(JST), os.environ['OPERATIONAL_DATE'], os.environ['GITHUB_RUN_ID'],
+                       read_feed, Client(os.environ['GH_TOKEN']))
+    print('G11_PREVIOUS_NIGHT=' + result, flush=True)
