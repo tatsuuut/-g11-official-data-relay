@@ -93,6 +93,8 @@ ALLOWED_FILES = {
     "scripts/test_wild4_republish_20261103.py",
     "scripts/test_deme_research_delivery_nikoshi.py",
     "scripts/predeadline_content_retry_v1.py",
+    "scripts/predeadline_refusal_evidence_v1.py",
+    "scripts/test_predeadline_refusal_evidence_v1.py",
     "scripts/test_predeadline_content_retry_v1.py",
     "docs/predeadline-content-retry-20261030.md",
     "scripts/verify_v53_readback.py",
