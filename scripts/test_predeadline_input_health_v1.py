@@ -6,6 +6,7 @@ from pathlib import Path
 from contextlib import redirect_stdout
 import io
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -48,6 +49,47 @@ class Artifact:
 
 
 class HealthTests(unittest.TestCase):
+    def test_last_source_403_is_reported_in_same_pass_with_no_missed_or_deferred_source(self):
+        ledger = Mock()
+        until = NOW + health.timedelta(minutes=30)
+        ledger.state.return_value = {'STOPPED':False,'GENERAL_HTTP_403_COUNT':1,'PAUSE_UNTIL':{'www.boatrace.jp':until}}
+        ledger.events.return_value = [
+            {'TYPE':'REQUEST_STARTED','PAYLOAD':{'HOST':'www.boatrace.jp','SOURCE_ID':SID,'REQUEST_ID':'one'}},
+            {'TYPE':'OUTCOME_RECORDED','AT_JST':NOW.isoformat(),'PAYLOAD':{'OUTCOME':'HTTP_403','REQUEST_ID':'one'}}]
+        self.artifact.ledger = ledger
+        acquisition = {'RETRYABLE_FAILURES':[{'SOURCE_ID':SID,'RACE_KEY':KEY,'REASON':'HTTP_403'}]}
+        output = io.StringIO()
+        with patch.dict('sys.modules', {'g11.canonical.official_pipeline':SimpleNamespace(FIRST_403_PAUSE_SECONDS=1800)}), \
+                patch.object(health, 'datetime', wraps=datetime) as clock, \
+                patch.dict('os.environ', {'GITHUB_WORKSPACE':''}), redirect_stdout(output):
+            clock.now.return_value = NOW
+            value = health.report(self.artifact,DAY,acquisition)
+        self.assertEqual(value['status'], 'DEFERRED')
+        self.assertEqual(value['host_pause']['retry_at_jst'], until.isoformat())
+        self.assertIn('G11_VERIFIED_HOST_PAUSE=',output.getvalue())
+
+    def test_terminal_event_is_bound_to_its_checked_day_and_excludes_odds_only_errors(self):
+        ledger = Mock()
+        state = {'STOPPED': True}
+        def events(outcomes):
+            rows = []
+            for i, (source, outcome) in enumerate(outcomes):
+                request = str(i)
+                rows.extend([{'TYPE':'REQUEST_STARTED','PAYLOAD':{'REQUEST_ID':request,'SOURCE_ID':source}},
+                    {'TYPE':'OUTCOME_RECORDED','AT_JST':(NOW-health.timedelta(minutes=10-i)).isoformat(),
+                     'PAYLOAD':{'REQUEST_ID':request,'OUTCOME':outcome}}])
+            return rows
+        for code, needed in [('HTTP_403',2), ('HTTP_429',3)]:
+            ledger.events.return_value = events([('odds3t-'+KEY,code)] + [(SID,code)]*needed + [(SID,'HTTP_200')])
+            result = health.saved_pipeline_stop(ledger,DAY,NOW,state)
+            self.assertEqual(result, {'date':DAY,'reason':'PIPELINE_STOPPED',
+                'observed_at_jst':(NOW-health.timedelta(minutes=10-needed)).isoformat()})
+            self.assertIsNone(health.saved_pipeline_stop(ledger,DAY,NOW,{'STOPPED':False}))
+            self.assertIsNone(health.saved_pipeline_stop(ledger,DAY,NOW-health.timedelta(days=1),state))
+            ledger.events.return_value[1]['PAYLOAD']['REQUEST_ID'] = 'wrong'
+            self.assertIsNone(health.saved_pipeline_stop(ledger,DAY,NOW,state))
+        self.assertEqual(self.summary({'DEFERRED':{'REASON':'PIPELINE_STOPPED'}})['status'], 'STOPPED')
+
     def test_only_the_bound_beforeinfo_event_can_date_a_saved_host_pause(self):
         ledger = Mock()
         until = NOW + health.timedelta(minutes=20)
