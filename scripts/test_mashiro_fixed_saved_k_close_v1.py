@@ -1,5 +1,6 @@
 """Run with the frozen observer checkout used by the existing isolated workflow."""
 import copy
+from datetime import date
 import importlib.util
 import os
 from pathlib import Path
@@ -18,6 +19,26 @@ BASES = ['BOAT_NUMBER', 'EXHIBITION_COURSE']
 
 
 class ArtifactTests(unittest.TestCase):
+    def test_audit_uses_exact_available_date_when_prior_cache_has_expired(self):
+        import isolated_research_runner_v1 as runner
+        day = '2026-11-18'
+        key = 'g11-state-v4-published-' + day + '-123-1-checkpoint'
+        with patch.object(recovery, 'datetime') as clock, patch.object(runner, 'latest_canonical', side_effect=['', key]), \
+                patch.object(runner, 'latest_research', side_effect=['', 'saved-observations']), patch.object(runner, 'outputs') as out:
+            clock.now.return_value.date.return_value = date.fromisoformat(day)
+            recovery.audit_source()
+            out.assert_called_once_with(day=day, cache_key=key, research_key='saved-observations')
+
+    def test_only_activated_matching_final_night_enqueues_research(self):
+        import isolated_research_runner_v1 as runner
+        key = 'g11-state-v4-published-' + DAY + '-123-1-checkpoint'
+        env = {'GITHUB_REPOSITORY': recovery.REPO, 'GITHUB_REF': 'refs/heads/main', 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}
+        with patch.dict(os.environ, env), patch.object(runner, 'dispatch_research') as dispatch, patch.object(Path, 'is_file', return_value=True):
+            recovery.verified_night_handoff(key)
+            dispatch.assert_called_once_with(DAY, key)
+            with self.assertRaisesRegex(ValueError, 'NIGHT_HANDOFF'):
+                recovery.verified_night_handoff(key.replace('123-', '456-'))
+
     def test_optional_selection_of_missing_or_older_published_day(self):
         for answer in ({'available': False}, {'available': True, 'projection': {'day': '2026-11-16'}}):
             with patch.object(recovery, 'request_json', return_value=(answer, {})):

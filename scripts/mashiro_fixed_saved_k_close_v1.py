@@ -33,6 +33,32 @@ def previous_day(day):
     return (date.fromisoformat(day) - timedelta(days=1)).isoformat()
 
 
+def verified_night_handoff(key):
+    from isolated_research_runner_v1 import dispatch_research
+    match = re.fullmatch(r'g11-state-v4-published-(\d{4}-\d{2}-\d{2})-(\d+)-(\d+)-checkpoint', key or '')
+    check(match and os.environ.get('GITHUB_REPOSITORY') == REPO and os.environ.get('GITHUB_REF') == 'refs/heads/main'
+          and match[2] == os.environ.get('GITHUB_RUN_ID') and match[3] == os.environ.get('GITHUB_RUN_ATTEMPT'), 'NIGHT_HANDOFF')
+    day = match[1]
+    if '2026-11-17' <= day <= '2026-12-14' and (Path('.relay-state') / isolation.MARKER.format(day=day)).is_file():
+        dispatch_research(day, key)
+
+
+def audit_source():
+    from isolated_research_runner_v1 import latest_canonical, latest_research, outputs
+    today = min(datetime.now(display.JST).date(), date(2026, 12, 14))
+    for day in dict.fromkeys(['2026-11-16', today.isoformat(), previous_day(today.isoformat())]):
+        if day < '2026-11-16':
+            continue
+        # A later canonical snapshot can verify an earlier isolated research bundle.
+        research_key = latest_research(day)
+        key = latest_canonical(day)
+        if key:
+            outputs(day=day, cache_key=key, research_key=research_key)
+            print('MASHIRO_READ_ONLY_AUDIT_SOURCE=' + day + ' ' + key)
+            return
+    check(False, 'NO_RETAINED_AUDIT_INPUT')
+
+
 def saved_projection(day, *, required=True):
     view, _ = request_json(display.ORIGIN + '/api/g11-mashiro-research?through=' + day)
     if view.get('available') is True and view['projection']['day'] == day:
@@ -231,14 +257,20 @@ def build(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['select', 'build', 'publish'])
-    parser.add_argument('--day', required=True)
+    parser.add_argument('mode', choices=['select', 'build', 'publish', 'handoff', 'audit-source'])
+    parser.add_argument('--day')
     parser.add_argument('--directory', type=Path, default=Path('.mashiro-saved-k'))
     parser.add_argument('--state-root', type=Path, default=Path('.research-state'))
     parser.add_argument('--source-root', type=Path, default=Path('.g11-private'))
     parser.add_argument('--observer-root', type=Path, default=Path('.g11-mashiro-fixed'))
     parser.add_argument('--source-key')
     args = parser.parse_args()
+    if args.mode == 'handoff':
+        return verified_night_handoff(args.source_key)
+    if args.mode == 'audit-source':
+        return audit_source()
+    if not args.day:
+        parser.error('--day is required for ' + args.mode)
     if args.mode == 'select':
         selected = select(args.day, args.directory)
         with open(os.environ['GITHUB_OUTPUT'], 'a') as output:

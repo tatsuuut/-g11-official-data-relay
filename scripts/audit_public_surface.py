@@ -18,6 +18,8 @@ ALLOWED_FILES = {
     'scripts/test_mashiro_p3_bridge_v1.py',
     'docs/mashiro-p3-paired-bridge-20261117.md',
     'scripts/mashiro_fixed_display_v1.py',
+    'scripts/mashiro_fixed_saved_k_close_v1.py',
+    'scripts/test_mashiro_fixed_saved_k_close_v1.py',
     # Exact observation-only wiring; private study implementation and raw
     # evidence remain outside this public source tree.
     '.github/workflows/g11-mashiro-fixed-research-audit.yml',
@@ -1076,9 +1078,3 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
-
-
-
-
-
-
