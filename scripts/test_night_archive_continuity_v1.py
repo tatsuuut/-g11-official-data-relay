@@ -31,7 +31,7 @@ class TestContinuity(unittest.TestCase):
 
     def test_previous_day_only_no_competing_run_or_duplicate(self):
         now=datetime(2026,11,19,2,40,tzinfo=JST)
-        def run(stage='PREDEADLINE',other=None,prior=None,complete=True):
+        def run(stage='PREDEADLINE',other=None,prior=None,complete=True,current=now):
             client=Mock()
             def request(method,url,*data):
                 if method=='POST': return None
@@ -41,7 +41,7 @@ class TestContinuity(unittest.TestCase):
             feed = {'operational_date_jst': DAY, 'stage': stage, 'status': 'PASS',
                     'counts': {'races': 1}, 'races': [{'key':'20261118-01-01'}]}
             with patch('previous_night_dispatch_v1.night_feed_ready', return_value={'ready': complete}):
-                status = reconcile(now,'2026-11-19','10',lambda d:feed,client)
+                status = reconcile(current,'2026-11-19','10',lambda d:feed,client)
             return status,client
         status,client=run()
         self.assertEqual(status,'DISPATCHED_'+DAY)
@@ -50,3 +50,8 @@ class TestContinuity(unittest.TestCase):
         self.assertEqual(run('NIGHT',complete=False)[0],'DISPATCHED_'+DAY)
         self.assertEqual(run(other=[{'id':11}])[0],'OTHER_RUN_ACTIVE')
         self.assertEqual(run(prior=[{'display_title':'LIVE-night-'+DAY}])[0],'RECOVERY_ALREADY_REQUESTED')
+        completed = {'display_title':'LIVE-night-'+DAY, 'status':'completed', 'updated_at':'2026-11-18T17:20:00Z'}
+        self.assertEqual(run(prior=[completed])[0], 'RECOVERY_COOLDOWN')
+        self.assertEqual(run(prior=[completed], current=now.replace(hour=4))[0], 'DISPATCHED_'+DAY)
+        self.assertEqual(run(prior=[completed, completed], current=now.replace(hour=5))[0], 'MORNING_RECOVERY_LIMIT')
+        self.assertEqual(run('NIGHT',prior=[completed],current=now.replace(hour=4))[0], 'ALREADY_PUBLISHED')

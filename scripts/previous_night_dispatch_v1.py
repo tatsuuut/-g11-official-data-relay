@@ -34,8 +34,18 @@ def reconcile(now, today, current_run, site, client):
     recent = client.request('GET',path+'/runs?'+urlencode({'created':'>='+cutoff.isoformat(), 'per_page':100}))
     if recent['total_count'] > len(recent['workflow_runs']):
         return 'INCOMPLETE_RUN_INDEX'
-    if any(r['display_title'] == 'LIVE-night-'+day for r in recent['workflow_runs']):
-        return 'RECOVERY_ALREADY_REQUESTED'
+    prior = [run for run in recent['workflow_runs'] if run['display_title'] == 'LIVE-night-'+day]
+    if len(prior) >= 2:
+        return 'MORNING_RECOVERY_LIMIT'
+    if prior:
+        attempt = prior[0]
+        if attempt.get('status') != 'completed' or not attempt.get('updated_at'):
+            return 'RECOVERY_ALREADY_REQUESTED'
+        finished = datetime.fromisoformat(attempt['updated_at'].replace('Z', '+00:00'))
+        if finished.tzinfo is None or now < finished + timedelta(hours=1):
+            return 'RECOVERY_COOLDOWN'
+        # The date-bound feed is still incomplete. Allow one normal retry
+        # with all previously recorded per-source refusals and caps intact.
     client.request('POST',path+'/dispatches',{'ref':'main','inputs':{'phase':'night','operational_date':day}})
     return 'DISPATCHED_'+day
 
