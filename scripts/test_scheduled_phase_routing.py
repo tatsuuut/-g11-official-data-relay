@@ -87,9 +87,14 @@ class ScheduledPhaseRoutingTests(unittest.TestCase):
                 with self.subTest(clock=clock, cron=cron):
                     self.assert_route(f"2026-11-01T{clock}+09:00", "predeadline", cron=cron)
 
-    def test_early_hours_preserve_existing_cron_policy_and_date_rollover(self):
-        for clock, day in (("00:00:00", "2026-10-31"), ("01:59:59", "2026-10-31"),
-                           ("02:00:00", "2026-11-01"), ("02:14:59", "2026-11-01")):
+    def test_after_midnight_scheduled_runs_settle_the_previous_operational_date(self):
+        for clock in ("00:00:00", "01:03:00", "01:59:59"):
+            for cron in MORNING_CRONS + DAY_CRONS:
+                with self.subTest(clock=clock, cron=cron):
+                    self.assert_route(f"2026-11-01T{clock}+09:00", "night", "2026-10-31", cron=cron)
+
+    def test_early_rollover_preserves_current_date_cron_policy(self):
+        for clock, day in (("02:00:00", "2026-11-01"), ("02:14:59", "2026-11-01")):
             for cron in MORNING_CRONS + DAY_CRONS:
                 with self.subTest(clock=clock, cron=cron):
                     phase = "morning" if cron in MORNING_CRONS else "predeadline"
