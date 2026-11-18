@@ -4,11 +4,37 @@ import unittest
 from subprocess import CalledProcessError
 from urllib.error import HTTPError
 from unittest import mock
+import json
+from types import SimpleNamespace
 
 from predeadline_watchdog_v1 import (_last_deadline, decide, main,
     runner_retry_decision, morning_watchdog_decision,
     morning_predeadline_handoff_decision, RUNNER_NOT_ACQUIRED,
     morning_arm_plan, arm_morning_handoff, REPOSITORY)
+
+
+class OfficialInputWatchdogTests(unittest.TestCase):
+    def test_real_hold_and_terminal_stop_fail_the_independent_check_even_with_saved_locks(self):
+        from predeadline_watchdog_v1 import check_published_official_inputs
+        from daily_runtime_delivery_v1 import ORIGIN
+        day = "2026-11-18"
+        at = lambda clock: day + "T" + clock + "+09:00"
+        first = {"date":day, "observed_at_jst":at("13:45:30"), "retry_at_jst":at("14:15:30")}
+        stop = {"date":day, "observed_at_jst":at("15:55:45"), "reason":"PIPELINE_STOPPED"}
+        for clock, receipt, expected in [
+            ("13:50:00", {"date":day,"pauses":[first],"stop":None}, 1),
+            ("14:15:30", {"date":day,"pauses":[first],"stop":None}, 0),
+            ("16:00:00", {"date":day,"pauses":[first],"stop":stop}, 1),
+            ("16:00:00", {"date":day,"pauses":[]}, 1),
+            ("16:00:00", {"date":day,"pauses":[dict(first, date="2026-11-17")],"stop":None}, 1),
+            ("16:00:00", {"date":day,"pauses":[],"stop":dict(stop, retry_at_jst=at("17:00:00"))}, 1),
+        ]:
+            with self.subTest(clock=clock, receipt=receipt), mock.patch.dict("os.environ",{"G11_APP_ORIGIN":ORIGIN}), \
+                    mock.patch("predeadline_watchdog_v1.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(receipt))) as get:
+                self.assertEqual(check_published_official_inputs(day, datetime.fromisoformat(at(clock))),expected)
+                self.assertEqual(get.call_args.args[0][-1], ORIGIN+"/api/g11-input-pause?date="+day)
+        with mock.patch.dict("os.environ",{"G11_APP_ORIGIN":ORIGIN}), mock.patch("predeadline_watchdog_v1.subprocess.run", side_effect=OSError):
+            self.assertEqual(check_published_official_inputs(day, datetime.fromisoformat(at("14:00:00"))),1)
 
 DAY = "2026-10-01"
 NOW = datetime.fromisoformat("2026-10-01T18:20:00+09:00")
