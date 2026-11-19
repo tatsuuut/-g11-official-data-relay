@@ -772,7 +772,7 @@ jobs:
       - name: Checkout exact saved-projection readback verifier
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: bc28f2ba0f2d8b9c32672bbf361805111f82d915
+          ref: d2ee1a1f2c7d29332459e07d6dcdecd291d9a137
           path: .g11-saved-readback-guard
           sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
           persist-credentials: false
@@ -870,7 +870,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_runtime_preparation_v1.py -v
           python3 -m unittest discover -s scripts -p test_wild4_retained_lock_v1.py -v
           python3 -m unittest discover -s scripts -p test_wild4_public_feed_budget_v1.py -v
-          python3 -m unittest discover -s scripts -p test_wild4_night_recovery_date_v1.py -v
+          WILD4_WORKFLOW_PATH=.g11-saved-readback-guard/.github/workflows/g11-wild4-shadow-lock-only.yml python3 -m unittest discover -s scripts -p test_wild4_night_recovery_date_v1.py -v
         env:
           WILD4_WORKFLOW_PATH: .g11-retained-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
 

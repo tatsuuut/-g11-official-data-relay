@@ -1,4 +1,4 @@
-"""Run the actual pinned date gate; only the authenticated Nov 3 NIGHT may recover."""
+"""Run the actual pinned date gate; verified prior-day NIGHT settlement is isolated from prediction creation."""
 from datetime import datetime as RealDatetime
 import os
 from pathlib import Path
@@ -50,6 +50,17 @@ class DateGateTests(unittest.TestCase):
         self.assertEqual(early['night_rollover'],'true')
         with self.assertRaises(SystemExit):
             self.run_gate(now='2026-11-04T02:00:00+09:00',checkpoint='')
+
+    def test_previous_day_verified_night_can_settle_after_rollover(self):
+        args = dict(now='2026-11-19T08:24:00+09:00', day='2026-11-18',
+                    checkpoint='g11-state-v4-published-2026-11-18-44365272981-1-checkpoint')
+        result = self.run_gate(**args)
+        self.assertEqual(result['night_rollover'], 'true')
+        self.assertEqual(result['previous_day_settlement'], 'true')
+        for updates in ({'mode':'wild4'}, {'checkpoint':''}, {'now':'2026-11-20T08:00:00+09:00'},
+                        {'PREDEADLINE_CHECKPOINT_KEY':'live'}, {'checkpoint':CHECKPOINT}):
+            with self.subTest(updates=updates), self.assertRaises(SystemExit):
+                self.run_gate(**{**args, **updates})
 
     def test_historical_recovery_cannot_create_predictions(self):
         source = WORKFLOW.read_text()
