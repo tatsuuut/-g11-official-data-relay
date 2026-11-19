@@ -30,7 +30,7 @@ def body_evidence(source_id, error):
         emit({'source': source_id, 'status': error.code, 'body_hint': 'UNAVAILABLE'})
 
 
-def observe(source_id, exc):
+def observe(source_id, exc, ledger=None):
     try:
         error = exc.__cause__
         if not isinstance(error, HTTPError) or error.code not in (403, 429):
@@ -42,6 +42,10 @@ def observe(source_id, exc):
               'retry_after_present': bool(headers.get('Retry-After')),
               'challenge_header': headers.get('cf-mitigated', '').lower() == 'challenge'})
         Thread(target=body_evidence, args=(source_id, error), daemon=True).start()
+        if ledger is not None:
+            incidents = incident_windows(ledger.events())
+            if incidents and incidents[-1]['source'] == source_id:
+                emit({'request_window': incidents[-1]})
     except Exception:
         # Reporting must not change the original exception or acquisition decision.
         pass

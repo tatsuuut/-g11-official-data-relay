@@ -6,7 +6,7 @@ The reviewed canonical collector still owns HTTP pacing, request budgets,
 parsing, eligibility, immutable saves and cutoff checks. No model is called here.
 """
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import wraps
 import hashlib
 import inspect
@@ -26,6 +26,9 @@ MIN_REMAINING_SECONDS = 180
 RETRY_START_WINDOW_SECONDS = 60
 MAX_RETRY_SOURCES = 2
 MAX_HOST_RESUME_WAIT_SECONDS = 180
+PACED_CAPTURE_FROM = date(2026, 11, 19)
+HEALTHY_SPACING_SECONDS = 15
+DEGRADED_SPACING_SECONDS = 30
 
 
 def _report(status, **fields):
@@ -88,6 +91,36 @@ def official_host_guard(store, now):
     return None
 
 
+def content_retry_at(state, source_id):
+    invalid = state['CONTENT_INVALID_COUNTS'].get(source_id, 0)
+    if invalid:
+        # Extend the ledger's own retry time. After a standard 30s pause
+        # the total wait becomes 90s on the first rejection and 180s thereafter.
+        extra = 60 if invalid == 1 else 150
+        return state['SOURCE_PAUSE_UNTIL'][source_id] + timedelta(seconds=extra)
+    return None
+
+
+def capture_pause(store, source_id, now):
+    """Delay new GETs using the shared daily ledger, including prior workers."""
+    if now.date() < PACED_CAPTURE_FROM or store.response_receipt(source_id) is not None:
+        return None
+    state = store.ledger.state()
+    if (state['STOPPED'] or state['ACTIVE_REQUEST'] is not None
+            or (source_id.startswith('odds3t-') and state['ODDS_STOPPED'])):
+        return None  # The canonical client owns stop and interrupted-request recovery.
+    retry_at = content_retry_at(state, source_id)
+    if retry_at is not None and now < retry_at:
+        return 'SOURCE_CONTENT_PAUSED', retry_at
+    previous = state['LAST_REQUEST_AT']
+    if previous is not None:
+        spacing = DEGRADED_SPACING_SECONDS if state['DEGRADED'] else HEALTHY_SPACING_SECONDS
+        retry_at = previous + timedelta(seconds=spacing)
+        if now < retry_at:
+            return 'SERIAL_PACING', retry_at
+    return None
+
+
 def _isolate_host(source):
     # Only the two reviewed collector hashes get here. Keep validation, source
     # receipt verification, race scope, immutable writes and cutoff in the original.
@@ -97,6 +130,19 @@ def _isolate_host(source):
          '            if deferred and self.store.response_receipt(task["SOURCE_ID"]) is None:\n'
          '                task_deferred.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"], **deferred})\n'
          '                task_index += 1\n'
+         '                continue\n'
+         '            pause = _capture_pause(self.store, task["SOURCE_ID"], now) if not deferred else None\n'
+         '            if pause is not None:\n'
+         '                reason, retry_at = pause\n'
+         '                if reason == "SERIAL_PACING" and retry_at < deadline:\n'
+         '                    self.sleeper(max(0, (retry_at - self.client.clock()).total_seconds()))\n'
+         '                    continue\n'
+         '                task_deferred.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"],\n'
+         '                                      "REASON": reason, "RETRY_AT_JST": _format_jst(retry_at)})\n'
+         '                task_index += 1\n'
+         '                continue\n'
+         '            if self.client.clock() >= deadline:\n'
+         '                missed.append(task["SOURCE_ID"]); task_index += 1\n'
          '                continue\n'
          '            try:\n                receipt, parsed = '),
         ('                delay = max(0.0, (exc.retry_at - now).total_seconds())\n',
@@ -109,7 +155,7 @@ def _isolate_host(source):
         ('                reason = str(exc)\n',
          '                reason = str(exc)\n'
          '                if reason in ("HTTP_403", "HTTP_429"):\n'
-         '                    _observe_refusal(task["SOURCE_ID"], exc)\n'
+         '                    _observe_refusal(task["SOURCE_ID"], exc, self.store.ledger)\n'
          '                if reason in ("HTTP_403", "HTTP_429", "PIPELINE_STOPPED"):\n'
          '                    deferred = _host_guard(self.store, self.client.clock()) or deferred\n'
          '                if reason == "PIPELINE_STOPPED" and deferred and deferred["REASON"] == reason:\n'
@@ -153,6 +199,7 @@ def _restricted_collector(original, selected, stop_at, *, early_capture=False, i
         from predeadline_refusal_evidence_v1 import observe
         namespace['_observe_refusal'] = observe
         namespace['_host_guard'] = official_host_guard
+        namespace['_capture_pause'] = capture_pause
     exec(compile(textwrap.dedent(source), collector.__code__.co_filename,
                  'exec'), namespace)
     restricted = namespace[collector.__name__]
@@ -252,6 +299,14 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, ea
                      early_wait_seconds=early_wait_seconds)
     # The existing nowait caller must opt in. Other callers retain their policy.
     if early_wait_seconds != 0:
+        return first
+    if isolate and first['REJECTED'] and runner.client.clock().date() >= PACED_CAPTURE_FROM:
+        state = runner.store.ledger.state()
+        for item in first['REJECTED']:
+            retry_at = content_retry_at(state, item['SOURCE_ID'])
+            if retry_at is not None:
+                item['RETRY_AT_JST'] = retry_at.isoformat(timespec='seconds')
+        _report('CONTENT_COOLDOWN', sources=len(first['REJECTED']), acquired=len(first['ACQUIRED']))
         return first
     try:
         if first['ACQUIRED']:

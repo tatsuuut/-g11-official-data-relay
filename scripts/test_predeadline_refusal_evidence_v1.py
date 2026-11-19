@@ -2,7 +2,7 @@ import io
 import unittest
 from contextlib import redirect_stdout
 from urllib.error import HTTPError
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import predeadline_refusal_evidence_v1 as evidence
 
 
@@ -39,3 +39,26 @@ class RefusalEvidenceTests(unittest.TestCase):
         self.assertEqual((row['prior_requests_60s'],row['prior_requests_10m'],row['seconds_since_previous_start']),(1,1,15))
         self.assertEqual(row['previous_requests_same_source'],1)
         self.assertEqual(row['previous_source'],'odds3t-B')
+
+    def test_live_refusal_logs_the_recorded_window_once(self):
+        key = 'beforeinfo-20261119-15-08'
+        previous = 'odds3t-20261119-12-03'
+        rows = []
+        for i, (source, outcome) in enumerate([(previous, 'HTTP_200'), (key, 'HTTP_403')]):
+            at = f'2026-11-19T18:36:{20*i:02d}+09:00'
+            rows.extend([
+                {'TYPE': 'REQUEST_STARTED', 'AT_JST': at,
+                 'PAYLOAD': {'REQUEST_ID': i, 'HOST': 'www.boatrace.jp', 'SOURCE_ID': source}},
+                {'TYPE': 'OUTCOME_RECORDED', 'AT_JST': at,
+                 'PAYLOAD': {'REQUEST_ID': i, 'OUTCOME': outcome}},
+            ])
+        ledger = Mock()
+        ledger.events.return_value = rows
+        failure = ValueError('HTTP_403')
+        failure.__cause__ = HTTPError('https://www.boatrace.jp/', 403, 'Forbidden', {}, io.BytesIO())
+        with patch.object(evidence, 'Thread'), patch.object(evidence, 'emit') as emit:
+            evidence.observe(key, failure, ledger)
+        ledger.events.assert_called_once_with()
+        row = emit.call_args.args[0]['request_window']
+        self.assertEqual((row['source'], row['previous_source'], row['prior_requests_60s']),
+                         (key, previous, 1))
