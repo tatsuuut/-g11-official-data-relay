@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "key": "20261118-11-11",
+      "venue": "びわこ",
+      "result": "3-1-2",
+      "payout": 11880,
+      "attack": 3,
+      "defend": 1,
+      "benefit": null,
+      "pattern": "ATTACK_WON",
+      "second": null,
+      "third": null,
+      "summary": "3コースの長田が先に回った1号艇をまくり差して勝利。1号艇は2着に残った。",
+      "article": "https://news.livedoor.com/article/detail/32848069/",
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261118&jcd=11&rno=11"
+    },
+    {
+      "key": "20261118-03-12",
+      "venue": "江戸川",
+      "result": "1-4-6",
+      "payout": 3400,
+      "attack": 4,
+      "defend": 1,
+      "benefit": null,
+      "pattern": "HELD",
+      "second": 4,
+      "third": null,
+      "summary": "4号艇がカドから攻めたが、1号艇が先に回って逃げ切った。4号艇は追い上げて2着。",
+      "article": "https://www.boatrace-edogawa.com/modules/gallery/?gid=962",
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261118&jcd=03&rno=12"
+    },
+    {
+      "key": "20260916-18-11",
+      "venue": "徳山",
+      "result": "6-5-4",
+      "payout": 254270,
+      "attack": 4,
+      "defend": null,
+      "benefit": 6,
+      "pattern": "BENEFIT",
+      "second": null,
+      "third": null,
+      "summary": "4号艇のカドまくりに乗じ、5コースの6号艇がまくり差して勝った。2着艇の進路は未確認。",
+      "article": "https://news.livedoor.com/article/detail/32342507/",
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20260916&jcd=18&rno=11"
+    }
+  ]
+}
