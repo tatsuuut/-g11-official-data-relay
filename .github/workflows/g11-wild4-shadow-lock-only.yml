@@ -105,7 +105,10 @@ jobs:
           # This exception is settlement-only; expired predictions are never generated.
           night_rollover=(not readback and os.environ['GITHUB_EVENT_NAME']=='workflow_dispatch'
               and os.environ.get('REQUESTED_MODE','')=='wild4-settle'
-              and now_jst.hour<2
+              and (now_jst.hour<2 or (day>='2026-11-18'
+                  and re.fullmatch(r'g11-state-v4-published-'+re.escape(day)+r'-[1-9][0-9]*-[1-9][0-9]*-checkpoint',
+                                   os.environ.get('NIGHT_CHECKPOINT_KEY','')) is not None
+                  and not any(os.environ.get(key) for key in ('PREDEADLINE_CHECKPOINT_KEY','PREDEADLINE_DELTA_KEY','PREWARM_BASE_KEY'))))
               and day==(now_jst.date()-timedelta(days=1)).isoformat())
           # Bounded transport recovery for the verified Nov 3 NIGHT that the
           # Site rejected with HTTP 413. Restore only this exact checkpoint;
@@ -140,9 +143,10 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
               output.write('night_rollover='+str(night_rollover or historical_night_repair).lower()+'\n')
+              output.write('previous_day_settlement='+str(night_rollover and now_jst.hour>=2).lower()+'\n')
               output.write('lifecycle_enabled='+str(day>='2026-10-13').lower()+'\n')
               # User hold: retain the three candidates until comparison-period review.
-              output.write('candidate_review_held='+str('2026-11-13'<=day<'2026-11-14').lower()+'\n')
+              output.write('candidate_review_held='+str('2026-11-13'<=day<'2026-11-14' or (night_rollover and now_jst.hour>=2)).lower()+'\n')
               output.write('artifact_name=g11-wild4-'+day.replace('-','')+'-future-oos-locks-encrypted\n')
           print('WILD4_SHADOW_OPERATIONAL_DATE='+day)
           print('WILD4_CANDIDATE_REVIEW_HELD='+str('2026-11-13'<=day<'2026-11-14').lower())
