@@ -136,6 +136,93 @@ class RetryTests(unittest.TestCase):
         return retry.collect_with_retry(self.original, self.runner,
             max_requests=8, early_wait_seconds=wait)
 
+    def setup_paced_day(self, *, degraded=False):
+        self.now = BASE.replace(month=11, day=19)
+        for task in self.plan:
+            key = '20261119-14-03'
+            task.update(RACE_KEY=key, SOURCE_ID=task['KIND'].lower()+'-'+key,
+                        DUE_AT_JST=(self.now-timedelta(minutes=2)).isoformat(),
+                        MUST_FINISH_BEFORE_JST=(self.now+timedelta(minutes=5)).isoformat())
+        self.runner.store.response_receipt = lambda _: None
+        self.prior_start = self.now - timedelta(seconds=4)
+        self.state = {'STOPPED': False, 'DEGRADED': degraded, 'PAUSE_UNTIL': {},
+                      'ODDS_STOPPED': False, 'ACTIVE_REQUEST': None,
+                      'CONTENT_INVALID_COUNTS': {}, 'SOURCE_PAUSE_UNTIL': {}}
+
+        def ledger_state():
+            last = self.attempts[-1][1] if self.attempts else self.prior_start
+            return dict(self.state, LAST_REQUEST_AT=last)
+
+        self.runner.store.ledger = types.SimpleNamespace(state=ledger_state)
+        def fetch(source, url, validator):
+            try:
+                return self.fetch(source, url, validator)
+            except Rejected as exc:
+                counts = self.state['CONTENT_INVALID_COUNTS']
+                counts[source] = counts.get(source, 0) + 1
+                self.state['SOURCE_PAUSE_UNTIL'][source] = exc.retry_at
+                raise
+        self.runner.client.fetch_validated_once = fetch
+        self.responses = {r['SOURCE_ID']: ['complete'] for r in self.plan}
+        return [task['SOURCE_ID'] for task in self.plan]
+
+    def test_shared_spacing_handles_prior_worker_and_both_inputs(self):
+        before, odds = self.setup_paced_day()
+        start = self.now
+        self.assertEqual(self.run_capture()['ACQUIRED'], [before, odds])
+        self.assertEqual(self.attempts, [(before, start+timedelta(seconds=11)),
+                                        (odds, start+timedelta(seconds=26))])
+
+    def test_degraded_spacing_rechecks_deadline_after_delayed_wake(self):
+        before, odds = self.setup_paced_day(degraded=True)
+        def late_wakeup(seconds):
+            self.sleep(seconds)
+            self.now += timedelta(minutes=5)
+        self.runner.sleeper = late_wakeup
+        self.assertEqual(self.run_capture()['MISSED'], [before, odds])
+        self.assertEqual(self.sleeps, [26])
+        self.assertFalse(self.attempts)
+
+    def test_incomplete_source_waits_across_workers_while_other_input_proceeds(self):
+        before, odds = self.setup_paced_day()
+        first = self.now
+        self.state['CONTENT_INVALID_COUNTS'][before] = 2
+        self.state['SOURCE_PAUSE_UNTIL'][before] = first+timedelta(seconds=30)
+        result = self.run_capture()
+        self.assertEqual(result['ACQUIRED'], [odds])
+        self.assertEqual(result['TASK_DEFERRED'][0]['RETRY_AT_JST'],
+                         (first+timedelta(seconds=180)).isoformat())
+        self.now = first+timedelta(seconds=180)
+        self.assertEqual(self.run_capture()['ACQUIRED'], [before])
+
+    def test_first_incomplete_response_waits_without_optional_second_get(self):
+        before, odds = self.setup_paced_day()
+        self.responses = {before: ['reject'], odds: ['reject']}
+        rejected = self.run_capture()['REJECTED']
+        self.assertEqual(len(rejected), 2)
+        self.assertEqual([sid for sid, _ in self.attempts], [before, odds])
+        self.assertEqual(rejected[0]['RETRY_AT_JST'],
+                         (self.pauses[before]+timedelta(seconds=60)).isoformat())
+        self.assertEqual(retry.capture_pause(self.runner.store, before, self.now),
+                         ('SOURCE_CONTENT_PAUSED', self.pauses[before]+timedelta(seconds=60)))
+
+    def test_stopped_host_admits_only_previously_saved_receipt(self):
+        before, odds = self.setup_paced_day()
+        self.state['STOPPED'] = True
+        self.runner.store.response_receipt = lambda sid: {'saved': True} if sid == odds else None
+        calls = []
+        def cached(sid, url, validator):
+            self.assertEqual(sid, odds)
+            calls.append(sid)
+            return {'CAPTURED_AT_JST': self.now.isoformat()}, validator(b'complete')
+        self.runner.client.fetch_validated_once = cached
+        result = self.run_capture()
+        self.assertEqual(result['ACQUIRED'], [odds])
+        self.assertEqual(result['TASK_DEFERRED'][0]['SOURCE_ID'], before)
+        self.assertEqual(result['DEFERRED']['REASON'], 'PIPELINE_STOPPED')
+        self.assertEqual(calls, [odds])
+        self.assertFalse(self.sleeps)
+
     def test_official_denial_is_observed_once_without_an_extra_fetch(self):
         from urllib.error import HTTPError
         failure = PipelineError('HTTP_403')
