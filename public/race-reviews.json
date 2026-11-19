@@ -14,7 +14,9 @@
       "third": null,
       "summary": "3コースの長田が先に回った1号艇をまくり差して勝利。1号艇は2着に残った。",
       "article": "https://news.livedoor.com/article/detail/32848069/",
-      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261118&jcd=11&rno=11"
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261118&jcd=11&rno=11",
+      "move": "MAKURI_SASHI",
+      "mark": "1M"
     },
     {
       "key": "20261118-03-12",
@@ -29,7 +31,10 @@
       "third": null,
       "summary": "4号艇がカドから攻めたが、1号艇が先に回って逃げ切った。4号艇は追い上げて2着。",
       "article": "https://www.boatrace-edogawa.com/modules/gallery/?gid=962",
-      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261118&jcd=03&rno=12"
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261118&jcd=03&rno=12",
+      "move": "MAKURI",
+      "inside": "HELD",
+      "mark": "1M"
     },
     {
       "key": "20260916-18-11",
@@ -44,7 +49,10 @@
       "third": null,
       "summary": "4号艇のカドまくりに乗じ、5コースの6号艇がまくり差して勝った。2着艇の進路は未確認。",
       "article": "https://news.livedoor.com/article/detail/32342507/",
-      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20260916&jcd=18&rno=11"
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20260916&jcd=18&rno=11",
+      "move": "MAKURI",
+      "mark": "1M",
+      "benefitMove": "MAKURI_SASHI"
     },
     {
       "key": "20261117-23-12",
@@ -59,7 +67,9 @@
       "third": null,
       "summary": "1マークで3号艇がまくり差しに入り、4艇が競った。2マークで1号艇が外を回って先頭へ。2着艇の進路は未確認。",
       "article": "https://sports.yahoo.co.jp/official/detail/2026111700118-spnaviow",
-      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261117&jcd=23&rno=12"
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261117&jcd=23&rno=12",
+      "move": "MAKURI_SASHI",
+      "mark": "1M"
     }
   ]
 }
