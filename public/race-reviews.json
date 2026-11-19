@@ -45,6 +45,21 @@
       "summary": "4号艇のカドまくりに乗じ、5コースの6号艇がまくり差して勝った。2着艇の進路は未確認。",
       "article": "https://news.livedoor.com/article/detail/32342507/",
       "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20260916&jcd=18&rno=11"
+    },
+    {
+      "key": "20261117-23-12",
+      "venue": "唐津",
+      "result": "1-5-3",
+      "payout": 5040,
+      "attack": 3,
+      "defend": 1,
+      "benefit": null,
+      "pattern": "HELD",
+      "second": null,
+      "third": null,
+      "summary": "1マークで3号艇がまくり差しに入り、4艇が競った。2マークで1号艇が外を回って先頭へ。2着艇の進路は未確認。",
+      "article": "https://sports.yahoo.co.jp/official/detail/2026111700118-spnaviow",
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261117&jcd=23&rno=12"
     }
   ]
 }
