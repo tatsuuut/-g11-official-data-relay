@@ -349,7 +349,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: b30031c6b9500a7e7bcf0391ced0d85df8575850
+          ref: 7faaacfec8a8643a588af7e23d062fc787ba24b8
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           path: .g11-private
           persist-credentials: false
@@ -361,7 +361,7 @@ jobs:
           import hashlib,json,pathlib
           from g11.wild_pack.v1 import goripan_multiday_v1 as multi
           from g11.wild_pack.v1 import goripan_competition_v1 as competition
-          expected=json.loads('{"g11/wild_pack/v1/goripan_competition_v1.py":"3ab4d769fd32ed98218866935008389d5a12472fb494ad66a1c6b417e849c17c","g11/wild_pack/v1/goripan_multiday_v1.py":"25fea3a38a429d4ae5fc155d7e09000fb08dbc54da887e2ab6b978f036d41028","g11/wild_pack/v1/goripan_candidate_pool_v1.py":"cda6f8bde8a7d212f8aaa7cb9abe1c0feac30339d320ebe5227999db738beb59","g11/wild_pack/v1/wild4_lifecycle_v1.py":"b6ce4ad3d8475660316cf50f62d227d7b9cc137b4e49441ec215fb819c32ae1c"}')
+          expected=json.loads('{"g11/wild_pack/v1/goripan_competition_v1.py":"d15abcd559ec96884b304fc330d599a519e55edb5786809518d7f5100bbedad0","g11/wild_pack/v1/goripan_multiday_v1.py":"25fea3a38a429d4ae5fc155d7e09000fb08dbc54da887e2ab6b978f036d41028","g11/wild_pack/v1/goripan_candidate_pool_v1.py":"cda6f8bde8a7d212f8aaa7cb9abe1c0feac30339d320ebe5227999db738beb59","g11/wild_pack/v1/wild4_lifecycle_v1.py":"b6ce4ad3d8475660316cf50f62d227d7b9cc137b4e49441ec215fb819c32ae1c"}')
           assert multi.CONTRACT=='G11_GORIPAN_MULTIDAY_5_5_800_V1'
           assert (multi.POLICY['selection_days'],multi.POLICY['selection_races'],
                   multi.POLICY['confirmation_days'],multi.POLICY['confirmation_races'])==(5,500,5,300)
@@ -376,7 +376,7 @@ jobs:
               assert hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()==sha, path
           print('WILD4_MULTIDAY_CONTRACT_READBACK='+json.dumps({'contract':multi.CONTRACT,
               'policy':multi.POLICY,'competition_contract':competition.CONTRACT,'competition_policy':competition.POLICY,
-              'source_sha':'b30031c6b9500a7e7bcf0391ced0d85df8575850','status':'PASS'},sort_keys=True))
+              'source_sha':'7faaacfec8a8643a588af7e23d062fc787ba24b8','status':'PASS'},sort_keys=True))
           PYMULTIGUARD
       - name: Decrypt verified state and candidate
         id: decrypted
