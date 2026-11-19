@@ -471,7 +471,7 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@d2ee1a1f2c7d29332459e07d6dcdecd291d9a137
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@66d94b4fe4dcd58e6e7b46e1e85af78e51e44551
     with:
       predeadline_checkpoint_key: ${{ inputs.predeadline_checkpoint_key || '' }}
       predeadline_delta_key: ${{ inputs.predeadline_delta_key || '' }}
