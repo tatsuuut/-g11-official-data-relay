@@ -89,7 +89,14 @@ def timely_stadium_sources(artifact, day, plan, prior, now):
     return output
 
 
-def complete_from_venue(artifact, prediction):
+def nothing_to_deliver(acquisition, prediction, prior_v53):
+    if acquisition.get('ACQUIRED') or prediction.get('COMPLETED') or prediction.get('ABEKEN_COMPLETED'):
+        return False
+    v53 = set(prediction.get('ABEKEN_V53_READY', ())) | set(prediction.get('ABEKEN_V53_FORMAL_COMPLETED', ()))
+    return all('abeken-v53-shadow-live-' + key.lower() + '.json' in prior_v53 for key in v53)
+
+
+def complete_from_venue(artifact, prediction, acquisition, prior_v53):
     """Admit timely input after a verified host stop under the active day's authority."""
     from pathlib import Path
     import importlib.util
@@ -104,12 +111,13 @@ def complete_from_venue(artifact, prediction):
         if not path.is_file():
             return prediction
         commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
-        if commit != 'a6c6b7fe09b0422e3c71ed531bd228bc90fd64a0':
+        if commit != '5ff3c9c3d0a35144e160f755ed0f379d46c99cff':
             raise ValueError('VENUE_COLLECTOR_VERSION')
         spec = importlib.util.spec_from_file_location('_g11_verified_venue_input', path)
         provider = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(provider)
-        return provider.complete(artifact, prediction, official_pipeline)
+        return provider.complete(artifact, prediction, official_pipeline,
+                                 idle_retry=nothing_to_deliver(acquisition, prediction, prior_v53))
     except (KeyError, OSError, ImportError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         print('VENUE_FORMAL_UNAVAILABLE', type(exc).__name__, str(exc)[:180], flush=True)
         return prediction
@@ -148,7 +156,7 @@ def formal_lock_scope(day):
     additions = {'_missing_formal_locks': missing_formal_locks, 'capture': capture}
     if day == '2026-11-20':
         native = '        prediction = CanonicalRunner(artifact).run_due_predeadline_predictions()'
-        substitutions.append((native, native + '\n        prediction = _complete_from_venue(artifact, prediction)'))
+        substitutions.append((native, native + '\n        prediction = _complete_from_venue(artifact, prediction, acquisition, prior_v53)'))
         additions['_complete_from_venue'] = complete_from_venue
     if day >= '2026-11-20':
         begin = '        acquisition = capture(store)'
