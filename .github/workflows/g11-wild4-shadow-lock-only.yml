@@ -1160,7 +1160,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C .g11-venue-input rev-parse HEAD)" = 'a6c6b7fe09b0422e3c71ed531bd228bc90fd64a0'
-          python3 -S .g11-venue-input/g11/relay/verified_wild_venue_odds_v1.py "${STORE}" "${DAY}" "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${G11_PUBLIC_RUNTIME_HELPERS}"
+          python3 -S .g11-venue-input/g11/relay/verified_wild_venue_odds_v1.py "${GITHUB_WORKSPACE}/${STORE}" "${DAY}" "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${G11_PUBLIC_RUNTIME_HELPERS}"
           if [ -s "${RUNNER_TEMP}/venue-wild4-odds.tmp" ]; then
             mv "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${RUNNER_TEMP}/venue-wild4-odds.json"
           fi
