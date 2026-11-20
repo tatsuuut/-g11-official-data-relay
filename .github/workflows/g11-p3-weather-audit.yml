@@ -60,7 +60,7 @@ jobs:
           path: .relay-cache/state.tgz.gpg
           key: stadium-diagram-original-20261119-readonly
           restore-keys: |
-            g11-state-v4-published-2026-11-19-
+            g11-state-v4-published-2026-11-20-44696295379-
             g11-state-v4-published-2026-11-20-
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -93,8 +93,14 @@ jobs:
           from g11.growth_p3.v1_1 import original_live_input_capture_v1 as verifier
           marks=defaultdict(dict)
           originals={}
+          current={}
           with tarfile.open(source, 'r|gz') as archive:
               for member in archive:
+                  from pathlib import PurePosixPath
+                  filename=PurePosixPath(member.name).as_posix().removeprefix('.relay-state/')
+                  if filename=='store/snapshots/morning/official-day-input.json' or filename.startswith('store/g11/published-preview-state/') and filename.endswith('host.json') or filename.startswith('store/responses/published-preview-20261120-') and filename.endswith('/response.bin'):
+                      if not member.isfile() or member.size>18000000: raise ValueError('CURRENT_MEMBER')
+                      current[filename]=json.loads(archive.extractfile(member).read())
                   original=re.search(r'(?:^|/)store/g11/p3-original-live-inputs/2026-11-19/(20261119-(?:01|15|22|24)-\d\d)\.input\.json$',member.name)
                   if original:
                       if not member.isfile() or member.size>verifier.MAX_RECORD_BYTES: raise ValueError('ORIGINAL_SIZE')
@@ -136,4 +142,21 @@ jobs:
           for venue,rows in evidence.items():
               print('RETAINED_STADIUM_LAYOUT='+json.dumps({'venue':venue,'codes':sorted({r[1] for r in rows}),'samples':len(rows),'receipts':rows}))
           if not evidence: raise ValueError('NO_ARCHIVED_STADIUM_DIAGRAMS')
+          from g11.canonical import published_preview_v1 as preview
+          morning=current['store/snapshots/morning/official-day-input.json']['PAYLOAD']
+          state=current.get('store/g11/published-preview-state/host.json',{})
+          source=current.get('store/responses/'+str(state.get('source'))+'/response.bin')
+          if source:
+              for rno in range(4,13):
+                  key=f'20261120-24-{rno:02}'
+                  native=preview.race_roster(morning,key)
+                  program=source['programs']['stadiums']['24']['races'][str(rno)]
+                  wrong=[]
+                  for boat,(racer,motor,name) in native.items():
+                      row=program['racers'][str(boat)]
+                      if (racer,motor,preview.normal_name(name))!=(row['number'],row['motor_number'],preview.normal_name(row['name'])):
+                          wrong.append([boat,racer,row['number'],motor,row['motor_number'],name,row['name']])
+                  print('OMURA_BOARD_ROSTER='+json.dumps([key,wrong],ensure_ascii=False))
+          for name,s in current.items():
+              if name.endswith('host.json'): print('VENUE_ORIGIN_STATUS='+json.dumps(s,sort_keys=True))
           PY
