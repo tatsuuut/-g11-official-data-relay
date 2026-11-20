@@ -329,7 +329,7 @@ class FormalPlanTests(unittest.TestCase):
         self.bridge={'PREDEADLINE_PLAN':[task(k) for k in ('BEFOREINFO','ODDS3T')],
             'RAW_DAY':{'rows':[[KEY,DEADLINE.strftime('%H:%M')]]*6}}
         self.context={'BEFOREINFO_CAPTURED_AT_JST':NOW.isoformat(),'ODDS_CAPTURED_AT_JST':NOW.isoformat()}
-        self.sources={t['KIND']:{'SNAPSHOT':{'SOURCE_RECEIPTS':[
+        self.sources={t['KIND']:{'SNAPSHOT':{'NAME':t['SOURCE_ID'],'SOURCE_RECEIPTS':[
             {'SOURCE_ID':t['SOURCE_ID'],'URL':t['URL']}]}} for t in self.bridge['PREDEADLINE_PLAN']}
         clock=patch.object(window,'datetime',wraps=datetime);self.clock=clock.start();self.addCleanup(clock.stop)
         self.clock.now.return_value=DEADLINE-timedelta(seconds=1)
@@ -384,7 +384,7 @@ class FormalPlanTests(unittest.TestCase):
     def test_unknown_formal_source_keeps_both_gates_and_collector_at_seven_minutes(self):
         market=self.official.CanonicalRunner._validated_odds_only_market
         formal=self.invocation._bind_predeadline_plan
-        with patch.object(window,'FORMAL_PLAN_SHA','0'*64):
+        with patch.multiple(window, FORMAL_PLAN_SHA='0'*64, STADIUM_FORMAL_PLAN_SHA='0'*64):
             with window.verified_odds_window(self.official) as admitted:
                 self.assertFalse(admitted)
                 self.assertIs(market,self.official.CanonicalRunner._validated_odds_only_market)
