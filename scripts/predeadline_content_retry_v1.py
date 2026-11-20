@@ -65,7 +65,43 @@ def urgent_pair_handoff(store, task, deadline, now, following, eligible, cancell
     _report('URGENT_PAIR_PUBLICATION_HANDOFF', race_key=key,
             remaining_seconds=round((deadline - now).total_seconds(), 3),
             following_due_sources=len(pending), next_deadline_jst=min(pending).isoformat())
+    if output := os.environ.get('GITHUB_OUTPUT'):
+        with open(output, 'a') as handle:
+            handle.write('warm=true\n')
     return True
+
+
+def resume_warm():
+    """Use only the unspent slots of the verified, publicly delivered first pass."""
+    from pathlib import Path
+    import shutil
+    import subprocess
+    import sys
+    root = Path(os.environ['GITHUB_WORKSPACE'])
+    out = root / '.relay-output'
+    first = json.loads((out / 'result.json').read_bytes())
+    gate, source = first['CRITICAL'], first['ACQUISITION']
+    slots = source['WARM_REMAINING']
+    run_id = os.environ['GITHUB_RUN_ID']
+    day = first['OPERATIONAL_DATE_JST']
+    if (gate.get('CRITICAL_CHECKPOINT_STATUS') != 'PASS' or gate.get('LAST_CRITICAL_RUN_ID') != run_id
+            or gate.get('OPERATIONAL_DATE') != day or type(slots) is not int or not 1 <= slots <= 7
+            or slots + len(source['ACQUIRED']) != 8 or not (out / 'hot-delta-readback.json').stat().st_size):
+        raise ValueError('WARM_FIRST_RECEIPT_OR_BUDGET')
+    shutil.copyfile(out / 'result.json', out / 'first-critical-result.json')
+    warm = out / 'warm-result.json'
+    subprocess.run([sys.executable, '-S', str(root / 'scripts/daily_predeadline_authority_recovery_v1.py'),
+        'critical', '--state-root', str(root / '.relay-state'), '--operational-date', day,
+        '--run-id', run_id, '--result', str(warm)], cwd=root / '.g11-private', check=True,
+        env={**os.environ, 'G11_WARM_CAPTURE_REMAINING': str(slots), 'G11_URGENT_WARM_HANDOFF': 'false',
+             'G11_PRIVATE_REPO_TOKEN': ''})
+    second = json.loads(warm.read_bytes())
+    after = second['CRITICAL']
+    if (after.get('CRITICAL_CHECKPOINT_STATUS') != 'PASS' or after.get('LAST_CRITICAL_RUN_ID') != run_id
+            or after.get('OPERATIONAL_DATE') != day or after.get('AUTHORITY_SHA256') != gate['AUTHORITY_SHA256']
+            or len(second['ACQUISITION']['ACQUIRED']) > slots or second['ACQUISITION'].get('WARM_REMAINING')):
+        raise ValueError('WARM_CHECKPOINT_OR_BUDGET')
+    warm.replace(out / 'result.json')
 
 
 def _report(status, **fields):
@@ -349,6 +385,9 @@ def resume_at_host_release(first, plan, runner, capture, max_requests, now):
     second = capture(runner, max_requests=max_requests, early_wait_seconds=0)
     result = merge_attempts(first, second)
     result['DEFERRED'] = second['DEFERRED']
+    if 'WARM_REMAINING' in second:
+        # This unrestricted pass inherited the entire unspent request budget.
+        result['WARM_REMAINING'] = second['WARM_REMAINING']
     _report('HOST_RELEASE_CHECK', acquired=len(second['ACQUIRED']), deferred=bool(second['DEFERRED']))
     return result
 
@@ -440,4 +479,12 @@ def bounded_content_retry(*, early_capture=False):
         yield
     finally:
         CanonicalRunner.run_due_predeadline = original
+
+
+if __name__ == '__main__':
+    try:
+        resume_warm()
+    except Exception:
+        print('::warning title=G11 warm LIVE capture incomplete::Same-day acquisition and its request ledger will resume from persisted state.', flush=True)
+        raise
 
