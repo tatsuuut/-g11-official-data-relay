@@ -582,4 +582,42 @@ class HotAvailabilityReceiptWindowTests(unittest.TestCase):
                     transport.validate_availability(invalid, day)
 
 
+class VerifiedStadiumHandoffTests(unittest.TestCase):
+    def test_only_new_unexpired_bound_originals_signal_handoff(self):
+        import hashlib
+        from datetime import datetime, timedelta
+        from pathlib import Path
+        from types import SimpleNamespace
+        from tempfile import TemporaryDirectory
+        import critical_formal_lock_scope_v1 as scope
+
+        key = '20261120-24-04'
+        day = '2026-11-20'
+        name = 'venue-market-' + key
+        limit = datetime.fromisoformat(day + 'T16:43:00+09:00')
+        now = limit - timedelta(minutes=3)
+        url = 'https://www.omurakyotei.jp/yosou/sp/odds/?day=20261120&race=04'
+        raw = b'saved-original'
+        sha = hashlib.sha256(raw).hexdigest()
+        receipt = dict(SOURCE_ID='odds3t-omura-'+key+'-'+sha, URL=url, FINAL_URL=url,
+            SHA256=sha, HOST='www.omurakyotei.jp', STATUS='HTTP_200_BYTE_EXACT_READBACK',
+            CAPTURED_AT_JST=now.isoformat())
+        snap = {'SOURCE_RECEIPTS':[receipt], 'PAYLOAD':dict(RACE_KEY=key, KIND='ODDS3T',
+            STATUS='OMURA_OFFICIAL_PUBLISHED_MARKET', PUBLISHER=receipt['HOST'],
+            CAPTURED_AT_JST=now.isoformat(), PARSED={'ODDS_ROWS':list(range(120))})}
+        plan = [dict(RACE_KEY=key, KIND='ODDS3T', MUST_FINISH_BEFORE_JST=limit.isoformat())]
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root/'snapshots/predeadline'/(name+'.json')
+            path.parent.mkdir(parents=True)
+            path.touch()
+            store = SimpleNamespace(root=root, response_bytes=lambda sid: raw,
+                                    load_verified_snapshot=lambda stage,n: {'SNAPSHOT':snap})
+            self.assertEqual(scope.timely_stadium_sources(store,day,plan,set(),now), [name])
+            self.assertEqual(scope.timely_stadium_sources(store,day,plan,{name},now), [])
+            self.assertEqual(scope.timely_stadium_sources(store,day,plan,set(),limit), [])
+            store.response_bytes = lambda sid: b'changed'
+            self.assertEqual(scope.timely_stadium_sources(store,day,plan,set(),now), [])
+
+
 if __name__=='__main__':unittest.main()
