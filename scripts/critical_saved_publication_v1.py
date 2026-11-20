@@ -420,8 +420,7 @@ def main():
     receipt = deliver(root / '.relay-state', output, ORIGIN, include_optional_inputs=False)
     feed = json.loads(output.read_bytes())
     critical = json.loads((root / '.relay-state/relay-state.json').read_bytes())['CRITICAL']
-    print('G11_PREDEADLINE_PUBLICATION_TIMING=' + json.dumps(
-        publication_timing(feed, critical, datetime.now(JST)), sort_keys=True), flush=True)
+    report_publication_timing(publication_timing(feed, critical, datetime.now(JST)))
     # HOME's condition comparison also needs the saved odds proof. Send just
     # current, newly saved races now; the regular path retains the full history.
     fresh = fresh_input_source(feed, critical, datetime.now(JST))
@@ -462,6 +461,21 @@ def publication_timing(feed, critical, verified_at):
                      'before_deadline': remaining > 0})
     return {'verified_at': verified_at.isoformat(), 'scope': 'SERVER_READBACK_NOT_DEVICE_ARRIVAL',
             'races': rows}
+
+
+def report_publication_timing(timing):
+    print('G11_PREDEADLINE_PUBLICATION_TIMING=' + json.dumps(timing, sort_keys=True), flush=True)
+    for row in timing['races']:
+        if row['five_minute_target_met']:
+            continue
+        remaining = row['readback_remaining_seconds']
+        if row['before_deadline']:
+            timing_label = f'{remaining:.1f}s before cutoff (under the five-minute target)'
+        elif remaining < 0:
+            timing_label = f'{-remaining:.1f}s after cutoff'
+        else:
+            timing_label = 'at cutoff'
+        print(f"::warning::PREDEADLINE {row['race']} server readback {timing_label}", flush=True)
 
 
 def continuation_delay(result, day, run_id, now):

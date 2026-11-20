@@ -40,6 +40,20 @@ class ContinuationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 critical.continuation_delay(result, DAY, '42', NOW)
 
+    def test_operator_warnings_cover_delayed_server_readback_only(self):
+        rows = [{'key': key, 'deadline_jst': (NOW + timedelta(seconds=seconds)).isoformat()}
+                for key, seconds in [('early', 300), ('short', 20), ('at', 0), ('late', -64)]]
+        timing = critical.publication_timing({'operational_date_jst': DAY, 'races': rows},
+            {'V53_LOCKED_BEFORE_DEADLINE': [r['key'] for r in rows]}, NOW)
+        with patch('sys.stdout', new_callable=io.StringIO) as output:
+            critical.report_publication_timing(timing)
+        raw, *warnings = output.getvalue().splitlines()
+        self.assertEqual(json.loads(raw.split('=', 1)[1]), timing)
+        self.assertEqual(len(warnings), 3)
+        self.assertIn('short server readback 20.0s before', warnings[0])
+        self.assertIn('at server readback at cutoff', warnings[1])
+        self.assertIn('late server readback 64.0s after cutoff', warnings[2])
+
     def test_timing_records_missed_target_without_calling_it_device_delivery(self):
         feed = {'operational_date_jst': DAY, 'races': [
             {'key': 'early', 'deadline_jst': (NOW+timedelta(minutes=5)).isoformat()},
