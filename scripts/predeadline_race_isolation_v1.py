@@ -285,6 +285,18 @@ def dispatch_followup(rows, day, output_path, run=subprocess.run):
     print('WILD4_FOLLOWUP_HANDOFF=DISPATCH_ACCEPTED')
 
 
+def first_handoff_boundary(first, second, day, run_id):
+    for field, expected in (('OPERATIONAL_DATE', day), ('LAST_CRITICAL_RUN_ID', run_id),
+                            ('CRITICAL_CHECKPOINT_STATUS', 'PASS')):
+        if first.get(field) != expected or second.get(field) != expected:
+            raise ValueError('WARM_HANDOFF_IDENTITY')
+    if (not re.fullmatch(r'[0-9a-f]{64}', str(first.get('AUTHORITY_SHA256')))
+            or first['AUTHORITY_SHA256'] != second.get('AUTHORITY_SHA256')
+            or datetime.fromisoformat(first['CRITICAL_CAPTURE_AT']) > datetime.fromisoformat(second['CRITICAL_CAPTURE_AT'])):
+        raise ValueError('WARM_HANDOFF_AUTHORITY_OR_TIME')
+    return first
+
+
 def _handoff_main():
     import argparse
     import os
@@ -310,7 +322,12 @@ def _handoff_main():
         if not (root/'store/snapshots/predeadline'/f'{name}.json').is_file():
             return None
         return store.load_verified_snapshot('predeadline', name)
-    rows = followup_odds(morning, metadata.get('CRITICAL', {}), load, now,
+    critical = metadata.get('CRITICAL', {})
+    if os.environ.get('G11_WARM_FOLLOWUP') == 'success':
+        first = json.loads((Path(os.environ['GITHUB_WORKSPACE']) /
+            '.relay-output/first-critical-result.json').read_bytes())['CRITICAL']
+        critical = first_handoff_boundary(first, critical, args.operational_date, os.environ['GITHUB_RUN_ID'])
+    rows = followup_odds(morning, critical, load, now,
                          args.early_sent == 'true')
     rows = without_published_goripan(rows, args.operational_date)
     print('G11_WILD4_FOLLOWUP_INPUTS=' + json.dumps(rows, sort_keys=True))
@@ -320,3 +337,4 @@ def _handoff_main():
 
 if __name__ == '__main__':
     raise SystemExit(_handoff_main())
+

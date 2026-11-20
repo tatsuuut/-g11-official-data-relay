@@ -182,6 +182,66 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result['ACQUIRED'], [odds] + [r['SOURCE_ID'] for r in other_tasks])
         self.assertFalse(result['MISSED'])
 
+    def november20_congestion(self, next_minute):
+        self.setup_paced_day(degraded=True)
+        self.now = datetime.fromisoformat('2026-11-20T10:59:44+09:00')
+        self.prior_start = self.now - timedelta(seconds=30)
+        self.plan = []
+        for key, minute in [('20261120-21-06', 3), ('20261120-17-03', next_minute),
+                            ('20261120-22-02', 9), ('20261120-02-02', 12)]:
+            end = self.now.replace(hour=11, minute=minute, second=0)
+            for kind in ('BEFOREINFO', 'ODDS3T'):
+                row = self.task(kind, key)
+                row.update(DUE_AT_JST=(end-timedelta(minutes=7)).isoformat(),
+                           MUST_FINISH_BEFORE_JST=end.isoformat())
+                self.plan.append(row)
+                self.responses[row['SOURCE_ID']] = ['complete']
+
+    def test_urgent_saved_pair_reaches_publication_before_six_remaining_gets(self):
+        self.november20_congestion(next_minute=6)
+        expected = [r['SOURCE_ID'] for r in self.plan]
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(first['ACQUIRED'], expected[:2])
+        self.assertEqual(first['WARM_REMAINING'], 6)
+        self.assertEqual(self.now.isoformat(), '2026-11-20T11:00:14+09:00')
+        # Replay representative native lock, verified checkpoint and public
+        # readback durations. The second collection can begin only after this.
+        self.sleep(12 + 102)
+        self.assertLess(self.now, datetime.fromisoformat(self.plan[0]['MUST_FINISH_BEFORE_JST']))
+        second = retry.collect_with_retry(self.original, self.runner, max_requests=first['WARM_REMAINING'],
+            early_wait_seconds=0, early_capture=True)
+        self.assertEqual(second['ACQUIRED'], expected[2:])
+        self.assertNotIn('WARM_REMAINING', second)
+        self.assertEqual([sid for sid, _ in self.attempts], expected)
+        self.assertEqual([sid for sid, _ in self.writes], expected)
+        self.sleep(14 + 52 + 10)
+        self.assertLess(self.now, datetime.fromisoformat(self.plan[2]['MUST_FINISH_BEFORE_JST']))
+
+    def test_urgent_handoff_keeps_another_near_cutoff_in_the_first_capture(self):
+        self.november20_congestion(next_minute=4)
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+            result = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(result['ACQUIRED'][:4], [r['SOURCE_ID'] for r in self.plan[:4]])
+
+    def test_warm_workflow_requires_both_checkpoints_and_distinct_publication_slots(self):
+        source = (Path(__file__).resolve().parents[1] / '.github/workflows/g11-free-runner.yml').read_text()
+        steps = ['critical-save', 'critical-publish', 'predeadline-chain', 'critical-warm',
+                 'publication-state-verified', 'wild4-followup', 'critical-warm-publish']
+        offsets = [source.index('id: ' + name + '\n') for name in steps]
+        self.assertEqual(offsets, sorted(offsets))
+        warm = source[offsets[3]:].split('      - name:', 1)[0]
+        self.assertIn("steps.critical-publish.outcome=='success'", warm)
+        self.assertIn('test -s ../.relay-output/hot-delta-readback.json', warm)
+        self.assertIn('G11_WARM_CAPTURE_REMAINING:', warm)
+        self.assertIn('first-critical-result.json', warm)
+        publish = source[offsets[-1]:].split('      - name:', 1)[0]
+        self.assertIn("steps.publication-state-verified.outputs.ready=='true'", publish)
+        self.assertIn("G11_WARM_PUBLICATION: 'true'", publish)
+        self.assertIn("steps.critical-warm-publish.outcome == 'success'", source)
+
     def test_shared_spacing_handles_prior_worker_and_both_inputs(self):
         before, odds = self.setup_paced_day()
         start = self.now
@@ -584,4 +644,5 @@ class TerminalWithdrawalMergeTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
 

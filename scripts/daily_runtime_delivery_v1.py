@@ -588,13 +588,17 @@ def send_morning(feed_path, feed, authority, origin, token):
 
 
 def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS, pause=time.sleep,
-            include_optional_inputs=True):
+            include_optional_inputs=True, critical_sequence_offset=0):
     if n13_transport_only():
         attempts = 1
     require(origin == ORIGIN and 1 <= attempts <= MAX_ATTEMPTS, "DAILY_DELIVERY_CONFIGURATION")
     Path(".relay-output").mkdir(exist_ok=True)
     incoming = json.loads(feed_path.read_bytes())
     day = incoming["operational_date_jst"]
+    require(type(critical_sequence_offset) is int and critical_sequence_offset in (0, 1)
+            and (not critical_sequence_offset or (incoming['stage'] == 'PREDEADLINE'
+                 and not include_optional_inputs and day >= '2026-11-20')),
+            'DAILY_CRITICAL_SEQUENCE_BINDING')
     rescue_class = incoming.get("SNAPSHOT_CLASS")
     if rescue_class == "SAME_DAY_RESCUE_BOUNDARY":
         from daily_predeadline_authority_recovery_v1 import is_delayed_day
@@ -651,7 +655,7 @@ def deliver(state: Path, feed_path: Path, origin: str, *, attempts=MAX_ATTEMPTS,
                 else:
                     # Reserve slot zero for the saved critical projection;
                     # the regular update in this same run still uses slot one.
-                    verified = hot.publish(feed_path, origin, sequence_offset=0)
+                    verified = hot.publish(feed_path, origin, sequence_offset=critical_sequence_offset)
                 if verified is None:
                     readback, headers, raw = hot.fetch(origin + "/api/g11-feed?date=" + day)
                 else:

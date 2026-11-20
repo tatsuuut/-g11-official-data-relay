@@ -123,6 +123,8 @@ def capture_boundary_delay(plan, saved_sources, now, maximum=300):
 
 def align_empty_capture(state, day, *, clock=None, sleeper=None):
     """Read the verified saved plan; never request or rewrite official input."""
+    if os.environ.get('G11_WARM_CAPTURE_REMAINING'):
+        return  # The first pass already identified queued work; never sleep again here.
     clock = clock or (lambda: datetime.now(JST))
     sleeper = sleeper or time.sleep
     try:
@@ -417,7 +419,9 @@ def main():
     os.environ['G11_SYNC_OIDC'] = token
     from daily_runtime_delivery_v1 import deliver, ORIGIN
     require(os.environ['G11_APP_ORIGIN'] == ORIGIN, 'EARLY_PUBLICATION_ORIGIN')
-    receipt = deliver(root / '.relay-state', output, ORIGIN, include_optional_inputs=False)
+    warm = os.environ.get('G11_WARM_PUBLICATION') == 'true'
+    receipt = deliver(root / '.relay-state', output, ORIGIN, include_optional_inputs=False,
+                      **({'critical_sequence_offset': 1} if warm else {}))
     feed = json.loads(output.read_bytes())
     critical = json.loads((root / '.relay-state/relay-state.json').read_bytes())['CRITICAL']
     report_publication_timing(publication_timing(feed, critical, datetime.now(JST)))

@@ -345,6 +345,17 @@ class FollowupTest(unittest.TestCase):
     def test_accepted_early_dispatch_does_not_suppress_new_saved_odds(self):
         self.assertEqual([GOOD], [r['RACE_KEY'] for r in self.choose()])
 
+    def test_second_checkpoint_uses_actual_first_wild4_cutoff(self):
+        first = dict(self.critical, LAST_CRITICAL_RUN_ID='42', AUTHORITY_SHA256='a'*64)
+        second = dict(first, CRITICAL_CAPTURE_AT=self.now.isoformat())
+        self.assertEqual([], adapter.followup_odds(self.morning, second, self.snapshots.get, self.now, True))
+        boundary = adapter.first_handoff_boundary(first, second, first['OPERATIONAL_DATE'], '42')
+        later = adapter.followup_odds(self.morning, boundary, self.snapshots.get, self.now, True)
+        self.assertEqual([GOOD], [row['RACE_KEY'] for row in later])
+        with self.assertRaisesRegex(ValueError, 'WARM_HANDOFF_IDENTITY'):
+            adapter.first_handoff_boundary(first, dict(second, LAST_CRITICAL_RUN_ID='43'),
+                                           first['OPERATIONAL_DATE'], '42')
+
     def test_failed_early_handoff_retries_all_unexpired_verified_inputs(self):
         self.assertEqual([BAD, GOOD], [r['RACE_KEY'] for r in self.choose(False)])
 

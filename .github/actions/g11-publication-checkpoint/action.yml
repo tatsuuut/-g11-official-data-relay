@@ -8,6 +8,10 @@ inputs:
     description: Optional current LIVE day; start the independently verifying WILD4 worker after the full save.
     required: false
     default: ""
+  warm-day:
+    description: Prepare the saved warm continuation feed during its verified full checkpoint transfer.
+    required: false
+    default: ""
   encrypt-full:
     description: Complete ordinary full encryption after the verified compact dispatch.
     required: false
@@ -98,14 +102,18 @@ runs:
       shell: bash
       run: sha256sum .relay-cache/state.tgz.gpg > .relay-output/publication-state.sha256
     - name: Prepare current feed during complete checkpoint transfer
-      if: inputs.encrypt-full == 'true' && inputs.wild4-day != ''
+      if: (inputs.encrypt-full == 'true' && inputs.wild4-day != '') || inputs.warm-day != ''
       shell: bash
       continue-on-error: true
       env:
-        PREPARE_DAY: ${{ inputs.wild4-day }}
+        PREPARE_DAY: ${{ inputs.wild4-day || inputs.warm-day }}
       run: |
         set -euo pipefail
-        test "${{ inputs.cache-key }}" = "g11-state-v4-critical-${PREPARE_DAY}-${GITHUB_RUN_ID}"
+        if [ -n '${{ inputs.warm-day }}' ]; then
+          test "${{ inputs.cache-key }}" = "g11-state-v4-published-${PREPARE_DAY}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-checkpoint"
+        else
+          test "${{ inputs.cache-key }}" = "g11-state-v4-critical-${PREPARE_DAY}-${GITHUB_RUN_ID}"
+        fi
         # The final publisher takes the same lock before falling back, including
         # when a slow preparation is still writing derived projection files.
         env -u GH_TOKEN -u GITHUB_TOKEN -u G11_PRIVATE_REPO_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \

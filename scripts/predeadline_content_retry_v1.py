@@ -11,6 +11,7 @@ from functools import wraps
 import hashlib
 import inspect
 import json
+import os
 import re
 import textwrap
 import types
@@ -29,6 +30,42 @@ MAX_HOST_RESUME_WAIT_SECONDS = 180
 PACED_CAPTURE_FROM = date(2026, 11, 19)
 HEALTHY_SPACING_SECONDS = 15
 DEGRADED_SPACING_SECONDS = 30
+# Budget the first verified checkpoint/readback and native finalization before
+# leaving a later race to the same worker's remaining serial capture slots.
+URGENT_READY_SECONDS = 180
+HANDOFF_SETUP_SECONDS = 145
+
+
+def urgent_pair_handoff(store, task, deadline, now, following, eligible, cancelled_days, remaining_slots):
+    """Return to normal LOCK, persistence and public delivery before later GETs."""
+    if (os.environ.get('G11_URGENT_WARM_HANDOFF') != 'true'
+            or now.date() < date(2026, 11, 20) or remaining_slots <= 0
+            or not 0 < (deadline - now).total_seconds() <= URGENT_READY_SECONDS):
+        return False
+    key = task['RACE_KEY']
+    pre = store.root / 'snapshots' / 'predeadline'
+    if not all((pre / f'{kind}-{key}.json').is_file() for kind in ('beforeinfo', 'odds3t')):
+        return False
+    from predeadline_capture_window_v1 import effective_due
+    pending = []
+    for row in following:
+        if (row['RACE_KEY'] not in eligible or row['RACE_KEY'][:-3] in cancelled_days
+                or (pre / (row['SOURCE_ID'] + '.json')).is_file()):
+            continue
+        end = datetime.fromisoformat(row['MUST_FINISH_BEFORE_JST'])
+        due = effective_due(datetime.fromisoformat(row['DUE_AT_JST']), end)
+        if due <= now < end:
+            pending.append(end)
+    if not pending:
+        return False
+    # An overlapping race with too little time for a fresh worker stays in
+    # this capture. Check the cumulative serial workload, including ties.
+    if (min(pending) - now).total_seconds() < HANDOFF_SETUP_SECONDS + remaining_slots * DEGRADED_SPACING_SECONDS:
+        return False
+    _report('URGENT_PAIR_PUBLICATION_HANDOFF', race_key=key,
+            remaining_seconds=round((deadline - now).total_seconds(), 3),
+            following_due_sources=len(pending), next_deadline_jst=min(pending).isoformat())
+    return True
 
 
 def _report(status, **fields):
@@ -203,6 +240,20 @@ def _restricted_collector(original, selected, stop_at, *, early_capture=False, i
             raise ValueError('EARLY_CAPTURE_COLLECTOR_CONTRACT')
         source = source.replace(anchor, anchor+'            due = _capture_due(due, deadline)\n', 1)
         namespace['_capture_due'] = effective_due
+        if isolate_host and selected is None:
+            anchor = '            acquired.append(task["SOURCE_ID"]); task_index += 1\n'
+            if source.count(anchor) != 1:
+                raise ValueError('URGENT_CAPTURE_COLLECTOR_CONTRACT')
+            source = source.replace(anchor, anchor+
+                '            if _urgent_handoff(self.store, task, deadline, self.client.clock(),\n'
+                '                    plan[task_index:], eligible, cancelled_days, max_requests - len(acquired)):\n'
+                '                urgent_remaining = max_requests - len(acquired)\n'
+                '                break\n', 1)
+            source = source.replace('        task_index = 0\n',
+                '        urgent_remaining = 0\n        task_index = 0\n', 1)
+            source = source.replace('            "ACQUIRED": acquired,\n',
+                '            "ACQUIRED": acquired,\n            **({"WARM_REMAINING": urgent_remaining} if urgent_remaining else {}),\n', 1)
+            namespace['_urgent_handoff'] = urgent_pair_handoff
     if isolate_host:
         source = _isolate_host(source)
         from predeadline_refusal_evidence_v1 import observe
@@ -372,6 +423,11 @@ def bounded_content_retry(*, early_capture=False):
         advance = (early_capture and early_wait_seconds == 0
             and enabled(self.client.clock())
             and getattr(CanonicalRunner,'_g11_ten_minute_odds_window',False))
+        warm = os.environ.get('G11_WARM_CAPTURE_REMAINING')
+        if warm:
+            if not advance or not re.fullmatch('[1-7]', warm):
+                raise ValueError('URGENT_REMAINDER_BUDGET')
+            max_requests = min(max_requests, int(warm))
         if advance:
             _report('TEN_MINUTE_CAPTURE',capture_lead_minutes=10,
                     saved_plan_rewritten=False,clock_shift_seconds=0)
