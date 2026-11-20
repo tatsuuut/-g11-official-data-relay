@@ -161,6 +161,24 @@ class HealthTests(unittest.TestCase):
             self.receipt[field] = original
             self.save_receipt()
 
+    def test_engine_hold_distinguishes_complete_inputs_from_a_saved_live_lock(self):
+        pre = self.root / 'snapshots/predeadline'
+        pre.mkdir(parents=True)
+        row = {'key':KEY,'formal_status':'FORMAL','predeadline':None}
+        run = {'PREDICTION':{'FAILED':[{'RACE_KEY':KEY, 'REASON':'P12_EXHIBITION_START'}]}}
+        validator = Mock(side_effect=ValueError('P12_EXHIBITION_START'))
+        self.assertEqual(health.p3_input_holds(self.artifact,DAY,[row],run,validator)['race_count'],0)
+        for name in (SID, 'odds3t-'+KEY):
+            (pre / (name + '.json')).touch()
+        snap = {'SNAPSHOT':{'PAYLOAD':{'CAPTURED_AT_JST':DAY+'T10:52:35+09:00'}}}
+        with patch.object(self.artifact,'load_verified_snapshot',return_value=snap):
+            report = health.p3_input_holds(self.artifact,DAY,[row],run,validator)
+        validator.assert_called_once_with(snap,snap,KEY)
+        self.assertEqual((report['races'][0]['canonical_reforecast_saved'], report['races'][0]['input_gate'],
+                          report['races'][0]['reported_reason']), (False,'P12_EXHIBITION_START','P12_EXHIBITION_START'))
+        (pre / ('current-growth-p3-live-'+KEY+'.json')).touch()
+        self.assertEqual(health.p3_input_holds(self.artifact,DAY,[row],run,validator)['race_count'],0)
+
     def test_saved_rejection_proves_schedule_drift_without_rewriting_or_prediction(self):
         before = {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
         result = self.summary()

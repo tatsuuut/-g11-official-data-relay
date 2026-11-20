@@ -312,6 +312,62 @@ def summarize(artifact, day, acquisition, *, now=None):
             'prediction_boundary_changed': False, 'prediction_generated': False}
 
 
+def p3_input_holds(artifact, day, rows, result, verify_context):
+    """Read saved input pairs for missing P3 LOCKs. Never invoke a predictor."""
+    pre = artifact.root / 'snapshots' / 'predeadline'
+    reasons = {}
+    for item in result.get('PREDICTION', {}).get('FAILED', []):
+        reasons[item['RACE_KEY']] = _safe_code(item.get('REASON'))
+    live = result.get('P3_LIVE', {})
+    for key in live.get('SKIPPED_DEADLINE', []):
+        reasons[key] = 'P3_LIVE_DEADLINE_EXPIRED'
+    for item in live.get('SKIPPED_TRUE_AI_LIVE', []):
+        reasons[item['RACE_ID']] = _safe_code(item.get('ERROR_REASON'))
+    count, evidence = 0, []
+    for row in rows:
+        key = row['key']
+        if (not KEY.fullmatch(key) or key[:8] != day.replace('-', '') or row.get('formal_status') != 'FORMAL'
+                or row.get('predeadline') is not None or (pre / f'current-growth-p3-live-{key}.json').exists()):
+            continue
+        names = [f'beforeinfo-{key}', f'odds3t-{key}']
+        if not all((pre / (name + '.json')).is_file() for name in names):
+            continue
+        count += 1
+        if len(evidence) >= MAX_DETAILS:
+            continue
+        record = {'race_key':key, 'canonical_reforecast_saved':(pre / f'predeadline-prediction-{key}.json').is_file(),
+                  'reported_reason':reasons.get(key), 'input_gate':'UNVERIFIED'}
+        try:
+            before, odds = [artifact.load_verified_snapshot('predeadline', name) for name in names]
+            for label, snap in [('before', before), ('odds', odds)]:
+                at = datetime.fromisoformat(snap['SNAPSHOT']['PAYLOAD']['CAPTURED_AT_JST'])
+                if at.utcoffset() != timedelta(hours=9) or at.date().isoformat() != day:
+                    raise ValueError('HEALTH_INPUT_TIME_BINDING')
+                record[label + '_captured_at_jst'] = at.isoformat()
+            verify_context(before, odds, key)
+            record['input_gate'] = 'PASS'
+        except (ValueError, KeyError, OSError, RuntimeError, TypeError) as exc:
+            record['input_gate'] = _safe_code(str(exc))
+        evidence.append(record)
+    return {'operational_date_jst':day, 'race_count':count, 'races':evidence, 'omitted':count - len(evidence)}
+
+
+def report_p3_after_delivery(root, feed):
+    """The read-only diagnostic runs only after the normal public readback."""
+    try:
+        sys.path.insert(0, str(root / '.g11-private'))
+        from g11.canonical.official_pipeline import OfficialArtifactStore, FORMAL_GATE
+        result = json.loads((root / '.relay-output/result.json').read_bytes())
+        day = feed['operational_date_jst']
+        if result['OPERATIONAL_DATE_JST'] != day:
+            raise ValueError('HEALTH_DAILY_RESULT_BINDING')
+        audit = p3_input_holds(OfficialArtifactStore(root / '.relay-state/store'), day, feed['races'],
+                               result, FORMAL_GATE.build_canonical_official_predeadline_context)
+        print('G11_P3_INPUT_PAIR_WITHOUT_LIVE=' + json.dumps(audit, sort_keys=True), flush=True)
+    except Exception as exc:
+        print('G11_P3_INPUT_PAIR_AUDIT_UNAVAILABLE=' + type(exc).__name__, flush=True)
+
+
 def report(artifact, day, acquisition):
     now = datetime.now(JST)
     value = summarize(artifact, day, acquisition, now=now)

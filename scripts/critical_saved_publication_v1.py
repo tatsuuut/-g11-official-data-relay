@@ -428,6 +428,8 @@ def main():
     if fresh['races']:
         from selective_alert_input_v1 import deliver_optional
         deliver_optional(root / '.relay-state/store', fresh, ORIGIN, token=token)
+    from predeadline_input_health_v1 import report_p3_after_delivery
+    report_p3_after_delivery(root, feed)
     print('G11_EARLY_PUBLICATION=' + json.dumps({
         'status': receipt['site_get_readback'], 'at': datetime.now(JST).isoformat(),
         'authority': receipt['authority_sha256'], 'prediction_recalculation': 0}, sort_keys=True))
