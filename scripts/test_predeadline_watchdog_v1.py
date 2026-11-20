@@ -697,8 +697,8 @@ class PredeadlineChainTests(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] /
                   '.github/workflows/g11-free-runner.yml').read_text()
         import yaml
-        jobs = yaml.safe_load(source)['jobs'].values()
-        matches = [step['run'] for job in jobs for step in job.get('steps', [])
+        workflow_jobs = yaml.safe_load(source)['jobs'].values()
+        matches = [step['run'] for job in workflow_jobs for step in job.get('steps', [])
                    if step.get('id') == 'predeadline-chain']
         self.assertEqual(len(matches), 1)
         script = matches[0]
