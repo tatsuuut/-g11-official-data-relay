@@ -322,7 +322,7 @@ jobs:
           printf 'source_sha=%s\n' "${source_sha}" >> "${GITHUB_OUTPUT}"
       - name: Verify scoped PREDEADLINE authority recovery regression
         if: steps.due.outputs.phase=='predeadline'
-        run: PYTHONPATH=scripts python3 -m unittest test_daily_predeadline_authority_recovery_v1 test_predeadline_race_isolation_v1 -q
+        run: PYTHONPATH=scripts python3 -m unittest test_daily_predeadline_authority_recovery_v1 test_predeadline_race_isolation_v1 test_prepared_critical_feed_v1 -q
       - name: Select short LIVE cycle from November 8
         id: fast-lane
         run: python3 scripts/predeadline_fast_lane_v1.py select --day '${{steps.due.outputs.operational_date}}' --phase '${{steps.due.outputs.phase}}' --frozen '${{steps.authority.outputs.frozen}}' --rescue '${{steps.authority.outputs.rescue_bootstrap}}'
