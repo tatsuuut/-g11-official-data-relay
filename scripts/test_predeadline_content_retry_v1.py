@@ -226,21 +226,57 @@ class RetryTests(unittest.TestCase):
                 early_wait_seconds=0, early_capture=True)
         self.assertEqual(result['ACQUIRED'][:4], [r['SOURCE_ID'] for r in self.plan[:4]])
 
+    def test_official_host_release_preserves_urgent_remainder_from_full_second_attempt(self):
+        self.november20_congestion(next_minute=6)
+        release = self.now + timedelta(seconds=1)
+        first = {name:[] for name in ('ACQUIRED','MISSED','SKIPPED','REJECTED',
+            'RETRYABLE_FAILURES','UNAVAILABLE','TASK_DEFERRED')}
+        first.update(STATUS='DUE_TASKS_PROCESSED', DEFERRED={'REASON':'HOST_PAUSED',
+            'RETRY_AT_JST':release.isoformat()})
+        full = retry._restricted_collector(self.original, None, None, early_capture=True, isolate_host=True)
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+            recovered = retry.resume_at_host_release(first, self.plan, self.runner, full, 8, self.now)
+        self.assertEqual(recovered['ACQUIRED'], [r['SOURCE_ID'] for r in self.plan[:2]])
+        self.assertEqual(recovered['WARM_REMAINING'], 6)
+        self.assertIsNone(recovered['DEFERRED'])
+
     def test_warm_workflow_requires_both_checkpoints_and_distinct_publication_slots(self):
         source = (Path(__file__).resolve().parents[1] / '.github/workflows/g11-free-runner.yml').read_text()
-        steps = ['critical-save', 'critical-publish', 'predeadline-chain', 'critical-warm',
-                 'publication-state-verified', 'wild4-followup', 'critical-warm-publish']
+        steps = ['critical-save', 'critical-publish', 'predeadline-chain', 'warm',
+                 'publication-state-verified', 'wild4-followup', 'critical-retry']
         offsets = [source.index('id: ' + name + '\n') for name in steps]
         self.assertEqual(offsets, sorted(offsets))
         warm = source[offsets[3]:].split('      - name:', 1)[0]
         self.assertIn("steps.critical-publish.outcome=='success'", warm)
-        self.assertIn('test -s ../.relay-output/hot-delta-readback.json', warm)
-        self.assertIn('G11_WARM_CAPTURE_REMAINING:', warm)
-        self.assertIn('first-critical-result.json', warm)
+        self.assertIn('python3 -S scripts/predeadline_content_retry_v1.py', warm)
+        self.assertIn("steps.critical.outputs.warm=='true'", warm)
         publish = source[offsets[-1]:].split('      - name:', 1)[0]
         self.assertIn("steps.publication-state-verified.outputs.ready=='true'", publish)
-        self.assertIn("G11_WARM_PUBLICATION: 'true'", publish)
-        self.assertIn("steps.critical-warm-publish.outcome == 'success'", source)
+        self.assertIn("G11_WARM_PUBLICATION:", publish)
+        self.assertIn("steps.warm.outcome == 'success' && steps.critical-retry.outcome == 'success'", source)
+
+    def test_warm_start_checks_receipt_preserves_first_cutoff_and_enforces_residual_budget(self):
+        root = self.root
+        out = root / '.relay-output'
+        out.mkdir()
+        first = {'OPERATIONAL_DATE_JST':'2026-11-20', 'CRITICAL':{'OPERATIONAL_DATE':'2026-11-20',
+            'CRITICAL_CHECKPOINT_STATUS':'PASS','LAST_CRITICAL_RUN_ID':'41','AUTHORITY_SHA256':'a'*64},
+            'ACQUISITION':{'ACQUIRED':['a','b'], 'WARM_REMAINING':6}}
+        (out / 'result.json').write_text(json.dumps(first))
+        (out / 'hot-delta-readback.json').write_text('{}')
+        def complete(_command, *, env, **kwargs):
+            self.assertEqual((env['G11_WARM_CAPTURE_REMAINING'], env['G11_URGENT_WARM_HANDOFF']), ('6','false'))
+            second = dict(first, ACQUISITION={'ACQUIRED':['c','d']})
+            (out / 'warm-result.json').write_text(json.dumps(second))
+        with patch.dict(os.environ, {'GITHUB_WORKSPACE':str(root), 'GITHUB_RUN_ID':'41'}), patch('subprocess.run',side_effect=complete) as call:
+            retry.resume_warm()
+            self.assertEqual(json.loads((out/'first-critical-result.json').read_bytes()), first)
+            self.assertEqual(json.loads((out/'result.json').read_bytes())['ACQUISITION'], {'ACQUIRED':['c','d']})
+            first['ACQUISITION']['WARM_REMAINING'] = 7
+            (out / 'result.json').write_text(json.dumps(first))
+            with self.assertRaisesRegex(ValueError, 'FIRST_RECEIPT_OR_BUDGET'):
+                retry.resume_warm()
+            self.assertEqual(call.call_count, 1)
 
     def test_shared_spacing_handles_prior_worker_and_both_inputs(self):
         before, odds = self.setup_paced_day()
