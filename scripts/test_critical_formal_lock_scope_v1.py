@@ -72,14 +72,18 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
 
     def exercise(self, *, missing=False, corrupt=False, observe=False):
         critical, official = self.modules()
-        day = '2026-11-01'
+        run_sha = hashlib.sha256(inspect.getsource(critical.run).encode()).hexdigest()
+        day = ('2026-11-21' if run_sha == scope.DISPLAY_WARM_RUN_SHA else
+               '2026-11-17' if observe else '2026-11-01')
+        formal = day.replace('-', '') + '-14-01'
+        excluded = day.replace('-', '') + '-22-01'
         now = datetime.fromisoformat(day + 'T07:00:00+09:00')
         deadline = day + 'T08:35:00+09:00'
-        source_id = 'beforeinfo-' + FORMAL
+        source_id = 'beforeinfo-' + formal
         fields = list(official.LOCK49_FIELDS)
         rows = []
-        for key, status, reason in ((FORMAL, 'FORMAL', None),
-                                    (EXCLUDED, 'EXCLUDED', 'BODY_NOT_GENERATED')):
+        for key, status, reason in ((formal, 'FORMAL', None),
+                                    (excluded, 'EXCLUDED', 'BODY_NOT_GENERATED')):
             row = [None] * len(fields)
             for name, value in (('標準レースキー', key), ('正式/除外', status), ('除外理由', reason)):
                 row[fields.index(name)] = value
@@ -95,7 +99,7 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
             def load_verified_snapshot(self, stage, name):
                 if (stage, name) == ('morning', 'official-day-input'):
                     return {'SNAPSHOT': {'PAYLOAD': {'PREDEADLINE_PLAN': [
-                        {'SOURCE_ID': source_id, 'RACE_KEY': FORMAL,
+                        {'SOURCE_ID': source_id, 'RACE_KEY': formal, 'KIND': 'BEFOREINFO',
                          'MUST_FINISH_BEFORE_JST': deadline}]}}}
                 if (stage, name) == ('morning', 'workbook-projection'):
                     return {'SNAPSHOT': {'PAYLOAD': projection}}
@@ -107,18 +111,18 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
             def __init__(self, store): pass
             def run_due_predeadline_predictions(self):
                 order.append('P3_V53')
-                return {'ABEKEN_V53_READY': [FORMAL]}
+                return {'ABEKEN_V53_READY': [formal]}
         def publish(*args, **kwargs):
             self.assertTrue(kwargs['strict_deadline'])
             self.assertFalse(kwargs['include_research'])
             self.assertIs(args[1], projection)
             order.append('CURRENT_P3')
             return {'LIVE_PUBLISH': {'COMPLETED': [
-                {'RACE_ID': FORMAL, 'P3_SNAPSHOT_WRITE': 'PASS'}]}}
+                {'RACE_ID': formal, 'P3_SNAPSHOT_WRITE': 'PASS'}]}}
 
         original = critical.run
         original_bytes = Path(critical.__file__).read_bytes()
-        self.assertEqual(hashlib.sha256(inspect.getsource(original).encode()).hexdigest(), scope.RUN_SHA256)
+        self.assertTrue(scope.reviewed_run(day, run_sha))
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
             model = state / 'store/g11/wild-pack-models/current.json'
@@ -129,7 +133,7 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
                 now=datetime.fromisoformat(day + 'T02:15:00+09:00'))
             morning = state / 'store/snapshots/morning'
             morning.mkdir(parents=True)
-            lock = morning / (critical.current_runtime.snapshot_name(FORMAL) + '.json')
+            lock = morning / (critical.current_runtime.snapshot_name(formal) + '.json')
             if not missing: lock.write_text('{}\n')
             (morning / 'fixture-input.json').write_text('{"retained":true}\n')
             (state / 'relay-state.json').write_text(json.dumps({
@@ -148,7 +152,7 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
                  patch.object(critical, 'capture', side_effect=lambda root:
                      order.append('OFFICIAL_CAPTURE') or {'ACQUIRED': [source_id]}), \
                  patch.object(critical.current_p3, 'publish_future', side_effect=publish), \
-                 scope.formal_lock_scope('2026-11-17' if observe else day):
+                 scope.formal_lock_scope(day):
                 if missing or corrupt:
                     with self.assertRaises(Exception) as error:
                         critical.run(state, day, 'fixture')
@@ -161,13 +165,20 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
                     self.assertEqual(result['STATUS'], 'CRITICAL_CHECKPOINT_PASS')
                     self.assertEqual(result['CRITICAL']['AUTHORITY_SHA256'], authority['authority_sha256'])
                     self.assertEqual(result['CRITICAL']['POST_DEADLINE_GENERATION'], 0)
-                    self.assertEqual(result['CRITICAL']['PREDICTION_LOCKED_BEFORE_DEADLINE'], [FORMAL])
-                    self.assertEqual(order, ['OFFICIAL_CAPTURE'] + (['INPUT_HEALTH'] if observe else []) + ['P3_V53', 'CURRENT_P3'])
+                    self.assertEqual(result['CRITICAL']['PREDICTION_LOCKED_BEFORE_DEADLINE'], [formal])
+                    self.assertEqual(order, ['OFFICIAL_CAPTURE'] + (['INPUT_HEALTH'] if day >= '2026-11-17' else []) + ['P3_V53', 'CURRENT_P3'])
             self.assertIs(critical.run, original)
             self.assertEqual(authority_path.read_bytes(), authority_bytes)
             if not corrupt:
                 self.assertEqual(before, {p.name: p.read_bytes() for p in morning.iterdir()})
         self.assertEqual(Path(critical.__file__).read_bytes(), original_bytes)
+
+    def test_only_the_two_reviewed_fingerprints_are_admitted_on_their_days(self):
+        self.assertTrue(scope.reviewed_run('2026-11-20', scope.RUN_SHA256))
+        self.assertFalse(scope.reviewed_run('2026-11-20', scope.DISPLAY_WARM_RUN_SHA))
+        self.assertTrue(scope.reviewed_run('2026-11-21', scope.RUN_SHA256))
+        self.assertTrue(scope.reviewed_run('2026-11-21', scope.DISPLAY_WARM_RUN_SHA))
+        self.assertFalse(scope.reviewed_run('2026-11-21', '0' * 64))
 
     def test_excluded_race_allows_unchanged_critical_capture_publish_and_seal(self):
         self.exercise()
