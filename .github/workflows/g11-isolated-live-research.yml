@@ -81,7 +81,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 637440c53c2fbf2043afae95b81ddd2b376c3a84
+          ref: 2f8e7fc4e201145c3c0faa2d0580e68bdb30b08e
           token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
           path: .p3-display-source
           persist-credentials: false
@@ -117,10 +117,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .p3-display-day
-          before=$(find .p3-display-day -type f -name '*.json' | wc -l)
+          fingerprint() { find .p3-display-day -type f -name '*.json' -print0 | sort -z | xargs -0r sha256sum | sha256sum; }
+          before=$(fingerprint)
           python3 -S .p3-display-source/g11/research/p3_original_display_v1/observe.py --store .research-state/store --day "$DAY" --output .p3-display-day
-          after=$(find .p3-display-day -type f -name '*.json' | wc -l)
-          if ((after > before)); then echo 'changed=true' >> "$GITHUB_OUTPUT"; fi
+          if [[ $(fingerprint) != "$before" ]]; then echo 'changed=true' >> "$GITHUB_OUTPUT"; fi
       - name: Encrypt and verify the updated P3 display comparison
         id: display-encrypt
         if: steps.display-observe.outputs.changed=='true'
