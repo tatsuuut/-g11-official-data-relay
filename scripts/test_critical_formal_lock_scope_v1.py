@@ -118,7 +118,8 @@ class FrozenCriticalIntegrationTests(unittest.TestCase):
 
         original = critical.run
         original_bytes = Path(critical.__file__).read_bytes()
-        self.assertEqual(hashlib.sha256(inspect.getsource(original).encode()).hexdigest(), scope.RUN_SHA256)
+        self.assertIn(hashlib.sha256(inspect.getsource(original).encode()).hexdigest(),
+                      scope.REVIEWED_RUN_SHA256)
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
             model = state / 'store/g11/wild-pack-models/current.json'

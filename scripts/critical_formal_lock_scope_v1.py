@@ -11,7 +11,11 @@ import inspect
 import re
 
 EFFECTIVE_FROM = date(2026, 11, 1)
-RUN_SHA256 = 'aa19dbecb3230e9836e529e5b73bec9ca560f514e293b23b8bf382dfefe1a5a1'
+# Morning authority can select either reviewed runner across the rollout.
+REVIEWED_RUN_SHA256 = frozenset({
+    'aa19dbecb3230e9836e529e5b73bec9ca560f514e293b23b8bf382dfefe1a5a1',
+    '0c6ef2bc60ab53b429f2849e7c3a4b2a1584ff2ad2b273beab952ce5d000ff71',
+})
 
 
 def missing_formal_locks(projection, store, snapshot_name, expected_fields):
@@ -48,7 +52,8 @@ def formal_lock_scope(day):
     from g11.relay import predeadline_critical_v1 as critical
     from morning_race_isolation_v1 import replace_pinned
     original = critical.run
-    if hashlib.sha256(inspect.getsource(original).encode()).hexdigest() != RUN_SHA256:
+    digest = hashlib.sha256(inspect.getsource(original).encode()).hexdigest()
+    if digest not in REVIEWED_RUN_SHA256:
         raise ValueError('CRITICAL_MORNING_SCOPE_SOURCE_CHANGED')
     before = '''        fields = projection["LOCK49_FIELDS"]
         index = fields.index("標準レースキー")
@@ -68,7 +73,7 @@ def formal_lock_scope(day):
     # replace_pinned compiles with a copy of the original globals. Bind the
     # observer in that namespace; changing critical.capture afterward cannot
     # affect the compiled run function.
-    critical.run = replace_pinned(original, RUN_SHA256, [(before, after)],
+    critical.run = replace_pinned(original, digest, [(before, after)],
         {'_missing_formal_locks': missing_formal_locks, 'capture': capture})
     try:
         yield
