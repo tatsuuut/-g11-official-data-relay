@@ -47,6 +47,32 @@ def missing_formal_locks(projection, store, snapshot_name, expected_fields):
     return missing
 
 
+def complete_from_venue(artifact, prediction):
+    """Admit timely input after a verified host stop under the active day's authority."""
+    from pathlib import Path
+    import importlib.util
+    import os
+    import subprocess
+    from g11.canonical import official_pipeline
+    if artifact.ledger.state()['STOPPED'] is not True:
+        return prediction
+    try:
+        root = Path(os.environ['GITHUB_WORKSPACE']).resolve() / '.g11-venue-input'
+        path = root / 'g11/relay/verified_venue_live_v1.py'
+        if not path.is_file():
+            return prediction
+        commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+        if commit != '61eae1c325946444febf45a4ae35e90f4a666b77':
+            raise ValueError('VENUE_COLLECTOR_VERSION')
+        spec = importlib.util.spec_from_file_location('_g11_verified_venue_input', path)
+        provider = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provider)
+        return provider.complete(artifact, prediction, official_pipeline)
+    except (KeyError, OSError, ImportError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        print('VENUE_FORMAL_UNAVAILABLE', type(exc).__name__, str(exc)[:180], flush=True)
+        return prediction
+
+
 @contextmanager
 def formal_lock_scope(day):
     if date.fromisoformat(day) < EFFECTIVE_FROM:
@@ -76,10 +102,14 @@ def formal_lock_scope(day):
     # replace_pinned compiles with a copy of the original globals. Bind the
     # observer in that namespace; changing critical.capture afterward cannot
     # affect the compiled run function.
-    critical.run = replace_pinned(original, run_sha, [(before, after)],
-        {'_missing_formal_locks': missing_formal_locks, 'capture': capture})
+    substitutions = [(before, after)]
+    additions = {'_missing_formal_locks': missing_formal_locks, 'capture': capture}
+    if day == '2026-11-20':
+        native = '        prediction = CanonicalRunner(artifact).run_due_predeadline_predictions()'
+        substitutions.append((native, native + '\n        prediction = _complete_from_venue(artifact, prediction)'))
+        additions['_complete_from_venue'] = complete_from_venue
+    critical.run = replace_pinned(original, run_sha, substitutions, additions)
     try:
         yield
     finally:
         critical.run = original
-
