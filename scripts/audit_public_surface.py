@@ -106,6 +106,7 @@ ALLOWED_FILES = {
     "docs/predeadline-cache-readback-20261029.md",
     "scripts/critical_saved_publication_v1.py",
     "scripts/test_critical_saved_publication_v1.py",
+    "scripts/test_prepared_critical_feed_v1.py",
     "docs/predeadline-publication-latency-20261024.md",
     "scripts/predeadline_race_isolation_v1.py",
     "scripts/test_predeadline_race_isolation_v1.py",
