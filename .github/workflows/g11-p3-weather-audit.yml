@@ -48,3 +48,57 @@ jobs:
           PYTHONPATH: .
         run: python3 tools/audit_p3_live_weather_v1.py --state "${RUNNER_TEMP}/p3-weather" --day 2026-11-06
 
+
+  retained-stadium-diagrams:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/retained-stadium-layout-nov19'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Restore the last November 19 authenticated publication
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: stadium-diagram-original-20261119-readonly
+          restore-keys: g11-state-v4-published-2026-11-19-
+      - name: Verify retained stadium diagrams and public race identities
+        env:
+          STATE_KEY: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+        run: |
+          set -euo pipefail
+          exec 3<<<"${STATE_KEY}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output "${RUNNER_TEMP}/state.tgz" .relay-cache/state.tgz.gpg
+          exec 3<&-
+          unset STATE_KEY
+          python3 - <<'PY'
+          from collections import defaultdict
+          from datetime import datetime
+          from hashlib import sha256
+          import json, os, pathlib, re, tarfile
+          from urllib.parse import urlsplit, parse_qs
+          source=pathlib.Path(os.environ['RUNNER_TEMP'])/'state.tgz'
+          marks=defaultdict(dict)
+          with tarfile.open(source, 'r|gz') as archive:
+              for member in archive:
+                  match=re.fullmatch(r'(?:\./)?(?:\.relay-state/)?store/responses/beforeinfo-(20261119-(?:01|15|22|24)-\d\d)/(response\.bin|receipt\.json)',member.name)
+                  if not match: continue
+                  key, part=match.groups()
+                  if not member.isfile() or member.size>550000 or part in marks[key]: raise ValueError('MEMBER')
+                  raw=archive.extractfile(member).read(member.size+1)
+                  if part=='receipt.json':
+                      marks[key][part]=json.loads(raw)
+                  else:
+                      north=re.findall(rb'\bis-direction(\d+)\b', raw)
+                      wind=re.findall(rb'\bis-wind(\d+)\b', raw)
+                      if len(north)!=1 or len(wind)!=1: raise ValueError('DIAGRAM')
+                      marks[key][part]=(int(north[0]),int(wind[0]),sha256(raw).hexdigest())
+          evidence={}
+          for key, record in sorted(marks.items()):
+              north, wind, digest=record['response.bin']
+              rc=record['receipt.json']
+              url='https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd='+key[:8]+'&jcd='+key[9:11]+'&rno='+str(int(key[-2:]))
+              if not (rc['SOURCE_ID']=='beforeinfo-'+key and rc['URL']==rc['FINAL_URL']==url and rc['HOST']=='www.boatrace.jp' and rc['STATUS']=='HTTP_200_BYTE_EXACT_READBACK' and rc['SHA256']==digest and 1<=north<=16 and 1<=wind<=17 and datetime.fromisoformat(rc['CAPTURED_AT_JST']).strftime('%Y%m%d')==key[:8]): raise ValueError('RECEIPT')
+              evidence.setdefault(key[9:11],[]).append([key,north,wind,digest,rc['CAPTURED_AT_JST']])
+          for venue,rows in evidence.items():
+              print('RETAINED_STADIUM_LAYOUT='+json.dumps({'venue':venue,'codes':sorted({r[1] for r in rows}),'samples':len(rows),'receipts':rows}))
+          if not evidence: raise ValueError('NO_ARCHIVED_STADIUM_DIAGRAMS')
+          PY
