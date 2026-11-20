@@ -696,9 +696,12 @@ class PredeadlineChainTests(unittest.TestCase):
         import textwrap
         source = (Path(__file__).resolve().parents[1] /
                   '.github/workflows/g11-free-runner.yml').read_text()
-        step = source.split('        id: predeadline-chain\n', 1)[1].split(
-            '      - name: Checkout hash-locked research runtime', 1)[0]
-        script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        import yaml
+        jobs = yaml.safe_load(source)['jobs'].values()
+        matches = [step['run'] for job in jobs for step in job.get('steps', [])
+                   if step.get('id') == 'predeadline-chain']
+        self.assertEqual(len(matches), 1)
+        script = matches[0]
         # Keep jq and the real shell control flow. Replace only external I/O
         # and the deliberate delay; POST is recorded rather than sent.
         stubs = '''
