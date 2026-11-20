@@ -1143,7 +1143,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 845eea35405dc81447b71a699c9a14c93fe22f2a
+          ref: a6c6b7fe09b0422e3c71ed531bd228bc90fd64a0
           path: .g11-venue-input
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           persist-credentials: false
@@ -1159,7 +1159,7 @@ jobs:
           DAY: ${{ steps.day.outputs.day }}
         run: |
           set -euo pipefail
-          test "$(git -C .g11-venue-input rev-parse HEAD)" = '845eea35405dc81447b71a699c9a14c93fe22f2a'
+          test "$(git -C .g11-venue-input rev-parse HEAD)" = 'a6c6b7fe09b0422e3c71ed531bd228bc90fd64a0'
           python3 -S .g11-venue-input/g11/relay/verified_wild_venue_odds_v1.py "${STORE}" "${DAY}" "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${G11_PUBLIC_RUNTIME_HELPERS}"
           if [ -s "${RUNNER_TEMP}/venue-wild4-odds.tmp" ]; then
             mv "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${RUNNER_TEMP}/venue-wild4-odds.json"
