@@ -321,10 +321,59 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
     return True
 
 
+def _prepared_binding(root, day):
+    proof = (root / '.relay-output/publication-state.sha256').read_text().split()
+    require(len(proof) == 2 and re.fullmatch('[0-9a-f]{64}', proof[0])
+            and proof[1] == '.relay-cache/state.tgz.gpg', 'PREPARED_CHECKPOINT_DIGEST')
+    return {'day': day, 'run': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+            'cipher_sha256': proof[0],
+            'metadata_sha256': hashlib.sha256((root / '.relay-state/relay-state.json').read_bytes()).hexdigest()}
+
+
+def prepare_feed(root, day):
+    # Full encryption is complete. Only the encrypted file is transferred while
+    # the original verifier reads sealed data and builds the derived view.
+    dest = root / '.relay-output'
+    binding = _prepared_binding(root, day)
+    prepared = dest / 'critical-prepared-feed.json'
+    if not project_saved(root / '.relay-state', day, binding['run'], root / '.g11-private', prepared):
+        return
+    require(binding == _prepared_binding(root, day), 'PREPARED_AUTHORITY_CHANGED')
+    binding['feed_sha256'] = hashlib.sha256(prepared.read_bytes()).hexdigest()
+    temp = dest / 'critical-prepared-proof.tmp'
+    temp.write_text(json.dumps(binding))
+    temp.replace(dest / 'critical-prepared-proof.json')
+
+
+def use_prepared_feed(root, day, output):
+    # Only invoked by the primary send after the exact remote checkpoint was
+    # downloaded and verified. Later publications use their own live state.
+    if os.environ.get('CRITICAL_CHECKPOINT_VERIFIED') != 'true' or datetime.now(JST).date().isoformat() != day:
+        return False
+    dest = root / '.relay-output'
+    try:
+        proof = json.loads((dest / 'critical-prepared-proof.json').read_bytes())
+        data = (dest / 'critical-prepared-feed.json').read_bytes()
+        expected = {**_prepared_binding(root, day), 'feed_sha256': hashlib.sha256(data).hexdigest()}
+        if proof != expected:
+            return False
+        feed = json.loads(data)
+        if (feed.get('operational_date_jst') != day or feed.get('stage') != 'PREDEADLINE'
+                or feed.get('status') != 'PASS'):
+            return False
+    except (ValueError, OSError, KeyError, TypeError, RuntimeError):
+        return False
+    output.write_bytes(data)
+    print('G11_CRITICAL_FEED_PREPARATION=VERIFIED_CACHE_HIT', flush=True)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--day', required=True)
     parser.add_argument('--select-restore', action='store_true')
+    parser.add_argument('--prepare-feed', action='store_true')
+    parser.add_argument('--use-prepared', action='store_true')
     parser.add_argument('--prewarm', action='store_true')
     parser.add_argument('--phase', default='')
     parser.add_argument('--continuation-delay', action='store_true')
@@ -335,6 +384,8 @@ def main():
     if args.prewarm:
         return prewarm_worker(args.day, args.phase)
     root = Path.cwd()
+    if args.prepare_feed:
+        return prepare_feed(root, args.day)
     if args.rescue_continuation_delay:
         result = json.loads((root / '.relay-output/result.json').read_bytes())
         feed = json.loads((root / '.relay-output/feed.json').read_bytes())
@@ -350,8 +401,10 @@ def main():
             'EARLY_PUBLICATION_PERSISTENCE_REQUIRED')
     from predeadline_input_health_v1 import publish_pause_if_observed
     publish_pause_if_observed(root, args.day)
-    ready = project_saved(root / '.relay-state', args.day, os.environ['GITHUB_RUN_ID'],
-                          root / '.g11-private', output)
+    ready = args.use_prepared and use_prepared_feed(root, args.day, output)
+    if not ready:
+        ready = project_saved(root / '.relay-state', args.day, os.environ['GITHUB_RUN_ID'],
+                              root / '.g11-private', output)
     if not ready:
         print('G11_EARLY_PUBLICATION=NO_NEW_LOCKS')
         return

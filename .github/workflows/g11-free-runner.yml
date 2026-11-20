@@ -402,7 +402,7 @@ jobs:
         continue-on-error: true
         env:
           CRITICAL_CHECKPOINT_VERIFIED: ${{steps.critical-save.outputs.ready}}
-        run: python3 -S scripts/critical_saved_publication_v1.py --day '${{steps.due.outputs.operational_date}}'
+        run: flock .relay-output/critical-prepared.lock python3 -S scripts/critical_saved_publication_v1.py --use-prepared --day '${{steps.due.outputs.operational_date}}'
       - name: Keep the predeadline relay alive between delayed cron starts
         id: predeadline-chain
         continue-on-error: true
