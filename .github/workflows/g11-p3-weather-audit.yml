@@ -94,10 +94,15 @@ jobs:
           marks=defaultdict(dict)
           originals={}
           current={}
+          catalogs={}
           with tarfile.open(source, 'r|gz') as archive:
               for member in archive:
                   from pathlib import PurePosixPath
                   filename=PurePosixPath(member.name).as_posix().removeprefix('.relay-state/')
+                  fan=re.fullmatch(r'store/responses/(racer-period-fan[0-9]{4})/response.bin',filename)
+                  if fan:
+                      if not member.isfile() or member.size>16000000:raise ValueError('CATALOG_BOUND')
+                      catalogs[fan[1]]=archive.extractfile(member).read()
                   if filename=='store/snapshots/morning/official-day-input.json' or filename.startswith('store/g11/published-preview-state/') and filename.endswith('host.json') or filename.startswith('store/responses/published-preview-20261120-') and filename.endswith('/response.bin'):
                       if not member.isfile() or member.size>18000000: raise ValueError('CURRENT_MEMBER')
                       current[filename]=json.loads(archive.extractfile(member).read())
@@ -144,6 +149,15 @@ jobs:
           if not evidence: raise ValueError('NO_ARCHIVED_STADIUM_DIAGRAMS')
           from g11.canonical import published_preview_v1 as preview
           morning=current['store/snapshots/morning/official-day-input.json']['PAYLOAD']
+          from g11.canonical import official_pipeline as core
+          envelope=current['store/snapshots/morning/official-day-input.json']
+          names={}
+          for rc in envelope['SOURCE_RECEIPTS']:
+              if rc['SOURCE_ID'] not in catalogs: continue
+              raw=catalogs[rc['SOURCE_ID']]
+              if sha256(raw).hexdigest()!=rc['SHA256']: raise ValueError('CATALOG_HASH')
+              contents=core.LzhExtractor().extract_one(raw,core.CanonicalRunner._archive_member(rc['URL']))
+              names={r:preview.normal_name(p.name) for r,p in core.parse_racer_period_bytes(contents).items()}
           state=current.get('store/g11/published-preview-state/host.json',{})
           source=current.get('store/responses/'+str(state.get('source'))+'/response.bin')
           if source:
@@ -155,7 +169,7 @@ jobs:
                   for boat,(racer,motor,name) in native.items():
                       row=program['racers'][str(boat)]
                       if (racer,motor,preview.normal_name(name))!=(row['number'],row['motor_number'],preview.normal_name(row['name'])):
-                          wrong.append([boat,racer,row['number'],motor,row['motor_number'],name,row['name']])
+                          wrong.append([boat,racer,row['number'],motor,row['motor_number'],name,row['name'],names.get(racer),names.get(racer)==preview.normal_name(row['name'])])
                   print('OMURA_BOARD_ROSTER='+json.dumps([key,wrong],ensure_ascii=False))
           for name,s in current.items():
               if name.endswith('host.json'): print('VENUE_ORIGIN_STATUS='+json.dumps(s,sort_keys=True))
