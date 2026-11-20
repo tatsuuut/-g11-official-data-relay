@@ -249,6 +249,23 @@
       "move": "ESCAPE",
       "mark": "1M",
       "inside": "HELD"
+    },
+    {
+      "key": "20261120-13-02",
+      "venue": "尼崎",
+      "result": "3-4-2",
+      "payout": 10280,
+      "attack": 3,
+      "defend": 1,
+      "benefit": null,
+      "pattern": "ATTACK_WON",
+      "second": null,
+      "third": null,
+      "summary": "3号艇佐野が3コースから強ツケマイ。スリットでは若干劣勢だったが、握るタイミングでイン1号艇が減速し、3がまくって勝った。4の2着、2の3着の成立経路は未確認。",
+      "article": "https://www.nikkansports.com/public_race/news/202611200001687.html",
+      "official": "https://www.boatrace.jp/owpc/pc/race/raceresult?hd=20261120&jcd=13&rno=2",
+      "move": "MAKURI",
+      "mark": "1M"
     }
   ]
 }
