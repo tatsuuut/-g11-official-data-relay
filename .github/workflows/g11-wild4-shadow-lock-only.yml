@@ -1127,6 +1127,43 @@ jobs:
           print('WILD4_RUNTIME_READY_AT='+datetime.now(timezone.utc).isoformat())
           print('WILD4_RUNTIME_READY=PASS MODEL_SHA256='+binding['MODEL_SHA256'])
           PYREADY
+      - name: Detect retained stadium quotes in the verified checkpoint
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && steps.day.outputs.day >= '2026-11-20'
+        id: stadium
+        env:
+          STORE: ${{ steps.decrypted.outputs.store }}
+          DAY: ${{ steps.day.outputs.day }}
+        run: |
+          shopt -s nullglob
+          quotes=("${STORE}"/snapshots/predeadline/venue-market-"${DAY//-/}"-24-??.json)
+          if [ "${#quotes[@]}" -gt 0 ]; then echo 'present=true' >> "${GITHUB_OUTPUT}"; fi
+      - name: Load stadium receipt verifier
+        if: steps.stadium.outputs.present == 'true'
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 845eea35405dc81447b71a699c9a14c93fe22f2a
+          path: .g11-venue-input
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          sparse-checkout: |
+            g11
+            p3
+      - name: Verify stadium quotes against the saved morning and original bytes
+        if: steps.stadium.outputs.present == 'true'
+        continue-on-error: true
+        env:
+          STORE: ${{ steps.decrypted.outputs.store }}
+          DAY: ${{ steps.day.outputs.day }}
+        run: |
+          set -euo pipefail
+          test "$(git -C .g11-venue-input rev-parse HEAD)" = '845eea35405dc81447b71a699c9a14c93fe22f2a'
+          python3 -S .g11-venue-input/g11/relay/verified_wild_venue_odds_v1.py "${STORE}" "${DAY}" "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${G11_PUBLIC_RUNTIME_HELPERS}"
+          if [ -s "${RUNNER_TEMP}/venue-wild4-odds.tmp" ]; then
+            mv "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${RUNNER_TEMP}/venue-wild4-odds.json"
+          fi
       - name: Check for a matching unexpired official odds packet
         if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         id: availability
@@ -1189,6 +1226,14 @@ jobs:
           print('WILD4_VERIFIED_DIRECT_SNAPSHOT_COUNT='+str(len(direct_records)))
           from g11.wild_pack.v1.wild4_record_merge_v1 import merge_verified_odds
           chosen=merge_verified_odds(odds, direct if direct_records else None, day)
+          stadium_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'venue-wild4-odds.json'
+          if stadium_path.is_file():
+              import json
+              try:
+                  stadium=json.loads(stadium_path.read_bytes())
+                  chosen=merge_verified_odds(chosen, stadium, day)
+              except (KeyError, TypeError, ValueError) as exc:
+                  print('WILD4_STADIUM_INPUT_UNAVAILABLE='+str(exc)[:120])
           print('WILD4_VERIFIED_INPUT_UNION='+str(len(chosen['RECORDS']) if chosen else 0))
           if chosen is not None:
               from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as b
