@@ -125,7 +125,16 @@ def _isolate_host(source):
     # Only the two reviewed collector hashes get here. Keep validation, source
     # receipt verification, race scope, immutable writes and cutoff in the original.
     changes = [
-        ('        task_index = 0\n', '        deferred = _host_guard(self.store, self.client.clock())\n        task_index = 0\n'),
+        ('        task_index = 0\n', '        deferred = _host_guard(self.store, self.client.clock())\n'
+         '        cancelled_days = _cancelled_days(self.store, plan, self.client.clock())\n        task_index = 0\n'),
+        ('            if now >= deadline:\n                missed.append(',
+         '            cancellation = cancelled_days.get(task["RACE_KEY"][:-3])\n'
+         '            if cancellation and self.store.response_receipt(task["SOURCE_ID"]) is None:\n'
+         '                skipped.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"],\n'
+         '                                "REASON": "OFFICIAL_VENUE_DAY_CANCELLED", "EVIDENCE_SHA256": cancellation})\n'
+         '                task_index += 1\n'
+         '                continue\n'
+         '            if now >= deadline:\n                missed.append('),
         ('            try:\n                receipt, parsed = ',
          '            if deferred and self.store.response_receipt(task["SOURCE_ID"]) is None:\n'
          '                task_deferred.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"], **deferred})\n'
@@ -197,6 +206,8 @@ def _restricted_collector(original, selected, stop_at, *, early_capture=False, i
     if isolate_host:
         source = _isolate_host(source)
         from predeadline_refusal_evidence_v1 import observe
+        from predeadline_input_health_v1 import verified_cancelled_venue_days
+        namespace['_cancelled_days'] = verified_cancelled_venue_days
         namespace['_observe_refusal'] = observe
         namespace['_host_guard'] = official_host_guard
         namespace['_capture_pause'] = capture_pause

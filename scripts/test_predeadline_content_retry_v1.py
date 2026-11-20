@@ -166,6 +166,22 @@ class RetryTests(unittest.TestCase):
         self.responses = {r['SOURCE_ID']: ['complete'] for r in self.plan}
         return [task['SOURCE_ID'] for task in self.plan]
 
+    def test_cancelled_venue_skips_new_gets_but_processes_other_venues_and_saved_receipts(self):
+        before, odds = self.setup_paced_day()
+        other_tasks = [dict(task, RACE_KEY=task['RACE_KEY'].replace('-14-', '-18-'),
+                            SOURCE_ID=task['SOURCE_ID'].replace('-14-', '-18-')) for task in self.plan]
+        self.plan.extend(other_tasks)
+        for task in other_tasks:
+            self.responses[task['SOURCE_ID']] = ['complete']
+        self.runner.store.response_receipt = lambda sid: {'saved':True} if sid == odds else None
+        with patch('predeadline_input_health_v1.verified_cancelled_venue_days',
+                   return_value={'20261119-14':'b'*64}):
+            result = self.run_capture()
+        self.assertEqual(result['SKIPPED'], [{'SOURCE_ID':before, 'RACE_KEY':'20261119-14-03',
+                         'REASON':'OFFICIAL_VENUE_DAY_CANCELLED','EVIDENCE_SHA256':'b'*64}])
+        self.assertEqual(result['ACQUIRED'], [odds] + [r['SOURCE_ID'] for r in other_tasks])
+        self.assertFalse(result['MISSED'])
+
     def test_shared_spacing_handles_prior_worker_and_both_inputs(self):
         before, odds = self.setup_paced_day()
         start = self.now

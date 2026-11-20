@@ -93,8 +93,16 @@ class ScheduleTable(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.tables, self.table, self.row, self.cell = [], None, None, None
         self.depth = 0
+        self.in_day_list = False
+        self.active_day = None
+        self.active_days = []
 
     def handle_starttag(self, tag, attrs):
+        classes = dict(attrs).get('class', '').split()
+        if tag == 'ul' and 'tab2_tabs' in classes:
+            self.in_day_list = True
+        if tag == 'li' and self.in_day_list and 'is-active2' in classes:
+            self.active_day = []
         if tag == 'table':
             self.depth += 1
             if self.depth == 1: self.table = []
@@ -105,6 +113,11 @@ class ScheduleTable(HTMLParser):
             self.cell['links'].append(dict(attrs).get('href', ''))
 
     def handle_endtag(self, tag):
+        if tag == 'li' and self.active_day is not None:
+            self.active_days.append(''.join(''.join(self.active_day).split()))
+            self.active_day = None
+        if tag == 'ul':
+            self.in_day_list = False
         if self.depth == 1:
             if tag in ('th', 'td') and self.cell is not None:
                 if self.row is not None: self.row.append(self.cell)
@@ -118,11 +131,13 @@ class ScheduleTable(HTMLParser):
         if tag == 'table': self.depth = max(0, self.depth - 1)
 
     def handle_data(self, data):
+        if self.active_day is not None:
+            self.active_day.append(data)
         if self.depth == 1 and self.cell is not None:
             self.cell['text'] += data
 
 
-def official_schedule(raw, source_url, day, venue):
+def _verified_schedule(raw, source_url, day, venue):
     """Require an exact day/venue and twelve bound race links in one table."""
     if type(raw) is not bytes or not 0 < len(raw) <= 2_000_000:
         raise ValueError('HEALTH_RESPONSE_SIZE')
@@ -160,7 +175,11 @@ def official_schedule(raw, source_url, day, venue):
             raise ValueError('HEALTH_SCHEDULE_ORDER')
         candidates.append(stamps)
     if len(candidates) != 1: raise ValueError('HEALTH_SCHEDULE_UNIQUE')
-    return candidates[0]
+    return candidates[0], parser.active_days
+
+
+def official_schedule(raw, source_url, day, venue):
+    return _verified_schedule(raw, source_url, day, venue)[0]
 
 
 def _safe_code(value):
@@ -207,7 +226,13 @@ def latest_rejection(artifact, task, day, now):
               'evidence_sha256': receipt['SHA256'], 'captured_at_jst': at.isoformat()}
     if task['KIND'] == 'BEFOREINFO':
         try:
-            schedule = official_schedule((path / 'response.bin').read_bytes(), receipt['URL'], day, key[9:11])
+            schedule, active_days = _verified_schedule(
+                (path / 'response.bin').read_bytes(), receipt['URL'], day, key[9:11])
+            if (key.endswith('-01') and parse_qs(urlsplit(receipt['URL']).query)['rno'] == ['1']
+                    and receipt.get('FINAL_URL') == receipt['URL']
+                    and active_days == [f'{at.month}月{at.day}日中止']
+                    and at < datetime.fromisoformat(task['MUST_FINISH_BEFORE_JST'])):
+                result['venue_day_cancelled'] = True
             official = schedule[int(key[-2:]) - 1]
             if official != task['MUST_FINISH_BEFORE_JST']:
                 result.update(official_deadline_jst=official,
@@ -218,12 +243,34 @@ def latest_rejection(artifact, task, day, now):
     return result
 
 
+def verified_cancelled_venue_days(artifact, plan, now):
+    """Only a verified first-race day cancellation captured before its saved cutoff can close the venue."""
+    day = now.date().isoformat()
+    cancelled = {}
+    for task in plan:
+        key = task['RACE_KEY']
+        if (task['KIND'] != 'BEFOREINFO' or not KEY.fullmatch(key) or not key.endswith('-01')
+                or key[:8] != day.replace('-', '') or task['SOURCE_ID'] != 'beforeinfo-' + key):
+            continue
+        if not (artifact.root / 'rejected-responses' / task['SOURCE_ID']).is_dir():
+            continue
+        try:
+            evidence = latest_rejection(artifact, task, day, now)
+        except (ValueError, KeyError, OSError, RuntimeError, TypeError):
+            continue
+        if evidence.get('venue_day_cancelled') is True:
+            cancelled[key[:-3]] = evidence['evidence_sha256']
+    return cancelled
+
+
 def summarize(artifact, day, acquisition, *, now=None):
     now = now or datetime.now(JST)
     if now.utcoffset() != timedelta(hours=9): raise ValueError('HEALTH_CLOCK')
     tasks = _plan(artifact, day)
     issues = {}
     official_unavailable = set()
+    cancelled = verified_cancelled_venue_days(artifact, tasks.values(), now)
+    cancelled_keys = {task['RACE_KEY'] for task in tasks.values() if task['RACE_KEY'][:-3] in cancelled}
     for category in ('MISSED', 'REJECTED', 'TASK_DEFERRED', 'RETRYABLE_FAILURES', 'UNAVAILABLE'):
         for item in acquisition.get(category, []):
             sid = item if isinstance(item, str) else item['SOURCE_ID']
@@ -231,6 +278,8 @@ def summarize(artifact, day, acquisition, *, now=None):
             task = tasks[sid]
             if isinstance(item, dict) and item.get('RACE_KEY') != task['RACE_KEY']:
                 raise ValueError('HEALTH_ISSUE_RACE')
+            if task['RACE_KEY'] in cancelled_keys:
+                continue
             if (category == 'UNAVAILABLE' and isinstance(item, dict)
                     and item.get('REASON') == 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE'
                     and re.fullmatch(r'[a-f0-9]{64}', str(item.get('AVAILABILITY_SNAPSHOT_SHA256', '')))):
@@ -257,6 +306,8 @@ def summarize(artifact, day, acquisition, *, now=None):
             'source_issue_count': len(issues),
             'race_issue_count': len({row['race_key'] for row in issues.values()}),
             'official_unavailable_race_count': len(official_unavailable),
+            'official_cancelled_race_count': len(cancelled_keys),
+            'official_cancelled_venue_days': cancelled,
             'omitted_source_details': max(0, len(issues) - len(details)), 'issues': details,
             'prediction_boundary_changed': False, 'prediction_generated': False}
 

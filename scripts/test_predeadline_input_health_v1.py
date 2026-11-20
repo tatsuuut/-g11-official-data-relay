@@ -130,6 +130,37 @@ class HealthTests(unittest.TestCase):
     def summary(self, value=None):
         return health.summarize(self.artifact, DAY, value or {'MISSED': [SID]}, now=NOW)
 
+    def test_first_race_requires_the_bound_selected_day_cancellation_before_its_cutoff(self):
+        yesterday = '<li><a>11月16日<span>中止</span></a></li>'
+        row = '<li class="is-active2"><span class="tab2_inner">11月17日<span>中止</span></span></li>'
+        self.receipt['FINAL_URL'] = URL
+        another = '20261117-04-01'
+        self.artifact.plan += [dict(self.artifact.plan[0], RACE_KEY=another, SOURCE_ID='beforeinfo-'+another,
+                                    URL=URL.replace('jcd=03','jcd=04'))]
+        def save_calendar(entries):
+            raw = ('<ul class="tab2_tabs">' + yesterday + entries + '</ul>').encode() + page()
+            (self.rejected / 'response.bin').write_bytes(raw)
+            self.receipt['SHA256'] = hashlib.sha256(raw).hexdigest()
+            self.save_receipt()
+        save_calendar(row)
+        summary = self.summary({'MISSED':[SID, 'beforeinfo-'+another]})
+        self.assertEqual(summary['official_cancelled_venue_days'], {KEY[:-3]:self.receipt['SHA256']})
+        self.assertEqual(summary['official_cancelled_race_count'],1)
+        self.assertEqual([i['race_key'] for i in summary['issues']], [another])
+        for entries in [row.replace('11月17日','11月18日'), row.replace('中止','初日'),
+                        row.replace('is-active2','inactive'), row + row, '']:
+            save_calendar(entries)
+            self.assertEqual(self.summary()['official_cancelled_race_count'],0)
+        save_calendar(row)
+        for field, altered in [('FINAL_URL',URL.replace('jcd=03','jcd=04')),
+                               ('CAPTURED_AT_JST',DAY+'T10:59:00+09:00')]:
+            original = self.receipt[field]
+            self.receipt[field] = altered
+            self.save_receipt()
+            self.assertEqual(self.summary()['official_cancelled_race_count'],0)
+            self.receipt[field] = original
+            self.save_receipt()
+
     def test_saved_rejection_proves_schedule_drift_without_rewriting_or_prediction(self):
         before = {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
         result = self.summary()
