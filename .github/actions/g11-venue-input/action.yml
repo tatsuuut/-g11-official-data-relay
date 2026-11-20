@@ -1,0 +1,20 @@
+name: Independently verified venue inputs
+description: Load the reviewed source collector alongside the frozen morning runtime.
+inputs:
+  token:
+    description: Read access to the configured private source
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      with:
+        repository: ${{ env.G11_PRIVATE_REPOSITORY }}
+        ref: c7b892edafec55d4c497cf37894455d312f10a2f
+        token: ${{ inputs.token }}
+        path: .g11-venue-input
+        persist-credentials: false
+        fetch-depth: 1
+        sparse-checkout: |
+          g11
+          p3

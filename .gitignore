@@ -11,3 +11,4 @@
 *.pickle
 *.joblib
 __pycache__/
+.g11-venue-input/

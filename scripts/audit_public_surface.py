@@ -34,6 +34,7 @@ ALLOWED_FILES = {
     'scripts/test_predeadline_capture_window_v1.py',
     'docs/predeadline-ten-minute-start-20261114.md',
     '.github/actions/g11-research-night-input/action.yml',
+    '.github/actions/g11-venue-input/action.yml',
     '.github/workflows/g11-isolated-live-research.yml',
     'scripts/research_state_isolation_v1.py',
     'scripts/isolated_research_runner_v1.py',

@@ -308,6 +308,11 @@ jobs:
           path: .g11-private
           persist-credentials: false
           fetch-depth: 1
+      - uses: ./.github/actions/g11-venue-input
+        if: steps.due.outputs.phase=='predeadline'&&steps.due.outputs.operational_date=='2026-11-20'&&steps.authority.outputs.source_sha=='d695f62445d95f5f80caf9da564a53021fb449d1'
+        continue-on-error: true
+        with:
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
       - name: Resolve immutable private source identity
         id: source
         env:
