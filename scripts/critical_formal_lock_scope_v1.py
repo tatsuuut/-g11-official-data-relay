@@ -47,6 +47,48 @@ def missing_formal_locks(projection, store, snapshot_name, expected_fields):
     return missing
 
 
+def stadium_inventory(store, day):
+    return {p.stem for p in (store / 'snapshots/predeadline').glob(
+        'venue-market-' + day.replace('-', '') + '-24-??.json')}
+
+
+def timely_stadium_sources(artifact, day, plan, prior, now):
+    """Signal new, byte-verified first-party odds to the existing handoff."""
+    from datetime import datetime
+    due = {t['RACE_KEY']: datetime.fromisoformat(t['MUST_FINISH_BEFORE_JST'])
+           for t in plan if t['KIND'] == 'ODDS3T'}
+    output = []
+    for name in sorted(stadium_inventory(artifact.root, day) - prior):
+        key = name.removeprefix('venue-market-')
+        limit = due.get(key)
+        if limit is None or now >= limit:
+            continue
+        try:
+            packet = artifact.load_verified_snapshot('predeadline', name)['SNAPSHOT']
+            receipt, = packet['SOURCE_RECEIPTS']
+            payload = packet['PAYLOAD']
+            raw = artifact.response_bytes(receipt['SOURCE_ID'])
+            digest = hashlib.sha256(raw).hexdigest()
+            url = 'https://www.omurakyotei.jp/yosou/sp/odds/?day=' + key[:8] + '&race=' + key[-2:]
+            captured = datetime.fromisoformat(receipt['CAPTURED_AT_JST'])
+            if (payload['KIND'] == 'ODDS3T' and payload['RACE_KEY'] == key
+                    and payload['STATUS'] == 'OMURA_OFFICIAL_PUBLISHED_MARKET'
+                    and receipt['STATUS'] == 'HTTP_200_BYTE_EXACT_READBACK'
+                    and payload['PUBLISHER'] == receipt['HOST'] == 'www.omurakyotei.jp'
+                    and receipt['URL'] == receipt['FINAL_URL'] == url
+                    and receipt['SOURCE_ID'] == 'odds3t-omura-' + key + '-' + digest
+                    and digest == receipt['SHA256']
+                    and payload['CAPTURED_AT_JST'] == receipt['CAPTURED_AT_JST']
+                    and limit.timestamp() - 420 <= captured.timestamp() <= now.timestamp()
+                    and len(payload['PARSED']['ODDS_ROWS']) == 120):
+                output.append(name)
+        except (KeyError, TypeError, ValueError, OSError) as exc:
+            print('VENUE_MARKET_HANDOFF_WAIT', key, str(exc)[:160], flush=True)
+    if output:
+        print('VENUE_MARKET_HANDOFF_VERIFIED', *output, flush=True)
+    return output
+
+
 def complete_from_venue(artifact, prediction):
     """Admit timely input after a verified host stop under the active day's authority."""
     from pathlib import Path
@@ -108,6 +150,14 @@ def formal_lock_scope(day):
         native = '        prediction = CanonicalRunner(artifact).run_due_predeadline_predictions()'
         substitutions.append((native, native + '\n        prediction = _complete_from_venue(artifact, prediction)'))
         additions['_complete_from_venue'] = complete_from_venue
+    if day >= '2026-11-20':
+        begin = '        acquisition = capture(store)'
+        end = '    timely_live = [item["RACE_ID"]'
+        substitutions.extend([
+            (begin, '        prior_venue = _stadium_inventory(store, operational_date)\n' + begin),
+            (end, '    if now < last_deadline:\n'
+             '        timely_sources.extend(_timely_stadium_sources(artifact, operational_date, plan, prior_venue, datetime.now(JST)))\n' + end)])
+        additions.update(_stadium_inventory=stadium_inventory, _timely_stadium_sources=timely_stadium_sources)
     critical.run = replace_pinned(original, run_sha, substitutions, additions)
     try:
         yield
