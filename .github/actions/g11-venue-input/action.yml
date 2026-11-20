@@ -10,7 +10,7 @@ runs:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       with:
         repository: ${{ env.G11_PRIVATE_REPOSITORY }}
-        ref: 845eea35405dc81447b71a699c9a14c93fe22f2a
+        ref: a6c6b7fe09b0422e3c71ed531bd228bc90fd64a0
         token: ${{ inputs.token }}
         path: .g11-venue-input
         persist-credentials: false

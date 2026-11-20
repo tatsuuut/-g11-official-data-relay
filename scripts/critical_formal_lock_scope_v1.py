@@ -104,7 +104,7 @@ def complete_from_venue(artifact, prediction):
         if not path.is_file():
             return prediction
         commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
-        if commit != '845eea35405dc81447b71a699c9a14c93fe22f2a':
+        if commit != 'a6c6b7fe09b0422e3c71ed531bd228bc90fd64a0':
             raise ValueError('VENUE_COLLECTOR_VERSION')
         spec = importlib.util.spec_from_file_location('_g11_verified_venue_input', path)
         provider = importlib.util.module_from_spec(spec)
