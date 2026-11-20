@@ -59,7 +59,19 @@ jobs:
         with:
           path: .relay-cache/state.tgz.gpg
           key: stadium-diagram-original-20261119-readonly
-          restore-keys: g11-state-v4-published-2026-11-19-
+          restore-keys: |
+            g11-state-v4-published-2026-11-19-
+            g11-state-v4-published-2026-11-20-
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: d695f62445d95f5f80caf9da564a53021fb449d1
+          token: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          path: layout-verifier
+          persist-credentials: false
+          sparse-checkout: |
+            g11
+            p3
       - name: Verify retained stadium diagrams and public race identities
         env:
           STATE_KEY: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
@@ -76,9 +88,29 @@ jobs:
           import json, os, pathlib, re, tarfile
           from urllib.parse import urlsplit, parse_qs
           source=pathlib.Path(os.environ['RUNNER_TEMP'])/'state.tgz'
+          import base64,sys
+          sys.path.insert(0,str(pathlib.Path('layout-verifier').resolve()))
+          from g11.growth_p3.v1_1 import original_live_input_capture_v1 as verifier
           marks=defaultdict(dict)
+          originals={}
           with tarfile.open(source, 'r|gz') as archive:
               for member in archive:
+                  original=re.search(r'(?:^|/)store/g11/p3-original-live-inputs/2026-11-19/(20261119-(?:01|15|22|24)-\d\d)\.input\.json$',member.name)
+                  if original:
+                      if not member.isfile() or member.size>verifier.MAX_RECORD_BYTES: raise ValueError('ORIGINAL_SIZE')
+                      value=verifier.validate(verifier.decode(archive.extractfile(member).read()))
+                      key=original[1]
+                      if key != value['RACE_ID']: raise ValueError('ORIGINAL_KEY')
+                      response=base64.b64decode(value['BEFOREINFO_RESPONSE_BASE64'],validate=True)
+                      north=re.findall(rb'\bis-direction(\d+)\b',response);wind=re.findall(rb'\bis-wind(\d+)\b',response)
+                      if len(north)!=1 or len(wind)!=1: raise ValueError('ORIGINAL_DIRECTION')
+                      packet=value['PREDICTION']; codes=packet['DIRECTION_ENCODING']
+                      if (int(north[0]),int(wind[0])) != (codes['NORTH_DIAGRAM_CODE'],codes['WIND_DIAGRAM_CODE']): raise ValueError('NATIVE_CODE_BINDING')
+                      history=packet.get('RACER_HISTORY_EVIDENCE',{}).get('BOATS',{})
+                      previous={n:{k:r['PREVIOUS_RACE'][k] for k in ('race_id','racer_id','course','finish','st')} for n,r in history.items() if r['PREVIOUS_RACE']}
+                      parity=sha256(json.dumps(previous,separators=(',',':'),sort_keys=True).encode()).hexdigest()
+                      originals[key]=[key,int(north[0]),int(wind[0]),sha256(response).hexdigest(),packet['CAPTURED_AT'],len(previous),parity]
+                      continue
                   match=re.fullmatch(r'(?:\./)?(?:\.relay-state/)?store/responses/beforeinfo-(20261119-(?:01|15|22|24)-\d\d)/(response\.bin|receipt\.json)',member.name)
                   if not match: continue
                   key, part=match.groups()
@@ -98,6 +130,9 @@ jobs:
               url='https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd='+key[:8]+'&jcd='+key[9:11]+'&rno='+str(int(key[-2:]))
               if not (rc['SOURCE_ID']=='beforeinfo-'+key and rc['URL']==rc['FINAL_URL']==url and rc['HOST']=='www.boatrace.jp' and rc['STATUS']=='HTTP_200_BYTE_EXACT_READBACK' and rc['SHA256']==digest and 1<=north<=16 and 1<=wind<=17 and datetime.fromisoformat(rc['CAPTURED_AT_JST']).strftime('%Y%m%d')==key[:8]): raise ValueError('RECEIPT')
               evidence.setdefault(key[9:11],[]).append([key,north,wind,digest,rc['CAPTURED_AT_JST']])
+          for key, row in originals.items():
+              rows=evidence.setdefault(key[9:11],[])
+              if not any(r[0]==key for r in rows): rows.append(row)
           for venue,rows in evidence.items():
               print('RETAINED_STADIUM_LAYOUT='+json.dumps({'venue':venue,'codes':sorted({r[1] for r in rows}),'samples':len(rows),'receipts':rows}))
           if not evidence: raise ValueError('NO_ARCHIVED_STADIUM_DIAGRAMS')
