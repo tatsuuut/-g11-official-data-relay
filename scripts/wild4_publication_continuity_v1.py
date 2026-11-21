@@ -92,7 +92,10 @@ def persisted_failure(run, jobs):
                'Project saved WILD4 locks and official settlements without source mutation',
                'Deliver WILD4 public projection and verify exact Site GET readback',
                'Require successful attempted public projection and delivery',
-               'Require completion for verified NIGHT handoff'}
+               'Require completion for verified NIGHT handoff',
+               # This isolated diagnostic fails only after ordinary persistence
+               # and delivery work. It never invalidates an uploaded LOCK.
+               'Report future input context failures after preserving independent work'}
     failed = {s['name'] for s in steps[index + 1:] if s.get('conclusion') == 'failure'}
     return bool(failed) and failed <= allowed
 
@@ -371,3 +374,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

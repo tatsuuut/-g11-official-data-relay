@@ -2,7 +2,10 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import os
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -42,6 +45,26 @@ class PersistedFailureTests(unittest.TestCase):
     def test_publication_failure_keeps_successfully_preserved_work(self):
         self.assertTrue(c.persisted_failure(self.run, [self.job]))
 
+    def test_input_context_failure_after_upload_keeps_saved_locks(self):
+        job = deepcopy(self.job)
+        job['steps'][-1]['name'] = 'Report future input context failures after preserving independent work'
+        self.assertTrue(c.persisted_failure(self.run, [job]))
+
+    def test_input_context_failure_before_upload_is_rejected(self):
+        job = deepcopy(self.job)
+        job['steps'].insert(2, {'name': 'Report future input context failures after preserving independent work',
+                              'conclusion': 'failure'})
+        self.assertFalse(c.persisted_failure(self.run, [job]))
+
+    def test_input_context_failure_does_not_hide_prediction_or_unknown_failures(self):
+        for name, index in (('Lock future races before deadline without any production write', 2),
+                            ('unreviewed later failure', 6)):
+            with self.subTest(name=name):
+                job = deepcopy(self.job)
+                job['steps'][-1]['name'] = 'Report future input context failures after preserving independent work'
+                job['steps'].insert(index, {'name': name, 'conclusion': 'failure'})
+                self.assertFalse(c.persisted_failure(self.run, [job]))
+
     def test_missing_failed_cancelled_old_or_foreign_persistence_is_rejected(self):
         for status in ('failure', 'skipped', 'cancelled', None):
             with self.subTest(status=status):
@@ -70,6 +93,93 @@ class PersistedFailureTests(unittest.TestCase):
                  mock.patch.object(c, 'api_json', side_effect=TimeoutError):
                 with self.assertRaises(SystemExit) as caught: c.main()
                 self.assertEqual(caught.exception.code, 2)
+
+
+
+@unittest.skipUnless(os.environ.get('WILD4_WORKFLOW_PATH'), 'Pinned workflow required')
+class NewestLedgerContextFailureTests(unittest.TestCase):
+    """Exercise the actual worker's shell selector with read-only API fixtures."""
+
+    setUp = PersistedFailureTests.setUp
+
+    def select(self, job, *, unavailable=False):
+        source = Path(os.environ['WILD4_WORKFLOW_PATH']).read_text()
+        step = source.split('      - name: Identify the most recent encrypted shadow ledger\n', 1)[1].split('      - name:', 1)[0]
+        script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); commands = root/'bin'; commands.mkdir()
+            artifact_name = 'g11-wild4-20261121-future-oos-locks-encrypted'
+            fixtures = {
+                'artifacts': {'artifacts': [
+                    {'id': 100, 'name': artifact_name, 'expired': False, 'created_at': '2026-11-21T01:00:00Z', 'workflow_run': {'id': 10}},
+                    {'id': 101, 'name': artifact_name, 'expired': False, 'created_at': '2026-11-21T02:00:00Z', 'workflow_run': {'id': 11}}]},
+                '10': {**self.run, 'id': 10, 'conclusion': 'success'},
+                '11': self.run, 'jobs': [job], 'unavailable': unavailable}
+            fixture_path = root/'fixtures.json'; fixture_path.write_text(json.dumps(fixtures))
+            curl = commands/'curl'
+            curl.write_text('#!'+sys.executable+'\n'+textwrap.dedent("""
+                import json,os,pathlib,sys
+                args=sys.argv[1:]
+                url=next(a for a in args if a.startswith('https://'))
+                data=json.loads(pathlib.Path(os.environ['G11_TEST_FIXTURES']).read_text())
+                if '/actions/artifacts?' in url:
+                    value=data['artifacts']
+                elif '/actions/runs/99/artifacts?' in url:
+                    value={'artifacts':[]}
+                else:
+                    value=data[url.rsplit('/',1)[-1]]
+                text=json.dumps(value)
+                if '-o' in args:
+                    pathlib.Path(args[args.index('-o')+1]).write_text(text)
+                else:
+                    print(text)
+            """)); curl.chmod(0o700)
+            python = commands/'python3'
+            python.write_text('#!'+sys.executable+'\n'+textwrap.dedent("""
+                import importlib.util,json,os,pathlib,sys
+                spec=importlib.util.spec_from_file_location('continuity_fixture',sys.argv[1])
+                module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+                data=json.loads(pathlib.Path(os.environ['G11_TEST_FIXTURES']).read_text())
+                def jobs(path):
+                    if data['unavailable']:
+                        raise TimeoutError('fixture only')
+                    assert path=='/actions/runs/11/jobs?per_page=100'
+                    return {'jobs':data['jobs']}
+                module.api_json=jobs
+                sys.argv=sys.argv[1:]
+                module.main()
+            """)); python.chmod(0o700)
+            output = root/'github-output'
+            env = {**os.environ, 'PATH': str(commands)+os.pathsep+os.environ['PATH'],
+                   'G11_TEST_FIXTURES': str(fixture_path), 'G11_PUBLIC_RUNTIME_HELPERS': str(Path(c.__file__).parent),
+                   'GITHUB_REPOSITORY': c.REPO, 'GITHUB_RUN_ID': '99', 'GITHUB_OUTPUT': str(output),
+                   'RUNNER_TEMP': str(root), 'OPERATIONAL_DATE': '2026-11-21', 'GH_TOKEN': 'fixture-no-network'}
+            result = subprocess.run(['bash', '-c', script], env=env, text=True, capture_output=True, timeout=15)
+            return result, output.read_text() if output.exists() else ''
+
+    def test_next_worker_selects_newest_saved_context_failure_ledger(self):
+        job = deepcopy(self.job)
+        job['steps'][-1]['name'] = 'Report future input context failures after preserving independent work'
+        result, output = self.select(job)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('id=101\n', output)
+        self.assertIn('run_id=11\n', output)
+        self.assertIn('WILD4_SAVED_FAILURE_ACCEPTED RUN=11', result.stdout)
+
+    def test_next_worker_rejects_prediction_failure_before_upload(self):
+        job = deepcopy(self.job)
+        job['steps'][-1]['name'] = 'Report future input context failures after preserving independent work'
+        job['steps'].insert(2, {'name': 'Lock future races before deadline without any production write', 'conclusion': 'failure'})
+        result, output = self.select(job)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('id=100\n', output)
+        self.assertIn('run_id=10\n', output)
+
+    def test_unavailable_newest_evidence_prevents_fallback(self):
+        result, output = self.select(self.job, unavailable=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(output, '')
+        self.assertIn('WILD4_SAVED_LEDGER_EVIDENCE_UNAVAILABLE', result.stderr)
 
 
 class AtomicRecoveryTests(unittest.TestCase):
@@ -216,3 +326,4 @@ class RealPrivateContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
