@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
         id: preparation
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@755214257eb85b1faed3c14d8187da3159ee81be
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
           prewarm-base-key: ${{ inputs.prewarm_base_key }}
@@ -1143,7 +1143,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: a6c6b7fe09b0422e3c71ed531bd228bc90fd64a0
+          ref: fac6a974d81759bbd49094b937bffa5bea59940d
           path: .g11-venue-input
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           persist-credentials: false
@@ -1159,7 +1159,7 @@ jobs:
           DAY: ${{ steps.day.outputs.day }}
         run: |
           set -euo pipefail
-          test "$(git -C .g11-venue-input rev-parse HEAD)" = 'a6c6b7fe09b0422e3c71ed531bd228bc90fd64a0'
+          test "$(git -C .g11-venue-input rev-parse HEAD)" = 'fac6a974d81759bbd49094b937bffa5bea59940d'
           python3 -S .g11-venue-input/g11/relay/verified_wild_venue_odds_v1.py "${GITHUB_WORKSPACE}/${STORE}" "${DAY}" "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${G11_PUBLIC_RUNTIME_HELPERS}"
           if [ -s "${RUNNER_TEMP}/venue-wild4-odds.tmp" ]; then
             mv "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${RUNNER_TEMP}/venue-wild4-odds.json"
@@ -1226,14 +1226,31 @@ jobs:
           print('WILD4_VERIFIED_DIRECT_SNAPSHOT_COUNT='+str(len(direct_records)))
           from g11.wild_pack.v1.wild4_record_merge_v1 import merge_verified_odds
           chosen=merge_verified_odds(odds, direct if direct_records else None, day)
+          def retained_venue_receipt(value, day, verify_source, hash_source):
+              """Verify retained venue evidence without returning formal input."""
+              candidate=value
+              if value.get('SCHEMA')=='G11_RETAINED_VENUE_ODDS_EVIDENCE_V1':
+                  if (value.get('STATUS')!='HELD_PENDING_INPUT_CONTRACT'
+                      or value.get('FORMAL_INPUT_ELIGIBLE') is not False
+                      or value.get('OPERATIONAL_DATE_JST')!=day
+                      or value.get('RESULT_DATA_PRESENT') is not False
+                      or value.get('PRODUCTION_MUTATED') is not False
+                      or value.get('CONTENT_SHA256')!=hash_source({k:v for k,v in value.items() if k!='CONTENT_SHA256'})):
+                      raise ValueError('VENUE_EVIDENCE_BOUNDARY')
+                  candidate=value['CANDIDATE_ODDS']
+              verified=verify_source(None,candidate,day)
+              return {'records':len(verified['RECORDS']),'source_sha256':value['CONTENT_SHA256']}
           stadium_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'venue-wild4-odds.json'
           if stadium_path.is_file():
               import json
               try:
                   stadium=json.loads(stadium_path.read_bytes())
-                  chosen=merge_verified_odds(chosen, stadium, day)
+                  # Source evidence remains retained. It is not admitted to a
+                  # model whose frozen input contract covers national odds.
+                  receipt=retained_venue_receipt(stadium,day,merge_verified_odds,train.daily_sha)
+                  print('WILD4_VENUE_INPUT_QUARANTINED='+json.dumps(receipt,sort_keys=True))
               except (KeyError, TypeError, ValueError) as exc:
-                  print('WILD4_STADIUM_INPUT_UNAVAILABLE='+str(exc)[:120])
+                  print('WILD4_STADIUM_INPUT_UNAVAILABLE='+type(exc).__name__)
           print('WILD4_VERIFIED_INPUT_UNION='+str(len(chosen['RECORDS']) if chosen else 0))
           if chosen is not None:
               from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as b
@@ -1242,6 +1259,177 @@ jobs:
                   raise SystemExit('RESEARCH_ODDS_READBACK_SHA')
               b._write_json_atomic(pathlib.Path(os.environ['RUNNER_TEMP'])/'wild4-verified-odds-day.json',chosen)
               records=chosen['RECORDS']
+          def frozen_source_context_readback(source_store, day, binding):
+              import hashlib
+              import re
+              import subprocess
+              from datetime import date
+              from pathlib import Path
+          
+              source_commit = "7faaacfec8a8643a588af7e23d062fc787ba24b8"
+              expected_sources = {
+                  "POSITION": "ce2d42946fb8f25d91dd0fcfff8b801f9f45c4ef21fb23a0d8bd4daeef17013c",
+                  "PROSPECTIVE": "a94c6df067a2d1ae32b22059192e2e8cb98041d81f3081d6b775302aa967c60a",
+                  "BET": "d8cf97ec2dc4309becb1ce51c40d53e10e790f2eab9a15855b92199b534149f4",
+              }
+              expected_runtime = "852bd01a9474c7c6ef85c46a36658e99bb5b038fa50faf39b7fc5ee795a62945"
+              report = {
+                  "schema": "G11_WILD4_FROZEN_SOURCE_CONTEXT_READBACK_V1",
+                  "status": "READBACK_UNAVAILABLE",
+                  "source_commit": source_commit,
+                  "read_only": True,
+                  "prediction_generated": False,
+                  "saved_input_mutated": False,
+                  "candidate_binding_mutated": False,
+              }
+          
+              def require(condition):
+                  if not condition:
+                      raise ValueError("FROZEN_SOURCE_CONTEXT_READBACK")
+          
+              def sha(value):
+                  require(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value))
+                  return value
+          
+              try:
+                  from g11.wild_pack.v1 import runtime_orchestrator_v1 as runtime
+          
+                  require(date.fromisoformat(day).isoformat() == day)
+                  expected_context = sha(binding["EVALUATION_CONTEXT_PACK_ID"])
+                  source_path = Path(runtime.__file__).resolve()
+                  repository = source_path.parents[3]
+                  actual_commit = subprocess.check_output(
+                      ["git", "-C", str(repository), "rev-parse", "HEAD"],
+                      text=True, stderr=subprocess.DEVNULL, timeout=5,
+                  ).strip()
+                  require(actual_commit == source_commit)
+                  require(hashlib.sha256(source_path.read_bytes()).hexdigest() == expected_runtime)
+                  sources = {
+                      "POSITION": runtime._source_sha(runtime.position),
+                      "PROSPECTIVE": runtime._source_sha(runtime.prospective),
+                      "BET": runtime._source_sha(runtime.bet),
+                  }
+                  require(sources == expected_sources)
+          
+                  store = Path(source_store)
+                  target = date.fromisoformat(day)
+                  head_day = runtime._true_ai_day_root(store, target)
+                  feature_manifest, feature_batch = runtime._load_manifest_artifact(
+                      head_day / "morning-features.manifest.json")
+                  prediction_manifest, head_batch = runtime._load_manifest_artifact(
+                      head_day / "morning-predictions.manifest.json")
+                  require(feature_batch.get("SCHEMA") == "G11_TRUE_AI_MORNING_FEATURE_BATCH_V1"
+                          and head_batch.get("SCHEMA") == "G11_TRUE_AI_HEAD_PREDICTION_BATCH_V1"
+                          and feature_batch.get("OPERATIONAL_DATE_JST") == day
+                          and head_batch.get("OPERATIONAL_DATE_JST") == day)
+          
+                  admission = runtime.prospective.load_admission(
+                      store / "g11/wild-pack-oos/morning" / day /
+                      "position-oos-admission.manifest.json")
+                  require(admission.get("OPERATIONAL_DATE_JST") == day
+                          and admission.get("PREDICTION_STAGE") == "MORNING")
+                  admitted_features, _ = runtime._filter_to_admission(
+                      feature_batch, head_batch, admission)
+                  input_hash = runtime._canonical_sha(admitted_features)
+                  require(input_hash == admission["INPUT_HASH"]
+                          and admission["ATOMIC_INPUT_SNAPSHOT_ID"] ==
+                          f"MORNING:{day}:{feature_manifest['MORNING_ARTIFACT_SHA256']}:{input_hash}")
+          
+                  contract = runtime.position.load_json(
+                      Path(runtime.position.__file__).resolve().parent / "POSITION_MODEL_CONTRACT_V1.json")
+                  registries = {}
+                  for wild_id in runtime.prospective.WILD_IDS:
+                      model_root = runtime._position_model_root(store, wild_id)
+                      pointer = runtime.position.load_json(model_root / "current.json")
+                      require(pointer.get("STATUS") == "CURRENT"
+                              and pointer.get("WILD_ID") == wild_id
+                              and pointer.get("PREDICTION_STAGE") == "MORNING")
+                      registry = runtime.position.load_json(model_root / str(pointer.get("REGISTRY_FILE")))
+                      runtime.position.validate_registry(registry, contract, wild_id)
+                      registries[wild_id] = registry
+                  for row in admission["RECORDS"]:
+                      registry = registries[row["WILD_ID"]]
+                      require(all(row.get(key) == registry.get(key) for key in (
+                          "MODEL_VERSION", "MODEL_SHA256", "CALIBRATION_SHA256",
+                          "FEATURE_SCHEMA_SHA256", "FOOD_SET_SHA256", "MODEL_CONTRACT_ID",
+                          "ARTIFACT_INFORMATION_CUTOFF_AT")))
+          
+                  head_binding = runtime._head_binding(store, prediction_manifest)
+                  require(head_batch.get("MODEL_VERSION") == head_binding.get("UNDERLYING_MODEL_VERSION")
+                          and head_batch.get("MODEL_SHA256") == head_binding.get("MODEL_SHA256"))
+                  snapshot_hash = runtime._canonical_sha({
+                      "FEATURE_SCHEMA_VERSION": feature_batch["FEATURE_SCHEMA_VERSION"],
+                      "NUMERIC_FEATURES": feature_batch["NUMERIC_FEATURES"],
+                      "CATEGORICAL_FEATURES": feature_batch["CATEGORICAL_FEATURES"],
+                  })
+                  pipeline_hash = runtime._canonical_sha(sources)
+                  computed_context = runtime.prospective.evaluation_context_id(
+                      head=head_binding,
+                      second=registries[runtime.position.SECOND_ID],
+                      third=registries[runtime.position.THIRD_ID],
+                      prediction_stage="MORNING",
+                      snapshot_contract_hash=snapshot_hash,
+                      inference_pipeline_hash=pipeline_hash,
+                  )
+                  saved_context = sha(admission["EVALUATION_CONTEXT_PACK_ID"])
+                  report.update(
+                      status="MATCH" if computed_context == expected_context else "MISMATCH",
+                      source_files_sha256=sources,
+                      inference_pipeline_hash=sha(pipeline_hash),
+                      snapshot_contract_hash=sha(snapshot_hash),
+                      saved_morning_artifact_hashes={
+                          "features": sha(feature_manifest["ARTIFACT_SHA256"]),
+                          "head": sha(prediction_manifest["ARTIFACT_SHA256"]),
+                      },
+                      computed_context_id=sha(computed_context),
+                      expected_context_id=expected_context,
+                      matches_frozen_candidate=computed_context == expected_context,
+                      saved_admission_context_id=saved_context,
+                      matches_saved_admission=computed_context == saved_context,
+                  )
+              except Exception:
+                  # Diagnostics must not interrupt independent saved-lock publication.
+                  # Exception messages may contain private paths or candidate fields.
+                  report["status"] = "READBACK_UNAVAILABLE"
+              return report
+          def input_context_health(records, binding, now, settlement_only, saved_race_keys=(), registry=None):
+              """Report verified metadata only; never admit or rewrite an input."""
+              import re
+              from collections import Counter
+              safe_sha=lambda value: value if isinstance(value,str) and re.fullmatch(r'[0-9a-f]{64}',value) else 'INVALID_SHA256'
+              fields=('HEAD_MODEL_HASH','SECOND_MODEL_HASH','THIRD_MODEL_HASH',
+                  'HEAD_CALIBRATION_HASH','SECOND_CALIBRATION_HASH','THIRD_CALIBRATION_HASH',
+                  'FEATURE_SCHEMA_HASH','FOOD_SET_HASH','SNAPSHOT_CONTRACT_HASH','INFERENCE_PIPELINE_HASH')
+              expected=binding['EVALUATION_CONTEXT_PACK_ID']
+              future_rows=[r for r in records if datetime.fromisoformat(r['UPSTREAM_PACKET']['RACE_DEADLINE_AT'])>now]
+              matched=[r for r in future_rows if r['UPSTREAM_PACKET']['EVALUATION_CONTEXT_PACK_ID']==expected]
+              mismatched=[r for r in future_rows if r['UPSTREAM_PACKET']['EVALUATION_CONTEXT_PACK_ID']!=expected]
+              saved=set(saved_race_keys)
+              blocked=[r for r in mismatched if r['STANDARD_RACE_KEY'] not in saved]
+              contexts=Counter(r['UPSTREAM_PACKET']['EVALUATION_CONTEXT_PACK_ID'] for r in future_rows)
+              details=[]
+              for context,count in sorted(contexts.items())[:8]:
+                  packet=next(r['UPSTREAM_PACKET'] for r in future_rows
+                      if r['UPSTREAM_PACKET']['EVALUATION_CONTEXT_PACK_ID']==context)
+                  details.append({'context_id':safe_sha(context),'count':count,
+                      'component_hashes':{key:safe_sha(packet[key]) for key in fields if key in packet}})
+              status=('SETTLEMENT_ONLY' if settlement_only else 'NO_INPUT' if not records
+                  else 'ALL_EXPIRED' if not future_rows else 'PARTIAL_CONTEXT_MISMATCH' if blocked and matched
+                  else 'CONTEXT_MISMATCH' if blocked else 'RETAINED_LOCKS_ONLY' if not matched else 'READY')
+              return {'schema':'G11_WILD4_INPUT_CONTEXT_HEALTH_V1','status':status,
+                  'records':len(records),'future':len(future_rows),'expired':len(records)-len(future_rows),
+                  'matching_future':len(matched),'mismatching_future':len(mismatched),
+                  'new_lock_context_blocked':0 if settlement_only else len(blocked),
+                  'retained_lock_context_mismatch':len(mismatched)-len(blocked),
+                  'expected_context_id':safe_sha(expected),'future_contexts':details,
+                  'omitted_contexts':max(0,len(contexts)-len(details)),
+                  'candidate_binding_hashes':{key:safe_sha(binding[key]) for key in
+                      ('MODEL_SHA256','REGISTRY_SHA256','TRAINING_INPUT_SHA256','EFFECTIVE_MODEL_IDENTITY')
+                      if key in binding},
+                  'candidate_registry_hashes':{key:safe_sha(registry[key]) for key in
+                      ('MODEL_SHA256','REGISTRY_SHA256','CONTRACT_SHA256','DATASET_SHA256','CALIBRATION_SHA256','EFFECTIVE_MODEL_IDENTITY')
+                      if registry is not None and key in registry},
+                  'eligibility_changed':False,'prediction_generated':False}
           now=datetime.now(timezone.utc)
           direct_due=[r for r in direct_records
               if datetime.fromisoformat(r['UPSTREAM_PACKET']['RACE_DEADLINE_AT'])>now
@@ -1264,6 +1452,18 @@ jobs:
           print('WILD4_ODDS_DAY_CONSIDERED='+str(len(records)))
           print('WILD4_MATCHING_UNEXPIRED='+str(len(due)))
           print('WILD4_INPUT_VERIFIED_AT='+now.isoformat())
+          import json,re
+          # Earlier restore verified these saved immutable race files.
+          saved_root=pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-wild4-future-locks'
+          saved_keys={p.stem for p in saved_root.glob('*.json')
+              if re.fullmatch(r'[0-9]{8}-[0-9]{2}-(?:0[1-9]|1[0-2])',p.stem)}
+          health=input_context_health(records,binding,now,os.environ.get('SETTLEMENT_ONLY')=='true',saved_keys,registry)
+          print('WILD4_INPUT_CONTEXT_HEALTH='+json.dumps(health,sort_keys=True),flush=True)
+          print('WILD4_FROZEN_SOURCE_CONTEXT_READBACK='+json.dumps(frozen_source_context_readback(source_store,day,binding),sort_keys=True),flush=True)
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
+              output.write('context_blocked='+str(health['new_lock_context_blocked']>0).lower()+'\n')
+          if health['new_lock_context_blocked']:
+              print('::error title=Goripan input context mismatch::Verified future input does not match the frozen model context; formal LOCK was not generated.',flush=True)
           PY
       - name: Lock future races before deadline without any production write
         if: inputs.lineage_readback_date == '' && steps.day.outputs.night_rollover != 'true' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true' && (steps.availability.outputs.due == 'true')
@@ -1964,6 +2164,12 @@ jobs:
           print('GORIPAN_UNVERIFIED_CANDIDATE_PROMOTION=false')
           PY
 
+      - name: Report future input context failures after preserving independent work
+        if: always() && !cancelled() && steps.availability.outputs.context_blocked == 'true'
+        run: |
+          echo 'WILD4_FUTURE_INPUT_CONTEXT_MISMATCH: new formal LOCKs remain blocked' >&2
+          exit 1
+
       - name: Require successful attempted public projection and delivery
         if: always() && !cancelled() && (steps.public-source.outcome == 'failure' || steps.public-projection.outcome == 'failure' || steps.public-projection.outputs.ready == 'true')
         run: |
@@ -1985,5 +2191,6 @@ jobs:
             echo 'WILD4_NIGHT_PUBLICATION_NOT_VERIFIED' >&2
             exit 1
           fi
+
 
 
