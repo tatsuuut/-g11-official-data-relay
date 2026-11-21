@@ -845,6 +845,47 @@ jobs:
       - name: Verify newest critical and full checkpoint selection
         run: python3 -m unittest discover -s scripts -p test_published_checkpoint_continuity_v1.py -v
 
+      - name: Checkout the frozen Goripan input-context guard
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: bbb4f12f81597e120d66a79b0de65c1876097333
+          path: .g11-context-guard
+          sparse-checkout: |
+            .github/workflows/g11-wild4-shadow-lock-only.yml
+            scripts/test_wild4_input_context_health_v1.py
+            scripts/test_wild4_retained_lock_v1.py
+            scripts/test_wild4_frozen_source_context_readback_v1.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Checkout the matching immutable ledger-continuity helper
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 4a538d01976361e469568a946fed15a6def034e8
+          path: .g11-context-continuity
+          sparse-checkout: |
+            scripts/wild4_publication_continuity_v1.py
+            scripts/test_wild4_publication_continuity_v1.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Verify input-context rejection and next-run immutable ledger continuity
+        env:
+          WILD4_WORKFLOW_PATH: .g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
+          PYTHONPATH: .g11-private
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
+          worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
+          assert 'g11-wild4-shadow-lock-only.yml@bbb4f12f81597e120d66a79b0de65c1876097333' in caller
+          assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
+          PY
+          "$(go env GOPATH)/bin/actionlint" "$WILD4_WORKFLOW_PATH"
+          python3 .g11-context-guard/scripts/test_wild4_input_context_health_v1.py -q
+          python3 .g11-context-guard/scripts/test_wild4_retained_lock_v1.py -q
+          python3 -c 'from g11.wild_pack.v1 import runtime_orchestrator_v1, prospective_oos_v1, test_prospective_oos_v1, test_bet_oos_collection_v1'
+          python3 .g11-context-guard/scripts/test_wild4_frozen_source_context_readback_v1.py -q
+          python3 .g11-context-continuity/scripts/test_wild4_publication_continuity_v1.py -q
+
       - name: Gate summary
         run: |
           echo 'G11_THREE_PHASE_GATE=STATIC_CONTRACT_AND_BOUNDED_REGRESSION_PASS'
