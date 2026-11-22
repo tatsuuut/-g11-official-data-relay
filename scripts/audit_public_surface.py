@@ -9,6 +9,8 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/live_refusal_recovery_v1.py",
+    "scripts/test_live_refusal_recovery_v1.py",
     # Restored immutable public workflow plus its reviewed optional dependency step.
     ".github/workflows/g11-wild4-shadow-lock-only.yml",
     "docs/operations-20261122-recovery.md",

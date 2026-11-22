@@ -704,6 +704,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p test_critical_formal_lock_scope_v1.py -v
           python3 -m unittest discover -s scripts -p test_predeadline_input_health_v1.py -v
+          python3 -m unittest discover -s scripts -p test_live_refusal_recovery_v1.py -v
           python3 -m unittest discover -s scripts -p test_predeadline_refusal_evidence_v1.py -v
 
       - name: Run bounded private regression

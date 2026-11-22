@@ -22,6 +22,42 @@ SCHEMA = 'G11_PREDEADLINE_INPUT_HEALTH_V1'
 MAX_DETAILS = 24
 KEY = re.compile(r'\d{8}-(?:0[1-9]|1\d|2[0-4])-(?:0[1-9]|1[0-2])')
 CODE = re.compile(r'[A-Z][A-Z0-9_:.-]{0,159}')
+RECOVERY_POLICY = 'G11_LIVE_REFUSAL_RECOVERY_V1'
+
+
+def recovery_policy(state):
+    """Only the versioned native ledger can supply recovery incident metadata."""
+    if 'REQUEST_POLICY' not in state:
+        return False
+    if state['REQUEST_POLICY'] != RECOVERY_POLICY:
+        raise ValueError('HEALTH_REQUEST_POLICY')
+    return True
+
+
+def recorded_incident(ledger, day, now, recorded_at):
+    """Bind a native transition timestamp to its checked request/outcome pair."""
+    at = datetime.fromisoformat(recorded_at)
+    if (now.utcoffset() != timedelta(hours=9) or now.date().isoformat() != day
+            or at.utcoffset() != timedelta(hours=9) or at.date().isoformat() != day or at > now
+            or at.isoformat(timespec='seconds') != recorded_at):
+        raise ValueError('HEALTH_INCIDENT_TIME')
+    active, matches = None, []
+    for event in ledger.events():
+        payload = event['PAYLOAD']
+        if event['TYPE'] == 'REQUEST_STARTED':
+            if active is not None or not all(isinstance(payload.get(k), str) and payload[k]
+                                            for k in ('REQUEST_ID', 'SOURCE_ID', 'HOST')):
+                raise ValueError('HEALTH_INCIDENT_REQUEST')
+            active = payload
+        elif event['TYPE'] == 'OUTCOME_RECORDED' and active and payload['REQUEST_ID'] == active['REQUEST_ID']:
+            if event['AT_JST'] == recorded_at:
+                matches.append((active, payload))
+            active = None
+        else:
+            raise ValueError('HEALTH_INCIDENT_BINDING')
+    if len(matches) != 1:
+        raise ValueError('HEALTH_INCIDENT_EVENT')
+    return at, *matches[0]
 
 
 def host_pause(deferred, day, now):
@@ -42,7 +78,24 @@ def saved_beforeinfo_pause(ledger, day, now, duration, *, state=None):
     """Recover the observed start from the checked request chain, including just after release."""
     if state is None:
         state = ledger.state()
+    versioned = recovery_policy(state)
     retry = state['PAUSE_UNTIL'].get('www.boatrace.jp')
+    if versioned:
+        if state['STOPPED'] or retry is None or retry < now - timedelta(minutes=15):
+            return None
+        start, request, outcome = recorded_incident(ledger, day, now,
+            state['PAUSE_STARTED_AT_JST']['www.boatrace.jp'])
+        if (retry.utcoffset() != timedelta(hours=9) or not start < retry
+                or retry - start > timedelta(hours=24)):
+            raise ValueError('HEALTH_PAUSE_PUBLICATION_BOUNDARY')
+        if request['HOST'] != 'www.boatrace.jp':
+            raise ValueError('HEALTH_PAUSE_HOST')
+        if outcome['OUTCOME'] != 'HTTP_403' or not request['SOURCE_ID'].startswith('beforeinfo-'):
+            return None
+        key = request['SOURCE_ID'][len('beforeinfo-'):]
+        if not KEY.fullmatch(key) or key[:8] != day.replace('-', ''):
+            raise ValueError('HEALTH_PAUSE_SOURCE_DAY')
+        return host_pause({'REASON': 'HOST_PAUSED', 'RETRY_AT_JST': retry.isoformat()}, day, start)
     if (state['STOPPED'] or state['GENERAL_HTTP_403_COUNT'] != 1 or retry is None
             or retry < now - timedelta(minutes=15)):
         return None
@@ -62,8 +115,15 @@ def saved_beforeinfo_pause(ledger, day, now, duration, *, state=None):
 
 def saved_pipeline_stop(ledger, day, now, state):
     """Date the first terminal transition in the already verified daily request chain."""
+    versioned = recovery_policy(state)
     if state['STOPPED'] is not True or now.date().isoformat() != day or now.utcoffset() != timedelta(hours=9):
         return None
+    if versioned:
+        at, _, outcome = recorded_incident(ledger, day, now, state['STOPPED_AT_JST'])
+        if outcome['OUTCOME'] not in {'HTTP_403', 'HTTP_429', 'HTTP_5XX', 'HTTP_OTHER',
+                                     'TIMEOUT', 'NETWORK_ERROR', 'CONTENT_INVALID'}:
+            raise ValueError('HEALTH_STOP_OUTCOME')
+        return {'date': day, 'reason': 'PIPELINE_STOPPED', 'observed_at_jst': at.isoformat(timespec='seconds')}
     counts = {'HTTP_403': 0, 'HTTP_429': 0}
     thresholds = {'HTTP_403': 2, 'HTTP_429': 3}
     active = None
@@ -373,12 +433,16 @@ def report(artifact, day, acquisition):
     value = summarize(artifact, day, acquisition, now=now)
     pause = value['host_pause']
     stop = None
+    state = None
     try:
         from g11.canonical.official_pipeline import FIRST_403_PAUSE_SECONDS
         state = artifact.ledger.state()
+        recovery_policy(state)
         if state['STOPPED'] is True:
             value['status'] = 'STOPPED'
             stop = saved_pipeline_stop(artifact.ledger, day, now, state)
+            if 'REQUEST_POLICY' in state:
+                pause = value['host_pause'] = None
         else:
             recorded = saved_beforeinfo_pause(artifact.ledger, day, now, FIRST_403_PAUSE_SECONDS, state=state)
             if recorded and (not pause or pause['retry_at_jst'] == recorded['retry_at_jst']):
@@ -389,7 +453,15 @@ def report(artifact, day, acquisition):
                         value['status'] = 'DEFERRED'
     except (ImportError, AttributeError, KeyError, ValueError, OSError, RuntimeError, TypeError) as exc:
         print('G11_HOST_LEDGER_READ_UNVERIFIED=' + type(exc).__name__, flush=True)
-        if value['status'] == 'PASS':
+        if isinstance(state, dict) and 'REQUEST_POLICY' in state:
+            # Never publish a guessed legacy two-refusal STOP or a stale pending
+            # receipt when new-policy evidence could not be verified.
+            pause = stop = value['host_pause'] = None
+            value['status'] = 'UNVERIFIED'
+            workspace = os.environ.get('GITHUB_WORKSPACE')
+            if workspace:
+                (Path(workspace) / '.relay-output' / 'host-pause.json').unlink(missing_ok=True)
+        elif value['status'] == 'PASS':
             value['status'] = 'UNVERIFIED'
     value['host_stop'] = stop
     print('G11_PREDEADLINE_INPUT_HEALTH=' + json.dumps(value, ensure_ascii=False, sort_keys=True), flush=True)
@@ -501,3 +573,4 @@ def main():
 
 
 if __name__ == '__main__': main()
+
