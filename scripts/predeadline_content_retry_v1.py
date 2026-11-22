@@ -514,7 +514,8 @@ def bounded_content_retry(*, early_capture=False):
             _report('TEN_MINUTE_CAPTURE',capture_lead_minutes=10,
                     saved_plan_rewritten=False,clock_shift_seconds=0)
         from predeadline_refusal_evidence_v1 import observe_responses
-        with observe_responses(self.client):
+        from live_refusal_recovery_v1 import durable_refusal_admission
+        with durable_refusal_admission(self), observe_responses(self.client):
             return collect_with_retry(original, self, max_requests=max_requests,
                                       early_wait_seconds=early_wait_seconds,early_capture=advance)
 
@@ -532,4 +533,5 @@ if __name__ == '__main__':
     except Exception:
         print('::warning title=G11 warm LIVE capture incomplete::Same-day acquisition and its request ledger will resume from persisted state.', flush=True)
         raise
+
 
