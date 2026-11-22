@@ -569,6 +569,55 @@ class RetryTests(unittest.TestCase):
                     raise RuntimeError('fixture')
         self.assertIs(self.Runner.run_due_predeadline, self.original)
 
+    def test_live_adapter_observes_http_without_changing_capture_or_model_inputs(self):
+        from unittest.mock import Mock
+        from urllib.request import Request
+        self.setup_paced_day()  # Exercises the actual compiled host-isolation path.
+        module = types.ModuleType('g11.canonical.official_pipeline')
+        module.CanonicalRunner = self.Runner
+        response = types.SimpleNamespace(status=200, headers={'Server-Timing': 'edge;dur=9000, origin;dur=20'})
+        opener = Mock(return_value=response)
+        self.runner.client.opener = opener
+        self.responses = {task['SOURCE_ID']: ['complete'] for task in self.plan}
+        for task in self.plan:
+            task['URL'] = ('https://www.boatrace.jp/owpc/pc/race/' + task['KIND'].lower()
+                           + '?hd=20261119&jcd=14&rno=3')
+        def fetch(source, url, validator):
+            self.assertIs(self.runner.client.opener(Request(url), timeout=30), response)
+            return self.fetch(source, url, validator)
+        self.runner.client.fetch_validated_once = fetch
+        with patch.dict('sys.modules', {'g11.canonical.official_pipeline': module}):
+            with retry.bounded_content_retry():
+                result = self.runner.run_due_predeadline(max_requests=8, early_wait_seconds=0)
+        self.assertEqual(result['ACQUIRED'], [row['SOURCE_ID'] for row in self.plan])
+        self.assertEqual((opener.call_count, len(self.writes), self.sleeps), (2, 2, [11, 15]))
+        self.assertIs(self.runner.client.opener, opener)
+        self.assertIs(self.Runner.run_due_predeadline, self.original)
+        events = [json.loads(line.split('=', 1)[1]) for line in self.log.getvalue().splitlines()
+                  if line.startswith('G11_OFFICIAL_RESPONSE=')]
+        self.assertEqual([row['source'] for row in events], result['ACQUIRED'])
+        self.assertTrue(all(row['status'] == 200 for row in events))
+        self.assertNotIn('G11_OFFICIAL_REFUSAL=', self.log.getvalue())
+
+    def test_live_adapter_restores_opener_when_collector_raises(self):
+        from unittest.mock import Mock
+        module = types.ModuleType('g11.canonical.official_pipeline')
+        module.CanonicalRunner = self.Runner
+        error = RuntimeError('private transport failure')
+        opener = Mock(side_effect=error)
+        self.runner.client.opener = opener
+        self.runner.client.fetch_validated_once = lambda *_: self.runner.client.opener(
+            'https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=20261030&jcd=14&rno=3')
+        with patch.dict('sys.modules', {'g11.canonical.official_pipeline': module}):
+            with self.assertRaises(RuntimeError) as caught:
+                with retry.bounded_content_retry():
+                    self.runner.run_due_predeadline(max_requests=8, early_wait_seconds=0)
+        self.assertIs(caught.exception, error)
+        self.assertIs(self.runner.client.opener, opener)
+        self.assertIs(self.Runner.run_due_predeadline, self.original)
+        self.assertEqual((opener.call_count, len(self.writes)), (1, 0))
+        self.assertNotIn('private transport failure', self.log.getvalue())
+
     def test_real_nowait_policy_nests_and_restores_with_retry_adapter(self):
         root = Path(os.environ.get('G11_RETRY_SOURCE_ROOT',
             Path(__file__).resolve().parents[1] / '.g11-private'))

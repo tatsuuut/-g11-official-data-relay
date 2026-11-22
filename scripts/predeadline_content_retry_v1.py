@@ -470,8 +470,10 @@ def bounded_content_retry(*, early_capture=False):
         if advance:
             _report('TEN_MINUTE_CAPTURE',capture_lead_minutes=10,
                     saved_plan_rewritten=False,clock_shift_seconds=0)
-        return collect_with_retry(original, self, max_requests=max_requests,
-                                  early_wait_seconds=early_wait_seconds,early_capture=advance)
+        from predeadline_refusal_evidence_v1 import observe_responses
+        with observe_responses(self.client):
+            return collect_with_retry(original, self, max_requests=max_requests,
+                                      early_wait_seconds=early_wait_seconds,early_capture=advance)
 
     CanonicalRunner.run_due_predeadline = bounded
     _report('ADAPTER_APPLIED')
