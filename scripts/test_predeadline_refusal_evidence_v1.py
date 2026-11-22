@@ -1,4 +1,7 @@
+import hashlib
 import io
+import json
+from email.message import Message
 import unittest
 from contextlib import redirect_stdout
 from urllib.error import HTTPError
@@ -62,3 +65,94 @@ class RefusalEvidenceTests(unittest.TestCase):
         row = emit.call_args.args[0]['request_window']
         self.assertEqual((row['source'], row['previous_source'], row['prior_requests_60s']),
                          (key, previous, 1))
+
+
+class ImmediateThread:
+    def __init__(self, target, args, daemon):
+        self.target, self.args = target, args
+
+    def start(self):
+        self.target(*self.args)
+
+
+class RefusalMetadataTests(unittest.TestCase):
+    def setUp(self):
+        self.network = patch('socket.create_connection', side_effect=AssertionError('NETWORK_FORBIDDEN'))
+        self.network.start()
+        self.addCleanup(self.network.stop)
+
+    def test_allowlist_excludes_authentication_and_cookie(self):
+        headers = Message()
+        headers['Server'] = 'example-edge'
+        headers['CF-Ray'] = 'a123b456-NRT'
+        headers['Authorization'] = 'Bearer NEVER_LOG'
+        headers['Set-Cookie'] = 'session=NEVER_LOG'
+        headers['X-Secret'] = 'NEVER_LOG'
+        self.assertEqual(evidence.response_metadata(headers), {'server':'example-edge', 'cf-ray':'a123b456-NRT'})
+
+    def test_header_injection_and_unbounded_values_are_dropped(self):
+        values = {'Server':'edge\nAuthorization: secret', 'Via':'v'*257,
+                  'X-Request-Id':'Bearer should-not-appear', 'X-Cache':'MISS'}
+        self.assertEqual(evidence.response_metadata(values), {'x-cache':'MISS'})
+
+    def test_run_context_is_bounded_to_explicit_fields(self):
+        with patch.dict(evidence.os.environ, {'GITHUB_RUN_ID':'123', 'GITHUB_RUN_ATTEMPT':'2',
+                'GITHUB_JOB':'collector', 'RUNNER_ENVIRONMENT':'github-hosted',
+                'GITHUB_TOKEN':'NEVER_LOG', 'EXTRA_SECRET':'NEVER_LOG'}, clear=True):
+            self.assertEqual(evidence.run_context(), {'github_run_id':'123','github_run_attempt':'2',
+                'github_job':'collector','runner_environment':'github-hosted'})
+
+    def test_denial_hashes_original_bytes_without_printing_text(self):
+        raw = b'ACCESS DENIED: secret-in-body'
+        error = HTTPError('https://www.boatrace.jp/example',403,'Forbidden',{},io.BytesIO(raw))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            evidence.body_evidence('beforeinfo-20261121-04-11', error)
+        item = json.loads(out.getvalue().split('=',1)[1])
+        self.assertEqual(item['body_hint'],'GENERIC_DENIAL')
+        self.assertEqual(item['response_prefix_bytes'], len(raw))
+        self.assertEqual(item['response_prefix_sha256'],hashlib.sha256(raw).hexdigest())
+        self.assertNotIn('secret-in-body',out.getvalue())
+
+    def test_body_read_is_limited_to_4096(self):
+        raw = b'forbidden ' + b'x'*6000
+        error = HTTPError('https://www.boatrace.jp/example',403,'Forbidden',{},io.BytesIO(raw))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            evidence.body_evidence('beforeinfo-20261121-04-11',error)
+        item = json.loads(out.getvalue().split('=',1)[1])
+        self.assertEqual(item['response_prefix_bytes'],4096)
+        self.assertEqual(item['response_prefix_sha256'],hashlib.sha256(raw[:4096]).hexdigest())
+
+    def test_observe_does_not_change_exception_or_request_again(self):
+        headers = Message()
+        headers['Server']='edge'
+        headers['Retry-After']='120'
+        error = HTTPError('https://www.boatrace.jp/example?secret=NEVER_LOG',403,'Forbidden',headers,io.BytesIO(b'Forbidden'))
+        exc=RuntimeError('HTTP_403')
+        exc.__cause__=error
+        out=io.StringIO()
+        with patch.object(evidence,'Thread',ImmediateThread), redirect_stdout(out):
+            result=evidence.observe('beforeinfo-20261121-04-11',exc)
+        lines=[json.loads(s.split('=',1)[1]) for s in out.getvalue().splitlines()]
+        self.assertIsNone(result)
+        self.assertIs(exc.__cause__,error)
+        self.assertEqual(str(exc),'HTTP_403')
+        self.assertEqual(lines[0]['response_headers'],{'server':'edge','retry-after':'120'})
+        self.assertNotIn('NEVER_LOG',out.getvalue())
+
+    def test_diagnostic_failure_does_not_change_acquisition_error(self):
+        error=HTTPError('https://www.boatrace.jp/example',403,'Forbidden',{},io.BytesIO(b'Forbidden'))
+        exc=RuntimeError('HTTP_403'); exc.__cause__=error
+        with patch.object(evidence,'response_metadata',side_effect=ValueError('bad metadata')):
+            self.assertIsNone(evidence.observe('beforeinfo-20261121-04-11',exc))
+        self.assertIs(exc.__cause__,error)
+
+    def test_unexpected_source_and_status_produce_no_extra_output(self):
+        out=io.StringIO()
+        with redirect_stdout(out):
+            for source,status in [('untrusted-source',403),('beforeinfo-20261121-04-11',500)]:
+                exc=RuntimeError('original')
+                exc.__cause__=HTTPError('https://www.boatrace.jp/example',status,'error',{},io.BytesIO(b'body'))
+                evidence.observe(source,exc)
+        self.assertEqual(out.getvalue(),'')

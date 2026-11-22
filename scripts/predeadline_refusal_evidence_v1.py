@@ -1,5 +1,7 @@
 """Read-only evidence for official predeadline refusals. No HTTP client or retry."""
+import hashlib
 import json
+import os
 import re
 from datetime import datetime
 from threading import Thread
@@ -10,11 +12,43 @@ def emit(fields):
     print('G11_OFFICIAL_REFUSAL=' + json.dumps(fields, sort_keys=True), flush=True)
 
 
+# Diagnostic-only allowlist. Never emit authentication, cookies, response URLs,
+# arbitrary headers, or raw denial text. Trace IDs let the source operator
+# locate an already completed request without sending a diagnostic request.
+DIAGNOSTIC_HEADERS = (
+    "Server", "Via", "Content-Type", "Retry-After", "X-Cache",
+    "CF-Ray", "X-Amz-Cf-Id", "X-Amz-Cf-Pop", "X-Request-Id",
+)
+RUN_CONTEXT_FIELDS = ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB", "RUNNER_ENVIRONMENT")
+
+
+def response_metadata(headers):
+    result = {}
+    for name in DIAGNOSTIC_HEADERS:
+        value = headers.get(name)
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        # Keep logs bounded and single-line. Reject suspicious values entirely.
+        if (not value or len(value) > 256 or not value.isascii()
+                or any(ord(c) < 32 or ord(c) == 127 for c in value)
+                or re.search(r"(?i)(authorization|set-cookie|bearer\s|basic\s|(?:token|signature|password)=)", value)):
+            continue
+        result[name.lower()] = value
+    return result
+
+
+def run_context():
+    return {name.lower(): value for name in RUN_CONTEXT_FIELDS
+            if re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", value := os.environ.get(name, ""))}
+
+
 def body_evidence(source_id, error):
     # The original GET already returned a denial. Only inspect one bounded read
     # on a background thread, after the normal ledger has recorded the error.
     try:
-        prefix = error.read1(4096).lower()
+        raw_prefix = error.read1(4096)
+        prefix = raw_prefix.lower()
         if b'too many requests' in prefix or b'rate limit exceeded' in prefix:
             label = 'RATE_LIMIT_MESSAGE'
         elif b'not available in your country' in prefix:
@@ -25,7 +59,9 @@ def body_evidence(source_id, error):
             label = 'GENERIC_DENIAL'
         else:
             label = 'NO_RECOGNIZED_MESSAGE'
-        emit({'source': source_id, 'status': error.code, 'body_hint': label})
+        emit({'source': source_id, 'status': error.code, 'body_hint': label,
+              'response_prefix_bytes': len(raw_prefix),
+              'response_prefix_sha256': hashlib.sha256(raw_prefix).hexdigest()})
     except Exception:
         emit({'source': source_id, 'status': error.code, 'body_hint': 'UNAVAILABLE'})
 
@@ -40,7 +76,9 @@ def observe(source_id, exc, ledger=None):
         headers = error.headers or {}
         emit({'source': source_id, 'status': error.code,
               'retry_after_present': bool(headers.get('Retry-After')),
-              'challenge_header': headers.get('cf-mitigated', '').lower() == 'challenge'})
+              'challenge_header': headers.get('cf-mitigated', '').lower() == 'challenge',
+              'response_headers': response_metadata(headers),
+              'run_context': run_context()})
         Thread(target=body_evidence, args=(source_id, error), daemon=True).start()
         if ledger is not None:
             incidents = incident_windows(ledger.events())
