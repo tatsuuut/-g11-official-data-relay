@@ -4,7 +4,7 @@ import json
 from email.message import Message
 import unittest
 from contextlib import redirect_stdout
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -344,3 +344,30 @@ class ResponseObservationTests(unittest.TestCase):
             self.assertEqual(event['server_timing_ms'], {})
             self.assertIsNone(event['server_timing_present'])
             self.assertNotIn('PRIVATE', capture.getvalue())
+
+    def test_wrapped_timeout_is_observed_without_reclassification_by_message_or_retry(self):
+        cases = [
+            (URLError(TimeoutError('PRIVATE')), 'TIMEOUT'),
+            (URLError(ConnectionRefusedError('timed out PRIVATE')), 'NETWORK_ERROR'),
+            (URLError('timed out PRIVATE'), 'NETWORK_ERROR'),
+            (HTTPError(self.URL, 429, TimeoutError('PRIVATE'), {}, io.BytesIO()), 429),
+        ]
+        for error, expected in cases:
+            with self.subTest(status=expected, reason_type=type(error.reason).__name__):
+                opener = Mock(side_effect=error)
+                client = SimpleNamespace(opener=opener)
+                capture = io.StringIO()
+                request = Request(self.URL)
+                with redirect_stdout(capture):
+                    with self.assertRaises(type(error)) as caught:
+                        with evidence.observe_responses(client, clock=Mock(side_effect=[10, 40])):
+                            client.opener(request, timeout=30)
+                self.assertIs(caught.exception, error)
+                self.assertIs(client.opener, opener)
+                opener.assert_called_once_with(request, timeout=30)
+                event, = self.events(capture)
+                self.assertEqual(event['status'], expected)
+                self.assertEqual(event['header_wait_ms'], 30_000)
+                self.assertEqual(event['server_timing_ms'], {})
+                self.assertNotIn('PRIVATE', capture.getvalue())
+                self.assertNotIn('G11_OFFICIAL_REFUSAL=', capture.getvalue())

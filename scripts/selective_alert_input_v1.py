@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 import subprocess
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import urllib.parse
 import urllib.request
 
@@ -25,6 +25,14 @@ ORIGIN = "https://g11-race-lab.higatatsunori2.chatgpt.site"
 WIRE_LIMIT = 240_000
 RESCUE_FROM_DAY = "2026-10-21"
 NOTIFICATION_TEN_MINUTE_FROM = "20261116"
+# Read-only helper from boat-brain-lab@76106bbd82e4fdaf6889db063c66ae02aef47561.
+# WILD4 keeps its frozen projection runtime; this supplies only its missing
+# context transport to the optional input step, never a predictor or model.
+PLAYER_CONTEXT_HELPER_SHA256 = "9094b1a6097e7be933552072f5d300f288d82320b05732c98cd954c9eab2042c"
+PLAYER_CONTEXT_MODULES = frozenset({
+    "g11", "g11.canonical", "g11.canonical.official_pipeline",
+    "g11.canonical.condition_context_transport_v1",
+})
 
 def rescue_source(source, day, is_gori):
     """Input transport scope only; the Site revalidates its accepted boundary."""
@@ -152,7 +160,23 @@ def make_proof(engine, row, saved, receipt, odds, odds_day=None, packet=None):
 
 def read_player_context(store_path, race_key, readback_at, cache):
     # Private runtime owns the official source schema; public relay only routes it.
-    from g11.canonical.condition_context_transport_v1 import read_player_context as read
+    helper = os.environ.get("G11_PLAYER_CONTEXT_HELPER")
+    if helper:
+        read = cache.get("_pinned_context_reader")
+        if read is None:
+            path = Path(helper)
+            require(path.is_absolute() and path.is_file() and not path.is_symlink()
+                    and path.resolve(strict=True) == path and path.stat().st_size <= 16_384,
+                    "CONTEXT_HELPER_FILE")
+            raw = path.read_bytes()
+            require(hashlib.sha256(raw).hexdigest() == PLAYER_CONTEXT_HELPER_SHA256,
+                    "CONTEXT_HELPER_SHA256")
+            module = ModuleType("_g11_pinned_condition_context_transport_v1")
+            # Execute the exact verified bytes; do not import/re-read another file.
+            exec(compile(raw, str(path), "exec"), module.__dict__)
+            read = cache["_pinned_context_reader"] = module.read_player_context
+    else:
+        from g11.canonical.condition_context_transport_v1 import read_player_context as read
     return read(store_path, race_key, readback_at, cache)
 
 def collect(store_path, source, *, odds_day=None, reader=read_official, context_reader=read_player_context):
@@ -192,8 +216,13 @@ def collect(store_path, source, *, odds_day=None, reader=read_official, context_
                 except Exception as exc:
                     # Optional context must not hold healthy odds or another engine.
                     code = str(exc)
-                    held.append({"race_key": key, "scope": "PLAYER_CONTEXT_ONLY",
-                                 "reason": code if code.isupper() and len(code) < 100 else type(exc).__name__})
+                    detail = {"race_key": key, "scope": "PLAYER_CONTEXT_ONLY",
+                              "reason": code if code.isupper() and len(code) < 100 else type(exc).__name__}
+                    if isinstance(exc, ModuleNotFoundError):
+                        detail["reason"] = type(exc).__name__
+                        if exc.name in PLAYER_CONTEXT_MODULES:
+                            detail["missing_module"] = exc.name
+                    held.append(detail)
             records.append(proof)
         except Exception as exc:
             # Reasons only; never dump decrypted input, tokens or stack traces.

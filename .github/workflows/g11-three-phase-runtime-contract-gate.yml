@@ -876,8 +876,19 @@ jobs:
           from pathlib import Path
           caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
           worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert 'g11-wild4-shadow-lock-only.yml@bbb4f12f81597e120d66a79b0de65c1876097333' in caller
+          assert 'g11-wild4-shadow-lock-only.yml@b0a22712cf64043934c66bb7956e5b2f92a64f5d' in caller
           assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
+          # The live workflow may add only the reviewed read-only dependency step.
+          import hashlib
+          current=Path('.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
+          assert hashlib.sha256(worker.encode()).hexdigest() == 'b9755c0b5690d16f8d8a45f0ae5493084bcf8c19470bc92397e305152d05c045'
+          start=current.index('      - name: Checkout pinned optional player context transport\n')
+          end=current.index('      - name: Checkout notification input reader only\n',start)
+          added=current[start:end]
+          assert hashlib.sha256(added.encode()).hexdigest() == 'df4a17582f6f3b016b743908f152fa0f7ac14d74966c65d83cb33af2223b5742'
+          env_line='          G11_PLAYER_CONTEXT_HELPER: $'+'{{ github.workspace }}/.g11-player-context/g11/canonical/condition_context_transport_v1.py\n'
+          assert current.count(env_line)==1
+          assert (current[:start]+current[end:]).replace(env_line,'') == worker
           PY
           "$(go env GOPATH)/bin/actionlint" "$WILD4_WORKFLOW_PATH"
           python3 .g11-context-guard/scripts/test_wild4_input_context_health_v1.py -q
@@ -951,6 +962,7 @@ jobs:
       - name: Verify retained history and all three current research cohorts
         working-directory: .g11-thirty-budget/g11/canonical
         run: python3 -m unittest -v test_deme_discovery_checkpoint test_deme_discovery_thirty test_deme_discovery_sunburst test_deme_discovery_nikoshi test_deme_discovery_thirty_budget test_deme_discovery_yotsuba test_deme_discovery_standard_preview test_deme_discovery_v5 test_deme_discovery_adoptions
+
 
 
 

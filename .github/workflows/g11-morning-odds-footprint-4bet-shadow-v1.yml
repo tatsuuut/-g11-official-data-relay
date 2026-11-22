@@ -471,7 +471,7 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@bbb4f12f81597e120d66a79b0de65c1876097333
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@b0a22712cf64043934c66bb7956e5b2f92a64f5d
     with:
       predeadline_checkpoint_key: ${{ inputs.predeadline_checkpoint_key || '' }}
       predeadline_delta_key: ${{ inputs.predeadline_delta_key || '' }}
@@ -537,4 +537,5 @@ jobs:
           python3 scripts/wild4_republish_20261103.py publish \
             --work "${RUNNER_TEMP}/saved-night" \
             --saved-archive .saved-night-readback/future-locks.tgz.gpg
+
 
