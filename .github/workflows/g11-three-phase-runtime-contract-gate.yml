@@ -876,7 +876,7 @@ jobs:
           from pathlib import Path
           caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
           worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert 'g11-wild4-shadow-lock-only.yml@bbb4f12f81597e120d66a79b0de65c1876097333' in caller
+          assert 'g11-wild4-shadow-lock-only.yml@b0a22712cf64043934c66bb7956e5b2f92a64f5d' in caller
           assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
           # The live workflow may add only the reviewed read-only dependency step.
           import hashlib
