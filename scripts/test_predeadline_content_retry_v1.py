@@ -21,6 +21,36 @@ JST = timezone(timedelta(hours=9))
 BASE = datetime(2026, 10, 30, 9, 22, tzinfo=JST)
 KEY = '20261030-14-03'
 
+# Public timing evidence only; no official response bodies or model data.
+WARM_HANDOFF_TIMING = {'schema': 'G11_SAVED_WARM_HANDOFF_TIMING_FIXTURE_V1',
+ 'source_url': 'https://github.com/tatsuuut/-g11-official-data-relay/actions/runs/44980310556/job/137079364892',
+ 'source_head': '9ddbefe5f3b8906832b80be5707c5e7e9f85e9e4',
+ 'day': '2026-11-22',
+ 'warm_started_at_jst': '2026-11-22T12:27:26.774475+09:00',
+ 'previous_request_started_at_jst': '2026-11-22T12:25:04.155+09:00',
+ 'warm_first_request_started_at_jst': '2026-11-22T12:27:29.690+09:00',
+ 'warm_slots': 7,
+ 'responses': [{'source_id': 'beforeinfo-20261122-13-05',
+                'headers_at_jst': '2026-11-22T12:27:30.013+09:00',
+                'header_wait_ms': 322.661},
+               {'source_id': 'odds3t-20261122-13-05',
+                'headers_at_jst': '2026-11-22T12:27:59.347+09:00',
+                'header_wait_ms': 289.253},
+               {'source_id': 'beforeinfo-20261122-02-05', 'headers_at_jst': '2026-11-22T12:28:29.323+09:00'},
+               {'source_id': 'odds3t-20261122-02-05', 'headers_at_jst': '2026-11-22T12:28:59.352+09:00'},
+               {'source_id': 'beforeinfo-20261122-21-09', 'headers_at_jst': '2026-11-22T12:29:29.252+09:00'},
+               {'source_id': 'odds3t-20261122-21-09', 'headers_at_jst': '2026-11-22T12:29:59.243+09:00'}],
+ 'deadlines': {'20261122-13-05': '2026-11-22T12:31:00+09:00',
+               '20261122-02-05': '2026-11-22T12:33:00+09:00',
+               '20261122-21-09': '2026-11-22T12:37:00+09:00'},
+ 'original_readback_at_jst': '2026-11-22T12:32:04.960917+09:00',
+ 'original_followup_started_at_jst': '2026-11-22T12:31:42.590560+09:00',
+ 'original_publication_started_at_jst': '2026-11-22T12:31:45.349691+09:00',
+ 'notes': ['Timing evidence only; source bodies in tests remain deterministic complete-input stubs for the '
+           'actual reviewed collector.',
+           'A replay projects the avoided serial acquisition and dispatch time; it does not certify live '
+           'publication or GitHub scheduling latency.']}
+
 
 class PipelineError(ValueError):
     pass
@@ -243,16 +273,22 @@ class RetryTests(unittest.TestCase):
     def test_warm_workflow_requires_both_checkpoints_and_distinct_publication_slots(self):
         source = (Path(__file__).resolve().parents[1] / '.github/workflows/g11-free-runner.yml').read_text()
         steps = ['critical-save', 'critical-publish', 'predeadline-chain', 'warm',
-                 'publication-state-verified', 'wild4-followup', 'critical-retry']
+                 'publication-state-verified', 'critical-retry', 'wild4-followup']
         offsets = [source.index('id: ' + name + '\n') for name in steps]
         self.assertEqual(offsets, sorted(offsets))
         warm = source[offsets[3]:].split('      - name:', 1)[0]
         self.assertIn("steps.critical-publish.outcome=='success'", warm)
         self.assertIn('python3 -S scripts/predeadline_content_retry_v1.py', warm)
         self.assertIn("steps.critical.outputs.warm=='true'", warm)
-        publish = source[offsets[-1]:].split('      - name:', 1)[0]
+        self.assertIn('G11_WARM_CONTINUATION_READY: ${{steps.predeadline-chain.outputs.ready}}', warm)
+        chain = source[offsets[2]:].split('      - name:', 1)[0]
+        self.assertGreater(chain.index("echo 'ready=true'"), chain.index('predeadline_dispatch_v1.py'))
+        publish = source[offsets[-2]:].split('      - name:', 1)[0]
         self.assertIn("steps.publication-state-verified.outputs.ready=='true'", publish)
         self.assertIn("G11_WARM_PUBLICATION:", publish)
+        followup = source[offsets[-1]:].split('      - name:', 1)[0]
+        self.assertIn('if: always()&&!cancelled()&&', followup)
+        self.assertIn("steps.publication-state-verified.outputs.ready=='true'", followup)
         self.assertIn("steps.warm.outcome == 'success' && steps.critical-retry.outcome == 'success'", source)
 
     def test_warm_start_checks_receipt_preserves_first_cutoff_and_enforces_residual_budget(self):
@@ -277,6 +313,193 @@ class RetryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'FIRST_RECEIPT_OR_BUDGET'):
                 retry.resume_warm()
             self.assertEqual(call.call_count, 1)
+
+    def warm_congestion_replay(self, *, following_deadline=None):
+        fixture = copy.deepcopy(WARM_HANDOFF_TIMING)
+        self.setup_paced_day(degraded=True)
+        self.now = datetime.fromisoformat(fixture['warm_first_request_started_at_jst'])
+        self.prior_start = datetime.fromisoformat(fixture['previous_request_started_at_jst'])
+        self.plan = []
+        self.responses = {}
+        for key, deadline in fixture['deadlines'].items():
+            end = datetime.fromisoformat(deadline)
+            if following_deadline is not None and key.endswith('-21-09'):
+                end = following_deadline
+            for kind in ('BEFOREINFO', 'ODDS3T'):
+                row = self.task(kind, key)
+                row.update(DUE_AT_JST=(end-timedelta(minutes=7)).isoformat(),
+                           MUST_FINISH_BEFORE_JST=end.isoformat())
+                self.plan.append(row)
+                self.responses[row['SOURCE_ID']] = ['complete']
+        return fixture
+
+    def test_warm_handoff_keeps_near_pair_then_publishes_before_distant_pair(self):
+        fixture = self.warm_congestion_replay()
+        expected = [row['source_id'] for row in fixture['responses']]
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF': 'true',
+                                   'G11_WARM_CAPTURE_REMAINING': '7'}):
+            result = retry.collect_with_retry(self.original, self.runner, max_requests=7,
+                early_wait_seconds=0, early_capture=True)
+        # Amagasaki alone cannot hand off Toda safely. Once Toda's pair is
+        # complete, its later cutoff must not obscure the earlier saved pair.
+        self.assertEqual(result['ACQUIRED'], expected[:4])
+        self.assertEqual(result['WARM_REMAINING'], 3)
+        self.assertEqual([sid for sid, _ in self.attempts], expected[:4])
+        report = next(json.loads(line.split('=', 1)[1]) for line in self.log.getvalue().splitlines()
+                      if 'WARM_PAIR_PUBLICATION_HANDOFF' in line)
+        self.assertEqual(report['race_key'], '20261122-13-05')
+        self.assertEqual(report['publication_reserve_seconds'], 145)
+        self.assertEqual(report['successor_capture_reserve_seconds'], 380)
+        # Preserve the observed limit: removing the two distant GETs and
+        # dispatch wait alone still projects a little past Amagasaki's cutoff.
+        at = datetime.fromisoformat
+        avoided = at(fixture['responses'][-1]['headers_at_jst']) - at(fixture['responses'][3]['headers_at_jst'])
+        dispatch = at(fixture['original_publication_started_at_jst']) - at(fixture['original_followup_started_at_jst'])
+        projected = at(fixture['original_readback_at_jst']) - avoided - dispatch
+        remaining = (at(fixture['deadlines']['20261122-13-05']) - projected).total_seconds()
+        self.assertAlmostEqual(avoided.total_seconds(), 59.891)
+        self.assertAlmostEqual(remaining, -2.310786, places=5)
+
+    def test_warm_handoff_does_not_push_another_near_cutoff_into_next_worker(self):
+        fixture = self.warm_congestion_replay(
+            following_deadline=datetime(2026, 11, 22, 12, 35, tzinfo=JST))
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF': 'true',
+                                   'G11_WARM_CAPTURE_REMAINING': '7'}):
+            result = retry.collect_with_retry(self.original, self.runner, max_requests=7,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(result['ACQUIRED'], [row['source_id'] for row in fixture['responses']])
+        self.assertNotIn('WARM_REMAINING', result)
+
+    def test_expired_completed_pair_does_not_hide_a_future_warm_publication(self):
+        self.warm_congestion_replay()
+        now = datetime(2026, 11, 22, 12, 1, tzinfo=JST)
+        ends = [now-timedelta(minutes=1), now+timedelta(minutes=2), now+timedelta(minutes=7)]
+        for index, row in enumerate(self.plan):
+            end = ends[index//2]
+            row.update(DUE_AT_JST=(end-timedelta(minutes=7)).isoformat(),
+                       MUST_FINISH_BEFORE_JST=end.isoformat())
+        saved = {}
+        for row in self.plan[:4]:
+            path = self.root/'snapshots/predeadline'/f'{row["SOURCE_ID"]}.json'
+            data = json.dumps({'saved_before_deadline': row['SOURCE_ID']}).encode()
+            path.write_bytes(data)
+            saved[path] = data
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF': 'true',
+                                   'G11_WARM_CAPTURE_REMAINING': '6'}):
+            handoff = retry.urgent_pair_handoff(self.runner.store, self.plan[3], ends[1], now,
+                self.plan[4:], {row['RACE_KEY'] for row in self.plan}, {}, 2,
+                acquired=[row['SOURCE_ID'] for row in self.plan[:4]], plan=self.plan)
+        self.assertTrue(handoff)
+        report = next(json.loads(line.split('=', 1)[1]) for line in self.log.getvalue().splitlines()
+                      if 'WARM_PAIR_PUBLICATION_HANDOFF' in line)
+        self.assertEqual(report['race_key'], '20261122-02-05')
+        for path, data in saved.items():
+            self.assertEqual(path.read_bytes(), data)
+
+    def test_saved_warm_handoff_restores_pending_pair_without_reacquiring_saved_sources(self):
+        import shutil
+        fixture = self.warm_congestion_replay()
+        expected = [row['source_id'] for row in fixture['responses']]
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF': 'true',
+                                   'G11_WARM_CAPTURE_REMAINING': '7'}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=7,
+                early_wait_seconds=0, early_capture=True)
+        saved = {path.name: path.read_bytes() for path in (self.root/'snapshots/predeadline').iterdir()}
+        original_root = self.root
+        self.root = original_root / 'restored'
+        shutil.copytree(original_root / 'snapshots', self.root / 'snapshots')
+        self.runner.store.root = self.root
+        self.sleep(retry.WARM_PUBLICATION_RESERVE_SECONDS + retry.WARM_SUCCESSOR_SETUP_SECONDS)
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF': 'false',
+                                   'G11_WARM_CAPTURE_REMAINING': ''}):
+            second = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(first['ACQUIRED'], expected[:4])
+        self.assertEqual(second['ACQUIRED'], expected[4:])
+        self.assertEqual([sid for sid, _ in self.attempts], expected)
+        self.assertEqual([sid for sid, _ in self.writes], expected)
+        for name, data in saved.items():
+            self.assertEqual((self.root/'snapshots/predeadline'/name).read_bytes(), data)
+        for (_, previous), (_, current) in zip(self.attempts, self.attempts[1:]):
+            self.assertGreaterEqual((current - previous).total_seconds(), retry.DEGRADED_SPACING_SECONDS)
+        self.assertLess(self.now, datetime.fromisoformat(fixture['deadlines']['20261122-21-09']))
+
+    def test_warm_continuation_keeps_stop_and_cutoff_after_delayed_start(self):
+        fixture = self.warm_congestion_replay()
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF': 'true',
+                                   'G11_WARM_CAPTURE_REMAINING': '7'}):
+            retry.collect_with_retry(self.original, self.runner, max_requests=7,
+                early_wait_seconds=0, early_capture=True)
+        attempts = list(self.attempts)
+        self.state['STOPPED'] = True
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF': 'false',
+                                   'G11_WARM_CAPTURE_REMAINING': ''}):
+            stopped = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+            self.assertEqual(stopped['ACQUIRED'], [])
+            self.assertEqual(stopped['DEFERRED'], {'REASON': 'PIPELINE_STOPPED'})
+            self.now = datetime.fromisoformat(fixture['deadlines']['20261122-21-09'])
+            expired = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(expired['ACQUIRED'], [])
+        self.assertTrue(set(row['source_id'] for row in fixture['responses'][-2:]).issubset(expired['MISSED']))
+        self.assertEqual(self.attempts, attempts)
+
+    def test_warm_start_preserves_handoff_budget_for_existing_continuation(self):
+        root = self.root
+        out = root / '.relay-output'
+        out.mkdir()
+        first = {'OPERATIONAL_DATE_JST': '2026-11-22', 'CRITICAL': {'OPERATIONAL_DATE': '2026-11-22',
+            'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_CRITICAL_RUN_ID': '41', 'AUTHORITY_SHA256': 'a'*64},
+            'ACQUISITION': {'ACQUIRED': ['a'], 'WARM_REMAINING': 7}}
+        (out / 'result.json').write_text(json.dumps(first))
+        (out / 'hot-delta-readback.json').write_text('{}')
+        def complete(_command, *, env, **kwargs):
+            self.assertEqual((env['G11_WARM_CAPTURE_REMAINING'], env['G11_URGENT_WARM_HANDOFF']), ('7', 'true'))
+            second = dict(first, ACQUISITION={'ACQUIRED': ['b', 'c', 'd', 'e'], 'WARM_REMAINING': 3})
+            (out / 'warm-result.json').write_text(json.dumps(second))
+        with patch.dict(os.environ, {'GITHUB_WORKSPACE': str(root), 'GITHUB_RUN_ID': '41',
+                                   'G11_WARM_CONTINUATION_READY': 'true'}), patch('subprocess.run', side_effect=complete):
+            retry.resume_warm()
+        self.assertEqual(json.loads((out/'first-critical-result.json').read_bytes()), first)
+        self.assertEqual(json.loads((out/'result.json').read_bytes())['ACQUISITION'],
+                         {'ACQUIRED': ['b', 'c', 'd', 'e'], 'WARM_REMAINING': 3})
+
+    def test_warm_start_rejects_inflated_or_unconsumed_handoff_budget(self):
+        out = self.root / '.relay-output'
+        out.mkdir()
+        first = {'OPERATIONAL_DATE_JST': '2026-11-22', 'CRITICAL': {'OPERATIONAL_DATE': '2026-11-22',
+            'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_CRITICAL_RUN_ID': '41', 'AUTHORITY_SHA256': 'a'*64},
+            'ACQUISITION': {'ACQUIRED': ['a'], 'WARM_REMAINING': 7}}
+        (out / 'result.json').write_text(json.dumps(first))
+        (out / 'hot-delta-readback.json').write_text('{}')
+        for acquired, remaining in [(['b', 'c'], 6), ([], 7), (['b'], True), (['b'], -1)]:
+            with self.subTest(acquired=acquired, remaining=remaining):
+                def complete(_command, **kwargs):
+                    second = dict(first, ACQUISITION={'ACQUIRED': acquired, 'WARM_REMAINING': remaining})
+                    (out / 'warm-result.json').write_text(json.dumps(second))
+                with patch.dict(os.environ, {'GITHUB_WORKSPACE': str(self.root), 'GITHUB_RUN_ID': '41',
+                                           'G11_WARM_CONTINUATION_READY': 'true'}), patch('subprocess.run', side_effect=complete):
+                    with self.assertRaisesRegex(ValueError, 'WARM_CHECKPOINT_OR_BUDGET'):
+                        retry.resume_warm()
+                self.assertEqual(json.loads((out/'result.json').read_bytes()), first)
+
+    def test_unconfirmed_continuation_keeps_warm_pass_in_existing_worker(self):
+        out = self.root / '.relay-output'
+        out.mkdir()
+        first = {'OPERATIONAL_DATE_JST': '2026-11-22', 'CRITICAL': {'OPERATIONAL_DATE': '2026-11-22',
+            'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_CRITICAL_RUN_ID': '41', 'AUTHORITY_SHA256': 'a'*64},
+            'ACQUISITION': {'ACQUIRED': ['a'], 'WARM_REMAINING': 7}}
+        (out / 'result.json').write_text(json.dumps(first))
+        (out / 'hot-delta-readback.json').write_text('{}')
+        def complete(_command, *, env, **kwargs):
+            self.assertEqual(env['G11_URGENT_WARM_HANDOFF'], 'false')
+            second = dict(first, ACQUISITION={'ACQUIRED': ['b', 'c', 'd', 'e', 'f', 'g']})
+            (out / 'warm-result.json').write_text(json.dumps(second))
+        with patch.dict(os.environ, {'GITHUB_WORKSPACE': str(self.root), 'GITHUB_RUN_ID': '41',
+                                   'G11_WARM_CONTINUATION_READY': ''}), patch('subprocess.run', side_effect=complete):
+            retry.resume_warm()
+        self.assertNotIn('WARM_REMAINING', json.loads((out/'result.json').read_bytes())['ACQUISITION'])
 
     def test_shared_spacing_handles_prior_worker_and_both_inputs(self):
         before, odds = self.setup_paced_day()

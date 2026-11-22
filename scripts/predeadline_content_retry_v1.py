@@ -34,17 +34,43 @@ DEGRADED_SPACING_SECONDS = 30
 # leaving a later race to the same worker's remaining serial capture slots.
 URGENT_READY_SECONDS = 180
 HANDOFF_SETUP_SECONDS = 145
+# A warm pass has no third publication slot. Yield only when the existing
+# continuation has room for this checkpoint/readback and its own preparation.
+# These are scheduling reserves, not a bound on GitHub queue latency. The
+# canonical collector still rechecks every cutoff after restore and pacing.
+WARM_HANDOFF_FROM = date(2026, 11, 22)
+WARM_PUBLICATION_RESERVE_SECONDS = 145
+WARM_SUCCESSOR_SETUP_SECONDS = 145
 
 
-def urgent_pair_handoff(store, task, deadline, now, following, eligible, cancelled_days, remaining_slots):
+def urgent_pair_handoff(store, task, deadline, now, following, eligible, cancelled_days,
+                        remaining_slots, *, acquired=(), plan=()):
     """Return to normal LOCK, persistence and public delivery before later GETs."""
     if (os.environ.get('G11_URGENT_WARM_HANDOFF') != 'true'
-            or now.date() < date(2026, 11, 20) or remaining_slots <= 0
-            or not 0 < (deadline - now).total_seconds() <= URGENT_READY_SECONDS):
+            or now.date() < date(2026, 11, 20) or remaining_slots <= 0):
         return False
     key = task['RACE_KEY']
     pre = store.root / 'snapshots' / 'predeadline'
-    if not all((pre / f'{kind}-{key}.json').is_file() for kind in ('beforeinfo', 'odds3t')):
+    warm = bool(os.environ.get('G11_WARM_CAPTURE_REMAINING')) and now.date() >= WARM_HANDOFF_FROM
+    if warm:
+        # A later pair must not hide a previously completed, earlier deadline.
+        # Only this pass's acquired races count; restored LOCKs are not recut.
+        changed = {row['RACE_KEY'] for row in plan if row['SOURCE_ID'] in acquired}
+        ready = [(datetime.fromisoformat(row['MUST_FINISH_BEFORE_JST']), row['RACE_KEY'])
+                 for row in plan if row['RACE_KEY'] in changed
+                 and row['RACE_KEY'] in eligible and row['RACE_KEY'][:-3] not in cancelled_days
+                 and all((pre / f'{kind}-{row["RACE_KEY"]}.json').is_file()
+                         for kind in ('beforeinfo', 'odds3t'))]
+        ready = [(end, race) for end, race in ready if now < end]
+        if not ready:
+            return False
+        deadline, key = min(ready)
+        ready_seconds = WARM_PUBLICATION_RESERVE_SECONDS + remaining_slots * DEGRADED_SPACING_SECONDS
+    else:
+        if not all((pre / f'{kind}-{key}.json').is_file() for kind in ('beforeinfo', 'odds3t')):
+            return False
+        ready_seconds = URGENT_READY_SECONDS
+    if not 0 < (deadline - now).total_seconds() <= ready_seconds:
         return False
     from predeadline_capture_window_v1 import effective_due
     pending = []
@@ -58,14 +84,20 @@ def urgent_pair_handoff(store, task, deadline, now, following, eligible, cancell
             pending.append(end)
     if not pending:
         return False
-    # An overlapping race with too little time for a fresh worker stays in
-    # this capture. Check the cumulative serial workload, including ties.
-    if (min(pending) - now).total_seconds() < HANDOFF_SETUP_SECONDS + remaining_slots * DEGRADED_SPACING_SECONDS:
+    # An overlapping race with too little time for continuation capture stays
+    # here. Include the warm publication and fresh worker setup, including ties.
+    setup = (WARM_PUBLICATION_RESERVE_SECONDS + WARM_SUCCESSOR_SETUP_SECONDS
+             if warm else HANDOFF_SETUP_SECONDS)
+    successor_budget = setup + remaining_slots * DEGRADED_SPACING_SECONDS
+    if (min(pending) - now).total_seconds() < successor_budget:
         return False
-    _report('URGENT_PAIR_PUBLICATION_HANDOFF', race_key=key,
+    _report('WARM_PAIR_PUBLICATION_HANDOFF' if warm else 'URGENT_PAIR_PUBLICATION_HANDOFF', race_key=key,
             remaining_seconds=round((deadline - now).total_seconds(), 3),
-            following_due_sources=len(pending), next_deadline_jst=min(pending).isoformat())
-    if output := os.environ.get('GITHUB_OUTPUT'):
+            following_due_sources=len(pending), next_deadline_jst=min(pending).isoformat(),
+            **({'remaining_request_slots': remaining_slots,
+                'publication_reserve_seconds': WARM_PUBLICATION_RESERVE_SECONDS,
+                'successor_capture_reserve_seconds': successor_budget} if warm else {}))
+    if not warm and (output := os.environ.get('GITHUB_OUTPUT')):
         with open(output, 'a') as handle:
             handle.write('warm=true\n')
     return True
@@ -90,18 +122,28 @@ def resume_warm():
         raise ValueError('WARM_FIRST_RECEIPT_OR_BUDGET')
     shutil.copyfile(out / 'result.json', out / 'first-critical-result.json')
     warm = out / 'warm-result.json'
+    handoff_enabled = (date.fromisoformat(day) >= WARM_HANDOFF_FROM
+                       and os.environ.get('G11_WARM_CONTINUATION_READY') == 'true')
     subprocess.run([sys.executable, '-S', str(root / 'scripts/daily_predeadline_authority_recovery_v1.py'),
         'critical', '--state-root', str(root / '.relay-state'), '--operational-date', day,
         '--run-id', run_id, '--result', str(warm)], cwd=root / '.g11-private', check=True,
-        env={**os.environ, 'G11_WARM_CAPTURE_REMAINING': str(slots), 'G11_URGENT_WARM_HANDOFF': 'false',
+        env={**os.environ, 'G11_WARM_CAPTURE_REMAINING': str(slots),
+             'G11_URGENT_WARM_HANDOFF': str(handoff_enabled).lower(),
              'G11_PRIVATE_REPO_TOKEN': ''})
     second = json.loads(warm.read_bytes())
     after = second['CRITICAL']
+    acquired = second['ACQUISITION']['ACQUIRED']
+    remaining = second['ACQUISITION'].get('WARM_REMAINING', 0)
     if (after.get('CRITICAL_CHECKPOINT_STATUS') != 'PASS' or after.get('LAST_CRITICAL_RUN_ID') != run_id
             or after.get('OPERATIONAL_DATE') != day or after.get('AUTHORITY_SHA256') != gate['AUTHORITY_SHA256']
-            or len(second['ACQUISITION']['ACQUIRED']) > slots or second['ACQUISITION'].get('WARM_REMAINING')):
+            or len(acquired) > slots or type(remaining) is not int or remaining < 0
+            or (remaining and (not handoff_enabled
+                or not 0 < remaining < slots or remaining + len(acquired) != slots))):
         raise ValueError('WARM_CHECKPOINT_OR_BUDGET')
     warm.replace(out / 'result.json')
+    if remaining:
+        _report('WARM_REMAINDER_TO_EXISTING_CONTINUATION', remaining_request_slots=remaining,
+                acquired=len(acquired), additional_publications=0)
 
 
 def _report(status, **fields):
@@ -282,7 +324,8 @@ def _restricted_collector(original, selected, stop_at, *, early_capture=False, i
                 raise ValueError('URGENT_CAPTURE_COLLECTOR_CONTRACT')
             source = source.replace(anchor, anchor+
                 '            if _urgent_handoff(self.store, task, deadline, self.client.clock(),\n'
-                '                    plan[task_index:], eligible, cancelled_days, max_requests - len(acquired)):\n'
+                '                    plan[task_index:], eligible, cancelled_days, max_requests - len(acquired),\n'
+                '                    acquired=acquired, plan=plan):\n'
                 '                urgent_remaining = max_requests - len(acquired)\n'
                 '                break\n', 1)
             source = source.replace('        task_index = 0\n',

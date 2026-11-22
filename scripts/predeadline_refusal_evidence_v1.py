@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timezone
 from threading import Thread
 from time import monotonic
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -123,7 +123,8 @@ def _response_event(context, completed_tick, response, *, failed=False):
         if not math.isfinite(duration) or duration < 0:
             return
         status = response.code if isinstance(response, HTTPError) else (
-            'TIMEOUT' if failed and isinstance(response, TimeoutError) else
+            'TIMEOUT' if failed and (isinstance(response, TimeoutError) or
+                                    isinstance(response, URLError) and isinstance(response.reason, TimeoutError)) else
             'NETWORK_ERROR' if failed else int(response.status))
         try:
             present, timing = server_timing(getattr(response, 'headers', None))

@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    # Restored immutable public workflow plus its reviewed optional dependency step.
+    ".github/workflows/g11-wild4-shadow-lock-only.yml",
+    "docs/operations-20261122-recovery.md",
     "scripts/bootstrap_after_morning.sh",
     "scripts/night_archive_continuity_v1.py",
     "scripts/test_night_archive_continuity_v1.py",
@@ -1060,8 +1063,11 @@ def main() -> int:
             fail(f"forbidden artifact type: {name}")
         # Existing OIDC workflow plus bounded authority/transport routing.
         # No prediction code or model is admitted by this larger YAML budget.
-        # Reviewed verified-checkpoint follow-up wiring adds under 1 KiB.
-        cap = 128_000 if name == ".github/workflows/g11-free-runner.yml" else 100_000
+        # Reviewed continuation admission/follow-up routing adds 169 bytes.
+        # The historical WILD4 workflow exceeds the default budget; only its
+        # bounded routing and one optional sparse checkout are admitted here.
+        cap = (128_256 if name == ".github/workflows/g11-free-runner.yml" else
+               147_000 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
         text = path.read_text(encoding="utf-8")
@@ -1086,3 +1092,4 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "special-eight-site-compat":
         sys.exit(special_eight_site_compat(pathlib.Path(sys.argv[2])))
     sys.exit(main())
+

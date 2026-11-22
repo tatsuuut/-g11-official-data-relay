@@ -10,6 +10,25 @@ from unittest.mock import patch
 import selective_alert_input_v1 as m
 
 class EvidenceTest(unittest.TestCase):
+    def test_missing_optional_module_reports_allowlisted_name_and_keeps_saved_odds(self):
+        row={**self.row,'classification':'FORMAL','deadline_at':'2099-10-13T10:45:00+09:00'}
+        source={'schema':'G11_WILD4_PUBLIC_PROJECTION_V1','date':'2026-10-13','races':[row]}
+        before=copy.deepcopy(source)
+        for name in ('g11.canonical.condition_context_transport_v1','private.token'):
+            error=ModuleNotFoundError('PRIVATE',name=name)
+            def missing(*_): raise error
+            payload,held=m.collect('/unused',source,odds_day=self.day,
+                reader=lambda *_:(self.saved,self.receipt,self.odds),context_reader=missing)
+            self.assertEqual(len(payload['records']),1)
+            self.assertNotIn('player_context',payload['records'][0])
+            self.assertEqual(payload['records'][0]['lock_sha256'],row['lock_sha256'])
+            expected={'race_key':row['race_key'],'scope':'PLAYER_CONTEXT_ONLY','reason':'ModuleNotFoundError'}
+            if name in m.PLAYER_CONTEXT_MODULES: expected['missing_module']=name
+            self.assertEqual(held,[expected])
+            self.assertNotIn('PRIVATE',json.dumps(held))
+            self.assertNotIn('private.token',json.dumps(held))
+        self.assertEqual(source,before)
+
     def test_current_probability_group_precedes_history_and_every_lock_is_retained(self):
         now = m.datetime.fromisoformat('2026-10-24T21:00:00+09:00')
         source = {'schema': 'G11_WILD4_PUBLIC_PROJECTION_V1', 'date': '2026-10-24',
@@ -149,6 +168,53 @@ class EvidenceTest(unittest.TestCase):
                 link=Path(temp)/'linked-store';link.symlink_to(root,target_is_directory=True)
                 with self.assertRaisesRegex(ValueError,'VERIFIED_SNAPSHOT_FILE'):
                     m.read_official(link,self.row['race_key'])
+
+class PinnedContextTransportTest(unittest.TestCase):
+    def setUp(self):
+        self.network=patch('socket.create_connection',side_effect=AssertionError('NETWORK_FORBIDDEN'))
+        self.network.start();self.addCleanup(self.network.stop)
+
+    def test_no_override_uses_private_runtime_contract_without_fallback(self):
+        module=types.ModuleType('g11.canonical.condition_context_transport_v1')
+        calls=[];expected={'packet':'fixture'}
+        def read(*args):calls.append(args);return expected
+        module.read_player_context=read
+        cache={}
+        with patch.dict(os.environ,{'G11_PLAYER_CONTEXT_HELPER':''}),patch.dict(sys.modules,{module.__name__:module}):
+            self.assertIs(m.read_player_context('/saved','20261122-14-03','now',cache),expected)
+        self.assertEqual(calls,[('/saved','20261122-14-03','now',cache)])
+
+    def test_exact_bytes_are_loaded_once_without_replacing_frozen_pipeline(self):
+        raw=b'def read_player_context(store, key, at, cache):\n    return {"store": store, "race": key, "at": at}\n'
+        frozen=types.ModuleType('g11.canonical.official_pipeline')
+        with tempfile.TemporaryDirectory() as temp:
+            helper=Path(temp)/'transport.py';helper.write_bytes(raw);cache={}
+            with patch.dict(os.environ,{'G11_PLAYER_CONTEXT_HELPER':str(helper)}),\
+                    patch.object(m,'PLAYER_CONTEXT_HELPER_SHA256',m.hashlib.sha256(raw).hexdigest()),\
+                    patch.dict(sys.modules,{frozen.__name__:frozen}):
+                self.assertEqual(m.read_player_context('/saved','key','now',cache),
+                    {'store':'/saved','race':'key','at':'now'})
+                helper.write_bytes(b'raise AssertionError("unverified replacement")')
+                self.assertEqual(m.read_player_context('/saved','next','later',cache)['race'],'next')
+                self.assertIs(sys.modules[frozen.__name__],frozen)
+
+    def test_mismatched_bytes_are_rejected_before_execution(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper=Path(temp)/'transport.py';helper.write_bytes(b'raise AssertionError("unverified code")')
+            with patch.dict(os.environ,{'G11_PLAYER_CONTEXT_HELPER':str(helper)}):
+                with self.assertRaisesRegex(ValueError,'CONTEXT_HELPER_SHA256'):
+                    m.read_player_context('/saved','key','now',{})
+
+    def test_missing_oversized_relative_and_symlink_helpers_are_held(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);helper=root/'transport.py';helper.write_bytes(b'x'*16_385)
+            link=root/'link.py';link.symlink_to(helper)
+            parent=root/'linked';parent.symlink_to(root,target_is_directory=True)
+            paths=[root/'missing.py',helper,link,parent/'transport.py',Path(os.path.relpath(helper))]
+            for path in paths:
+                with self.subTest(path=str(path)),patch.dict(os.environ,{'G11_PLAYER_CONTEXT_HELPER':str(path)}):
+                    with self.assertRaisesRegex(ValueError,'CONTEXT_HELPER_FILE'):
+                        m.read_player_context('/saved','key','now',{})
 
 class ProbabilityTransportTest(unittest.TestCase):
     def fixture(self, root, number=1):

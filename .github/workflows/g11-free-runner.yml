@@ -444,11 +444,14 @@ jobs:
             exit 0
           fi
           python3 scripts/predeadline_dispatch_v1.py --day "${OPERATIONAL_DATE}" --mode continuation
+          echo 'ready=true' >> "${GITHUB_OUTPUT}"
 
       - name: Resume remaining capture slots after the urgent public readback
         id: warm
         if: steps.critical.outputs.warm=='true'&&steps.critical-publish.outcome=='success'
         continue-on-error: true
+        env:
+          G11_WARM_CONTINUATION_READY: ${{steps.predeadline-chain.outputs.ready}}
         run: python3 -S scripts/predeadline_content_retry_v1.py
 
       - name: Checkout hash-locked research runtime
@@ -1043,14 +1046,6 @@ jobs:
         with:
           cache-key: g11-state-v4-published-${{steps.due.outputs.operational_date}}-${{github.run_id}}-${{github.run_attempt}}-checkpoint
           warm-day: ${{steps.warm.outcome=='success'&&steps.due.outputs.operational_date||''}}
-      - name: Handoff additional timely odds after verified state save
-        id: wild4-followup
-        if: steps.warm.outcome!='failure'&&steps.due.outputs.phase=='predeadline'&&(steps.runtime.outcome=='success'||steps.fast-lane.outputs.enabled=='true')&&steps.publication-state-verified.outputs.ready=='true'&&steps.critical.outputs.rescue!='true'&&steps.authority.outputs.rescue_bootstrap!='true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{github.token}}
-          G11_WARM_FOLLOWUP: ${{steps.warm.outcome}}
-        run: python3 scripts/predeadline_race_isolation_v1.py handoff --state-root .relay-state --operational-date '${{steps.due.outputs.operational_date}}' --early-sent '${{steps.wild4-early.outputs.sent}}'
       - name: Retry saved publication after an early delivery failure
         id: critical-retry
         if: steps.fast-lane.outputs.enabled=='true'&&(steps.critical-publish.outcome=='failure'||steps.warm.outcome=='success')&&steps.publication-state-verified.outputs.ready=='true'
@@ -1058,6 +1053,14 @@ jobs:
           CRITICAL_CHECKPOINT_VERIFIED: ${{steps.publication-state-verified.outputs.ready}}
           G11_WARM_PUBLICATION: ${{steps.warm.outcome=='success'}}
         run: flock .relay-output/critical-prepared.lock python3 -S scripts/critical_saved_publication_v1.py --use-prepared --day '${{steps.due.outputs.operational_date}}'
+      - name: Handoff additional timely odds after verified state save
+        id: wild4-followup
+        if: always()&&!cancelled()&&steps.warm.outcome!='failure'&&steps.due.outputs.phase=='predeadline'&&(steps.runtime.outcome=='success'||steps.fast-lane.outputs.enabled=='true')&&steps.publication-state-verified.outputs.ready=='true'&&steps.critical.outputs.rescue!='true'&&steps.authority.outputs.rescue_bootstrap!='true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{github.token}}
+          G11_WARM_FOLLOWUP: ${{steps.warm.outcome}}
+        run: python3 scripts/predeadline_race_isolation_v1.py handoff --state-root .relay-state --operational-date '${{steps.due.outputs.operational_date}}' --early-sent '${{steps.wild4-early.outputs.sent}}'
       - name: Publish a newly verified feed through OIDC
         if: steps.runtime.outcome=='success'&&hashFiles('.relay-output/feed.json')!=''&&steps.night-ready.outputs.allowed=='true'&&(env.G11_NIGHT_TRANSPORT_ONLY=='true'||steps.publication-state-verified.outputs.ready=='true')
         id: publish
