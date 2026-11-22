@@ -1,11 +1,19 @@
-"""Read-only evidence for official predeadline refusals. No HTTP client or retry."""
+"""Read-only response/refusal evidence. No new HTTP request, body read or retry.
+
+G11_OFFICIAL_RESPONSE describes transport only: HTTP 200 does not certify parsed
+input or a prediction LOCK. Existing refusal/ledger decisions remain separate.
+"""
+from contextlib import contextmanager
 import hashlib
 import json
+import math
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Thread
+from time import monotonic
 from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlsplit
 
 
 def emit(fields):
@@ -20,6 +28,160 @@ DIAGNOSTIC_HEADERS = (
     "CF-Ray", "X-Amz-Cf-Id", "X-Amz-Cf-Pop", "X-Request-Id",
 )
 RUN_CONTEXT_FIELDS = ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB", "RUNNER_ENVIRONMENT")
+
+
+def _split_timing(value, delimiter):
+    """Split HTTP list/parameters without treating quoted descriptions as data."""
+    result, start, quoted, escaped = [], 0, False, False
+    for index, char in enumerate(value):
+        if quoted and escaped:
+            escaped = False
+        elif quoted and char == '\\':
+            escaped = True
+        elif char == '"':
+            quoted = not quoted
+        elif char == delimiter and not quoted:
+            result.append(value[start:index].strip())
+            start = index + 1
+    if quoted or escaped:
+        return None
+    result.append(value[start:].strip())
+    return result
+
+
+def server_timing(headers):
+    """Keep only bounded, unambiguous numeric edge/origin durations in ms."""
+    if headers is None:
+        return None, {}  # No response headers were received/readable.
+    all_values = getattr(headers, 'get_all', None)
+    values = all_values('Server-Timing') if callable(all_values) else [headers.get('Server-Timing')]
+    if values is None or values == [None]:
+        return False, {}
+    if (not isinstance(values, (list, tuple)) or len(values) > 32
+            or any(not isinstance(value, str) for value in values)
+            or sum(len(value) for value in values) + max(0, len(values)-1)*2 > 4096):
+        return True, {}
+    raw, present = ', '.join(values), True
+    if (not raw.isascii()
+            or any(ord(char) < 32 or ord(char) == 127 for char in raw)):
+        return present, {}
+    metrics = _split_timing(raw, ',')
+    if metrics is None or len(metrics) > 32:
+        return present, {}
+    result, seen = {}, set()
+    for metric in metrics:
+        parts = _split_timing(metric, ';')
+        if parts is None or parts[0].lower() not in ('edge', 'origin'):
+            continue
+        name = parts[0].lower()
+        if name in seen:
+            result.pop(name, None)
+            continue
+        seen.add(name)
+        duration = [part.partition('=')[2].strip() for part in parts[1:]
+                    if part.partition('=')[0].strip().lower() == 'dur']
+        if len(duration) != 1:
+            continue
+        literal = duration[0]
+        if len(literal) >= 2 and literal[0] == literal[-1] == '"':
+            literal = literal[1:-1]
+        if not re.fullmatch(r'(?:\d+(?:\.\d+)?|\.\d+)', literal):
+            continue
+        value = float(literal)
+        if math.isfinite(value) and 0 <= value <= 86_400_000:
+            result[name] = value
+    return present, result
+
+
+def _source_from_request(request):
+    """Derive a safe public source ID; never emit a URL or arbitrary query."""
+    url = request if isinstance(request, str) else getattr(request, 'full_url', '')
+    if not isinstance(url, str) or len(url) > 512:
+        return None
+    parsed = urlsplit(url)
+    if (parsed.scheme != 'https' or parsed.netloc != 'www.boatrace.jp'
+            or parsed.fragment or parsed.path not in
+            ('/owpc/pc/race/beforeinfo', '/owpc/pc/race/odds3t')):
+        return None
+    query = parse_qs(parsed.query, keep_blank_values=True, max_num_fields=3)
+    if set(query) != {'hd', 'jcd', 'rno'} or any(len(v) != 1 for v in query.values()):
+        return None
+    day, venue, race = (query[key][0] for key in ('hd', 'jcd', 'rno'))
+    if (not re.fullmatch(r'\d{8}', day) or not re.fullmatch(r'\d{1,2}', venue)
+            or not re.fullmatch(r'\d{1,2}', race)
+            or not 1 <= int(venue) <= 24 or not 1 <= int(race) <= 12):
+        return None
+    datetime.strptime(day, '%Y%m%d')
+    return f'{parsed.path.rsplit("/", 1)[-1]}-{day}-{int(venue):02d}-{int(race):02d}'
+
+
+def _response_event(context, completed_tick, response, *, failed=False):
+    # Diagnostics cannot replace the original response/exception or inspect a body.
+    try:
+        source, started, tick = context
+        duration = (completed_tick - tick) * 1000
+        if not math.isfinite(duration) or duration < 0:
+            return
+        status = response.code if isinstance(response, HTTPError) else (
+            'TIMEOUT' if failed and isinstance(response, TimeoutError) else
+            'NETWORK_ERROR' if failed else int(response.status))
+        try:
+            present, timing = server_timing(getattr(response, 'headers', None))
+        except Exception:
+            present, timing = None, {}
+        fields = {'collector': 'relay-predeadline', 'source': source,
+                  'started': started,
+                  'headers_or_error_at': datetime.now(timezone.utc).isoformat(timespec='milliseconds'),
+                  'status': status, 'header_wait_ms': round(duration, 3),
+                  'server_timing_present': present, 'server_timing_ms': timing,
+                  'run_context': run_context()}
+        print('G11_OFFICIAL_RESPONSE=' + json.dumps(fields, sort_keys=True), flush=True)
+    except Exception:
+        pass
+
+
+@contextmanager
+def observe_responses(client, *, clock=None):
+    """Temporarily observe the existing opener; cached receipts make no event."""
+    original = getattr(client, 'opener', None)
+    if not callable(original) or getattr(original, '_g11_response_evidence', False) is True:
+        yield
+        return
+    clock = clock or monotonic
+
+    def observed(*args, **kwargs):
+        context = None
+        try:
+            request = args[0] if args else kwargs.get('url')
+            source = _source_from_request(request)
+            if source:
+                context = (source, datetime.now(timezone.utc).isoformat(timespec='milliseconds'), clock())
+        except Exception:
+            pass
+        try:
+            response = original(*args, **kwargs)
+        except Exception as exc:
+            try:
+                completed = clock()
+                if context is not None:
+                    _response_event(context, completed, exc, failed=True)
+            except Exception:
+                pass
+            raise
+        try:
+            completed = clock()
+            if context is not None:
+                _response_event(context, completed, response)
+        except Exception:
+            pass
+        return response
+
+    observed._g11_response_evidence = True
+    client.opener = observed
+    try:
+        yield
+    finally:
+        client.opener = original
 
 
 def response_metadata(headers):
