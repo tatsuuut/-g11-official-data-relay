@@ -7,6 +7,7 @@ Legacy ledgers do not call this provider. No STOP or saved prediction is edited.
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
+from importlib import import_module
 import json
 import os
 import re
@@ -238,7 +239,7 @@ class TimedProbeResponse:
 
 @contextmanager
 def durable_refusal_admission(runner):
-    from g11.canonical import official_pipeline as official
+    official = import_module('g11.canonical.official_pipeline')
     # The hook exists only in the reviewed new native policy. Today's frozen
     # source is left byte-for-byte and behavior-for-behavior unchanged.
     if not hasattr(official, 'LIVE_REFUSAL_RECOVERY_CLAIM_PROVIDER'):

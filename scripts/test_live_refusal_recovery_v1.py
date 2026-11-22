@@ -135,7 +135,7 @@ class TransportTests(unittest.TestCase):
 
     def test_context_restores_native_provider_and_original_opener(self):
         original = self.client.opener
-        with patch.dict('sys.modules', {'g11.canonical': SimpleNamespace(official_pipeline=self.official)}):
+        with patch.dict('sys.modules', {'g11.canonical.official_pipeline': self.official}):
             with self.assertRaisesRegex(RuntimeError, 'fixture'):
                 with recovery.durable_refusal_admission(self.runner):
                     self.assertIsInstance(self.official.LIVE_REFUSAL_RECOVERY_CLAIM_PROVIDER, recovery.ClaimProvider)
@@ -145,7 +145,7 @@ class TransportTests(unittest.TestCase):
 
     def test_legacy_runtime_has_no_provider_or_opener_change(self):
         original = self.client.opener
-        with patch.dict('sys.modules', {'g11.canonical': SimpleNamespace(official_pipeline=SimpleNamespace())}):
+        with patch.dict('sys.modules', {'g11.canonical.official_pipeline': SimpleNamespace()}):
             with recovery.durable_refusal_admission(self.runner):
                 self.assertIs(self.client.opener, original)
 
