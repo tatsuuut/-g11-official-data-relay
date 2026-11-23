@@ -61,6 +61,8 @@ ALLOWED_FILES = {
     "scripts/optional_display_isolation_v1.py",
     "scripts/test_optional_display_isolation_v1.py",
     "scripts/saved_morning_publication_20261109.py",
+    "scripts/saved_morning_transport_v1.py",
+    "scripts/test_saved_morning_transport_v1.py",
     "scripts/audit_saved_morning_20261109.py",
     "scripts/audit_missing_race_20261111.py",
     "docs/nov11-delivery-and-missing-race.md",
@@ -1071,7 +1073,8 @@ def main() -> int:
         # One optional post-readback stage caller adds 754 bytes; no new data.
         # The historical WILD4 workflow exceeds the default budget; only its
         # bounded routing and one optional sparse checkout are admitted here.
-        cap = (129_010 if name == ".github/workflows/g11-free-runner.yml" else
+        # Date/cache-bound saved MORNING delivery adds transport only; no prediction code.
+        cap = (131_997 if name == ".github/workflows/g11-free-runner.yml" else
                147_000 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
