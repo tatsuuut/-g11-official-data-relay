@@ -1,6 +1,7 @@
 """Replay reviewed acquisition functions with synthetic transport, never a forecast."""
 import ast
 import copy
+from contextlib import nullcontext
 from datetime import datetime,timedelta
 import hashlib
 import json
@@ -396,6 +397,7 @@ class FormalPlanTests(unittest.TestCase):
 
 class AvailabilityReceiptTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('critical_saved_publication_v1.official_input_compatibility',return_value=nullcontext()))
         self.market=VerifiedMarketTests(methodName='runTest');self.market.setUp()
         self.official=self.market.official
         root=Path(os.environ.get('G11_RETRY_SOURCE_ROOT',Path(__file__).resolve().parents[1]/'.g11-private'))
