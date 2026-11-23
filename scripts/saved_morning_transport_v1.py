@@ -23,6 +23,7 @@ def project(state, day, source, output, run_id):
     sys.path.insert(0, str(source.resolve()))
     from g11.relay import v1 as relay
     from optional_display_isolation_v1 import isolate_optional_display
+    from rescue_night_result_parser_v1 import official_input_compatibility
     store = state / 'store'
     before = relay._tree_sha(store)
     now = relay._now_jst()
@@ -42,7 +43,7 @@ def project(state, day, source, output, run_id):
         morning = relay._morning_projection(store)
         publication = relay.current_growth_p3.load_locked_publication(store, morning, now)
         require(publication.get('READ_ONLY') is True, 'SAVED_MORNING_READ_ONLY')
-        with isolate_optional_display(relay):
+        with official_input_compatibility(), isolate_optional_display(relay):
             feed = relay.build_feed(store, run_id=int(run_id), github_sha=authority['runtime_source_sha'],
                                    current_p3_publication=publication, relay_phase='morning')
     finally:
