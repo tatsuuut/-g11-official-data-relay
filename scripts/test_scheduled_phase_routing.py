@@ -1,5 +1,6 @@
 """Run the production shell resolver against delayed cron and day boundaries."""
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -155,7 +156,7 @@ class ScheduledPhaseRoutingTests(unittest.TestCase):
     def test_live_rerun_cannot_reuse_runtime_cache_identity(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.phase == 'predeadline' && github.run_attempt != '1')",workflow)
-        retry=workflow.split('  reroute-predeadline-rerun:\n',1)[1]
+        retry=re.split(r'\n  [A-Za-z0-9_-]+:\n',workflow.split('  reroute-predeadline-rerun:\n',1)[1],maxsplit=1)[0]
         self.assertIn('--mode rerun',retry)
         self.assertIn("github.run_attempt != '1'",retry)
         self.assertNotIn('.relay-state',retry)
