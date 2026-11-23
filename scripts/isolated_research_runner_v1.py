@@ -257,8 +257,43 @@ def apply_paired_saved_inputs(verified_bundle,state,day):
               if k.startswith(prefix) or isolation.fixed_mashiro_member(k,day) or k==report}
     return isolation.apply_files({**verified_bundle,'members':selected},state,day)
 
+def generic_publication_ready(state, feed, day):
+    """Admit only a complete display pair bound to its saved research state.
+
+    This is a readiness check, not publication success. The authenticated
+    publisher still rechecks its normal contract and the app readback.
+    """
+    from deme_research_delivery_v1 import RELEASE, compact, sha
+    projection = feed.parent/'deme-discovery-public.json'
+    try:
+        if (not feed.is_file() or feed.is_symlink() or feed.stat().st_size > 40000000
+                or not projection.is_file() or projection.is_symlink()
+                or projection.stat().st_size > 384000):
+            return False
+        value = json.loads(feed.read_bytes())
+        public = json.loads(projection.read_bytes())
+        runtime = public.get('runtime') or {}
+        if (value.get('status') != 'PASS' or value.get('operational_date_jst') != day
+                or value.get('stage') not in ('MORNING', 'PREDEADLINE')
+                or not isinstance(value.get('races'), list) or not value['races']
+                or value.get('same_day_rescue')
+                or public.get('schema') != 'G11_P3_DEME_DISCOVERY_V1'
+                or public.get('available') is not True
+                or public.get('production_mutated') is not False
+                or public.get('automatic_adoption') is not False
+                or runtime.get('implementation') != RELEASE
+                or runtime.get('operational_date') != day):
+            return False
+        canonical = json.loads((state/'store/shadow/original-display/v2/deme-discovery.json').read_bytes())
+        digest = sha(compact({k:v for k,v in canonical.items() if k != 'state_integrity_sha256'}))
+        return canonical.get('state_integrity_sha256') == public.get('source_state_sha256') == digest
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
 def run_research(state, source, deme_source, previous, destination, day, source_key, feed,
                  *, fixed_source=Path('.g11-mashiro-fixed'),paired_source=Path('.g11-mashiro-bridge')):
+    outputs(publication_ready=False)
     authority,binding = authority_binding(state,day,source)
     sources = isolation.core_sources(state,day)
     seeds = {name:isolation.digest(path) for name,path in isolation.research_files(state,day).items()}
@@ -290,10 +325,17 @@ def run_research(state, source, deme_source, previous, destination, day, source_
     result = {'mode':'PAIRED_ONLY_UNRELATED_SEED_CONFLICT'} if paired_only else {'mode':'CLOSE_ONLY'} if closing else capture_only_research(state,source,day)
     result['fixed_mashiro'] = fixed
     result['paired_mashiro']=paired or paired_mashiro_research(state,source,paired_source,fixed_source,day,source_key)
+    publication_ready = False
     if not closing and not paired_only:
         try:
+            # A successful current recovery must create both derived files.
+            # A partial failure cannot reuse a previous invocation's display.
+            feed.unlink(missing_ok=True)
+            (feed.parent/'deme-discovery-public.json').unlink(missing_ok=True)
             from saved_deme_recovery_v1 import recover
             result['deme'] = recover(state,deme_source,day,feed)['readback']
+            publication_ready = (result['deme'] == 'PASS'
+                and generic_publication_ready(state,feed,day))
         except Exception as exc:
             result['deme'] = 'UNAVAILABLE:'+type(exc).__name__
     isolation.require(isolation.protected_metadata(state,day) == before
@@ -301,10 +343,12 @@ def run_research(state, source, deme_source, previous, destination, day, source_
     authority.verify_runtime(state,day,source)
     value = isolation.export_bundle(state,destination,day,binding,source_key,seeds,sources,closed=closing)
     isolation.read_bundle(destination,day)
-    outputs(no_change=False,closing=closing,bundle_sha=value['bundle_sha256'],
+    outputs(no_change=False,closing=closing,publication_ready=publication_ready,
+            bundle_sha=value['bundle_sha256'],
             fixed_archive_ready=closing and fixed.get('NIGHT_RESULTS_COMPLETE') is True,
             fixed_protocol_sha=fixed.get('PROTOCOL_SHA256',''))
     print('G11_ISOLATED_RESEARCH='+json.dumps({'day':day,'closed':closing,
+        'publication_ready':publication_ready,
         'members':len(value['members']),'held_late_count':value['held_late_count'],
         'canonical_state_written':False,'result':result},sort_keys=True),flush=True)
 
@@ -425,6 +469,8 @@ def main():
     if a.mode=='publish':
         if datetime.now(isolation.JST) >= max(isolation.plan_deadlines(state,a.day).values()):
             print('G11_ISOLATED_RESEARCH_PUBLICATION=CLOSED_WINDOW'); return
+        isolation.require(generic_publication_ready(state,a.feed.resolve(),a.day),
+                          'RESEARCH_PUBLICATION_INPUT_NOT_READY')
         from deme_research_delivery_v1 import publish_persisted_live
         for attempt in range(3):
             try:

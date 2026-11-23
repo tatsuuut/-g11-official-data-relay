@@ -9,6 +9,8 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/postprocess_delivery_v1.py",
+    "scripts/test_postprocess_delivery_v1.py",
     "scripts/live_refusal_recovery_v1.py",
     "scripts/test_live_refusal_recovery_v1.py",
     # Restored immutable public workflow plus its reviewed optional dependency step.
@@ -1066,9 +1068,10 @@ def main() -> int:
         # Existing OIDC workflow plus bounded authority/transport routing.
         # No prediction code or model is admitted by this larger YAML budget.
         # Reviewed continuation admission/follow-up routing adds 169 bytes.
+        # One optional post-readback stage caller adds 754 bytes; no new data.
         # The historical WILD4 workflow exceeds the default budget; only its
         # bounded routing and one optional sparse checkout are admitted here.
-        cap = (128_256 if name == ".github/workflows/g11-free-runner.yml" else
+        cap = (129_010 if name == ".github/workflows/g11-free-runner.yml" else
                147_000 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")

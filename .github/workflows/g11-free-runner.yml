@@ -1803,6 +1803,13 @@ jobs:
             exit 1
           fi
           printf 'feed_sha=%s\n' "${feed_sha}" >> "${GITHUB_OUTPUT}"
+      - name: Resume one saved Site postprocessing stage
+        if: always()&&!cancelled()&&steps.due.outputs.phase=='predeadline'&&steps.publication-state-verified.outputs.ready=='true'&&steps.authority.outputs.frozen=='true'&&steps.authority.outputs.rescue_bootstrap!='true'&&(steps.critical-publish.outcome=='success'||steps.critical-retry.outcome=='success'||steps.publish.outcome=='success')
+        continue-on-error: true
+        env:
+          POSTPROCESS_CHECKPOINT_VERIFIED: ${{steps.publication-state-verified.outputs.ready}}
+          POSTPROCESS_AUTHORITY_SHA: ${{steps.authority.outputs.authority_sha256}}
+        run: python3 -S scripts/postprocess_delivery_v1.py --state-root .relay-state --day '${{steps.due.outputs.operational_date}}'
       - name: P3 research update after LIVE publication
         if: >-
           always() && !cancelled() && steps.deme-source.outcome=='success' &&
