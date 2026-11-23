@@ -174,9 +174,9 @@ class TransportTests(unittest.TestCase):
             self.assertNotIn('--retry', command)
             self.assertNotIn('--data-binary', command)
             self.assertEqual(command[command.index('--request') + 1], 'POST')
-            self.assertEqual(command[command.index('--max-time') + 1], '20')
+            self.assertEqual(command[command.index('--max-time') + 1], '30')
             self.assertIn('fixture-credential', kwargs['input'])
-            self.assertLessEqual(kwargs['timeout'], 25)
+            self.assertLessEqual(kwargs['timeout'], 35)
             target = Path(command[command.index('--output') + 1])
             target.write_text(json.dumps({'date': DAY, 'status': 'COMPLETE',
                 'processed': None, 'pending': []}))

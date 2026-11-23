@@ -26,7 +26,8 @@ JST = timezone(timedelta(hours=9))
 STAGES = {'PRIOR_NIGHT', 'LIFECYCLE', 'PROMOTION_ABEKEN', 'PROMOTION_WILD', 'INTRADAY_RESULTS'}
 STATUSES = {'COMPLETE', 'PENDING', 'BUSY', 'HELD'}
 MAX_BODY = 8192
-NETWORK_WALL_SECONDS = 25
+# Allow the unchanged 24-second result refresh budget plus OIDC/DB overhead.
+NETWORK_WALL_SECONDS = 35
 
 
 def compact(value):
@@ -132,12 +133,12 @@ def post_stage(day, token, runner=subprocess.run):
     """
     with tempfile.TemporaryDirectory() as temporary:
         target = Path(temporary) / 'response.json'
-        command = ['curl', '--silent', '--show-error', '--max-time', '20',
+        command = ['curl', '--silent', '--show-error', '--max-time', '30',
             '--max-filesize', str(MAX_BODY), '--config', '-', '--request', 'POST',
             '--output', str(target), '--write-out', '%{http_code}',
             ORIGIN + '/api/g11-postprocess?' + urlencode({'date': day})]
         config = 'header = ' + json.dumps('Authorization: Bearer ' + token) + '\n'
-        result = runner(command, input=config, text=True, capture_output=True, timeout=21)
+        result = runner(command, input=config, text=True, capture_output=True, timeout=31)
         require(result.returncode == 0, 'POST_RESPONSE_UNVERIFIED')
         require(result.stdout == '200', 'POST_HTTP_UNVERIFIED')
         return read_json(target)
