@@ -18,6 +18,7 @@ import re
 import sys
 import time
 from urllib.request import Request, urlopen
+from rescue_night_result_parser_v1 import official_input_compatibility
 
 JST = timezone(timedelta(hours=9))
 INDEPENDENT_LIVE_FROM = '2026-11-15'
@@ -357,7 +358,7 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
     # Reopen saved receipts under the same reviewed admission window used to
     # capture them. Unknown source versions keep their original fail-closed
     # gates; source bytes, MORNING plans, LOCKs and cutoffs remain unchanged.
-    with receipt_window, isolate_optional_display(relay):
+    with official_input_compatibility(), receipt_window, isolate_optional_display(relay):
         morning = relay._morning_projection(store)
         publication = publisher.load_locked_publication(store, morning, now)
         require(publication.get('READ_ONLY') is True, 'EARLY_PUBLICATION_READ_ONLY_REQUIRED')

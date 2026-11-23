@@ -1,6 +1,6 @@
 """Failure tests for the saved-only early publication boundary."""
 import copy
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, nullcontext, contextmanager
 from datetime import datetime
 import io
 import json
@@ -24,6 +24,7 @@ NOW = datetime.fromisoformat(DAY + 'T20:31:10+09:00')
 
 class EarlyPublicationTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(early,'official_input_compatibility',return_value=nullcontext()))
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name); self.out = self.root / 'critical-feed.json'
         self.authority = {'authority_sha256': 'a'*64, 'runtime_source_sha': 'b'*40}
@@ -54,6 +55,23 @@ class EarlyPublicationTests(unittest.TestCase):
         self.assertEqual(4, self.module.verify_locks.call_count)
         self.assertEqual('b'*40, self.relay.build_feed.call_args.kwargs['github_sha'])
         self.assertEqual('predeadline', self.relay.build_feed.call_args.kwargs['relay_phase'])
+
+    def test_saved_projection_uses_the_same_official_parser_context_as_capture(self):
+        active=[]
+        @contextmanager
+        def compatibility():
+            active.append(True)
+            try:yield
+            finally:active.pop()
+        original=self.relay.build_feed.return_value
+        def read_saved(*args,**kwargs):
+            if not active:raise RuntimeError('NIGHT_SG_OFFICIAL_B_QUARANTINE_BINDING')
+            return original
+        self.relay.build_feed.side_effect=read_saved
+        with patch.object(early,'official_input_compatibility',side_effect=compatibility):
+            self.assertTrue(self.project())
+        self.assertEqual(active,[])
+        self.assertEqual(self.saved,json.loads(self.out.read_text())['races'][0])
 
     def test_real_projector_import_needs_no_optional_dependencies(self):
         source = Path(__file__).resolve().parents[1] / '.g11-private'
@@ -933,6 +951,7 @@ class NativeIndependentLiveStageTests(unittest.TestCase):
     official request, production checkpoint or external publication is run.
     """
     def setUp(self):
+        self.enterContext(patch.object(early,'official_input_compatibility',return_value=nullcontext()))
         import ast
         import __future__
         import dataclasses

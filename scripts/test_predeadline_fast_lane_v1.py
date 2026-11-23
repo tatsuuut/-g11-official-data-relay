@@ -1,7 +1,7 @@
 """Future activation, immutable state, failed delivery and cycle routing."""
 import json
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
@@ -30,6 +30,7 @@ class FastCycleTests(TestCase):
             self.assertFalse(fast.enabled(day, phase, frozen, rescue, now))
 
     def setUp(self):
+        self.enterContext(patch.object(publication,'official_input_compatibility',return_value=nullcontext()))
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.metadata = {'OPERATIONAL_DATE_JST': DAY, 'MORNING_COMPLETE': True,
