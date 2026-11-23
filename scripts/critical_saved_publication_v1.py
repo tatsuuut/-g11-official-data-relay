@@ -253,6 +253,68 @@ def independent_live_projector(relay, store, day, morning, publication):
     return adapted
 
 
+def completed_night_publication(state, day, authority, implementation, now):
+    """Skip stale LIVE delivery only for this authority's immutable NIGHT receipt.
+
+    This is a saved-proof check, not an app GET or a NIGHT regeneration. The
+    retained reader re-verifies sources, accounting, phase bindings and LOCKs.
+    Missing proof keeps the existing PREDEADLINE stage gate in force.
+    """
+    root = state / 'daily-runtime' / day
+    receipt_path = root / 'daily-operation-complete.json'
+    if not receipt_path.exists():
+        return False
+    require(receipt_path.is_file() and not receipt_path.is_symlink()
+            and receipt_path.stat().st_size <= 64000,
+            'EARLY_PUBLICATION_NIGHT_RECEIPT_FILE')
+    receipt = json.loads(receipt_path.read_bytes())
+    require(type(receipt) is dict, 'EARLY_PUBLICATION_NIGHT_RECEIPT_SHAPE')
+    unsigned = dict(receipt)
+    digest = unsigned.pop('receipt_sha256', None)
+    require(digest == implementation.digest(implementation.canonical(unsigned)),
+            'EARLY_PUBLICATION_NIGHT_RECEIPT_HASH')
+    checkpoint = implementation.read_checkpoint(state, day)
+    require(receipt.get('schema') == 'G11_DAILY_SITE_DELIVERY_RECEIPT_V1'
+            and receipt.get('operational_date_jst') == day and receipt.get('phase') == 'NIGHT'
+            and receipt.get('authority_sha256') == authority['authority_sha256']
+            and receipt.get('runtime_source_sha') == authority['runtime_source_sha']
+            and receipt.get('canonical_feed_sha256') == checkpoint['feed_sha256']
+            and receipt.get('checkpoint_sha256') == checkpoint['checkpoint_sha256']
+            and receipt.get('http_success') is True and receipt.get('site_get_readback') == 'PASS'
+            and receipt.get('atomic_transaction') == 'PASS'
+            and receipt.get('daily_operation_complete') == 'PASS'
+            and type(receipt.get('races')) is int and receipt['races'] > 0
+            and receipt['races'] == receipt.get('results') == checkpoint['races']
+            and receipt.get('pending') == checkpoint['pending'] == 0
+            and all(re.fullmatch(r'[0-9a-f]{64}', str(receipt.get(key, '')))
+                    for key in ('site_payload_sha256', 'site_get_sha256',
+                                'night_transaction_id', 'manifest_sha256')),
+            'EARLY_PUBLICATION_NIGHT_RECEIPT_BINDING')
+    gate = {'DAILY_AUTHORITY_READBACK': 'PASS', 'MORNING_AUTHORITY_MATCH': 'PASS',
+            'PREDEADLINE_AUTHORITY_MATCH': 'PASS', 'NIGHT_AUTHORITY_MATCH': 'PASS',
+            'RESULTS': checkpoint['races'], 'RACES': checkpoint['races'], 'PENDING': 0,
+            'MORNING_LOCK_MUTATION': 0, 'PREDEADLINE_LOCK_MUTATION': 0,
+            'PREDICTION_RECALCULATION': 0, 'FINANCE_VERIFIED': 'PASS',
+            'IMMUTABLE_NIGHT_CHECKPOINT': 'PASS', 'ATOMIC_TRANSACTION': 'PASS',
+            'SITE_GET_READBACK': 'PASS'}
+    require(receipt.get('completion_gate') == gate,
+            'EARLY_PUBLICATION_NIGHT_COMPLETION_GATE')
+    feed = json.loads((root / 'night-feed.json').read_bytes())
+    rows = feed.get('races')
+    require(feed.get('operational_date_jst') == day and feed.get('stage') == 'NIGHT'
+            and feed.get('status') == 'PASS'
+            and feed.get('daily_runtime') == implementation.feed_binding(authority, 'NIGHT')
+            and feed.get('source', {}).get('github_sha') == authority['runtime_source_sha']
+            and type(rows) is list and len(rows) == checkpoint['races'],
+            'EARLY_PUBLICATION_NIGHT_FEED_BINDING')
+    deadlines = [datetime.fromisoformat(row['deadline_jst']) for row in rows]
+    require(all(deadline.utcoffset() == timedelta(hours=9)
+                and deadline.date().isoformat() == day and deadline <= now
+                for deadline in deadlines), 'EARLY_PUBLICATION_NIGHT_FUTURE_RACE')
+    print('G11_EARLY_PUBLICATION=SKIPPED_VERIFIED_COMPLETED_NIGHT', flush=True)
+    return True
+
+
 def project_saved(state, day, run_id, source, output, *, authority_module=None,
                   relay=None, publisher=None, now=None):
     now = now or datetime.now(JST)
@@ -280,6 +342,8 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
             'EARLY_PUBLICATION_AUTHORITY_BINDING')
     for phase in ('MORNING', 'PREDEADLINE'):
         authority_module.verify_locks(state, day, phase, exact=True)
+    if completed_night_publication(state, day, authority, authority_module, now):
+        return False
     if relay is None:
         sys.path.insert(0, str(source))
         from g11.relay import v1 as relay
@@ -408,7 +472,7 @@ def main():
         ready = project_saved(root / '.relay-state', args.day, os.environ['GITHUB_RUN_ID'],
                               root / '.g11-private', output)
     if not ready:
-        print('G11_EARLY_PUBLICATION=NO_NEW_LOCKS')
+        print('G11_EARLY_PUBLICATION=NO_LIVE_PUBLICATION_REQUIRED')
         return
     request = Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' +
         os.environ['G11_OIDC_AUDIENCE'], headers={

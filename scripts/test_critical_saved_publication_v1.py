@@ -110,6 +110,138 @@ class EarlyPublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'FEED_BINDING'): self.project()
         self.assertFalse(self.out.exists())
 
+    def completed_night(self):
+        root = self.root / 'daily-runtime' / DAY
+        root.mkdir(parents=True)
+        self.module.canonical = lambda value: json.dumps(value, ensure_ascii=False,
+            sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+        self.module.digest = lambda raw: early.hashlib.sha256(raw).hexdigest()
+        checkpoint = {'feed_sha256': 'c'*64, 'checkpoint_sha256': 'd'*64,
+                      'races': 1, 'results': 1, 'pending': 0}
+        self.module.read_checkpoint = Mock(return_value=checkpoint)
+        feed = {'operational_date_jst': DAY, 'stage': 'NIGHT', 'status': 'PASS',
+                'daily_runtime': self.module.feed_binding(self.authority, 'NIGHT'),
+                'source': {'github_sha': self.authority['runtime_source_sha']},
+                'races': [{'key': '20261024-12-12', 'deadline_jst': DAY+'T20:30:00+09:00'}]}
+        (root / 'night-feed.json').write_text(json.dumps(feed))
+        receipt = {'schema': 'G11_DAILY_SITE_DELIVERY_RECEIPT_V1',
+            'operational_date_jst': DAY, 'phase': 'NIGHT', **self.authority,
+            'canonical_feed_sha256': checkpoint['feed_sha256'],
+            'checkpoint_sha256': checkpoint['checkpoint_sha256'],
+            'site_payload_sha256': 'e'*64, 'site_get_sha256': 'f'*64,
+            'night_transaction_id': '1'*64, 'manifest_sha256': '2'*64,
+            'http_success': True, 'site_get_readback': 'PASS', 'atomic_transaction': 'PASS',
+            'daily_operation_complete': 'PASS', 'results': 1, 'races': 1, 'pending': 0,
+            'completion_gate': {'DAILY_AUTHORITY_READBACK': 'PASS', 'MORNING_AUTHORITY_MATCH': 'PASS',
+                'PREDEADLINE_AUTHORITY_MATCH': 'PASS', 'NIGHT_AUTHORITY_MATCH': 'PASS',
+                'RESULTS': 1, 'RACES': 1, 'PENDING': 0, 'MORNING_LOCK_MUTATION': 0,
+                'PREDEADLINE_LOCK_MUTATION': 0, 'PREDICTION_RECALCULATION': 0,
+                'FINANCE_VERIFIED': 'PASS', 'IMMUTABLE_NIGHT_CHECKPOINT': 'PASS',
+                'ATOMIC_TRANSACTION': 'PASS', 'SITE_GET_READBACK': 'PASS'}}
+        self.write_night_receipt(receipt)
+        return root, receipt
+
+    def write_night_receipt(self, receipt):
+        unsigned = {k: v for k, v in receipt.items() if k != 'receipt_sha256'}
+        receipt = {**unsigned, 'receipt_sha256': self.module.digest(self.module.canonical(unsigned))}
+        path = self.root / 'daily-runtime' / DAY / 'daily-operation-complete.json'
+        path.write_text(json.dumps(receipt))
+        return path
+
+    def test_verified_completed_night_skips_stale_live_without_projection_or_transport(self):
+        root, _ = self.completed_night()
+        before = {path.name: path.read_bytes() for path in root.iterdir()}
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertFalse(self.project())
+        self.module.read_checkpoint.assert_called_once_with(self.root, DAY)
+        self.relay.build_feed.assert_not_called()
+        self.publisher.load_locked_publication.assert_not_called()
+        self.assertFalse(self.out.exists())
+        self.assertEqual(before, {path.name: path.read_bytes() for path in root.iterdir()})
+        self.assertIn('SKIPPED_VERIFIED_COMPLETED_NIGHT', output.getvalue())
+
+    def test_completed_night_uses_native_checkpoint_hash_and_lock_verifier(self):
+        from daily_runtime_bootstrap_v1 import module
+        source = Path(__file__).resolve().parents[1] / '.g11-private/g11/relay/daily_runtime_authority_v1.py'
+        if not source.is_file():
+            self.skipTest('retained authority reader is exercised in the private contract gate')
+        implementation = module(source)
+        root, receipt = self.completed_night()
+        lock = self.root / 'original-lock.bin'; lock.write_bytes(b'original saved LOCK')
+        inventory = lambda: {'original-lock.bin': implementation.digest(lock.read_bytes())}
+        night = self.root / 'store/snapshots/night'; night.mkdir(parents=True)
+        for name in ('official-day-results', 'workbook-ledger-projection'):
+            (night / (name+'.json')).write_text('{}')
+        checkpoint = {'schema': implementation.CHECKPOINT_SCHEMA, 'operational_date_jst': DAY,
+            'authority_sha256': self.authority['authority_sha256'], 'immutable': True,
+            'races': 1, 'results': 1, 'pending': 0, 'finance_verified': True,
+            'morning_lock_mutated': False, 'predeadline_lock_mutated': False,
+            'prediction_recalculated': False,
+            'feed_sha256': implementation.digest((root/'night-feed.json').read_bytes()),
+            'official_source_files': {'result-k': 'verified'},
+            'official_results_sha256': implementation.digest((night/'official-day-results.json').read_bytes()),
+            'night_projection_sha256': implementation.digest((night/'workbook-ledger-projection.json').read_bytes())}
+        for phase in ('morning', 'predeadline'):
+            checkpoint[phase+'_lock_sha256'] = implementation.digest(implementation.canonical(inventory()))
+            checkpoint[phase+'_bindings_sha256'] = implementation.digest(implementation.canonical([]))
+        checkpoint['checkpoint_sha256'] = implementation.digest(implementation.canonical(checkpoint))
+        (root/'night-checkpoint.json').write_bytes(implementation.canonical(checkpoint))
+        receipt.update(canonical_feed_sha256=checkpoint['feed_sha256'],
+                       checkpoint_sha256=checkpoint['checkpoint_sha256'])
+        self.write_night_receipt(receipt)
+        with patch.object(implementation, 'load', return_value=self.authority), \
+             patch.object(implementation, 'official_sources', return_value={'result-k': 'verified'}), \
+             patch.object(implementation, 'verify_locks', side_effect=lambda *a, **k: inventory()), \
+             patch.object(implementation, 'bindings', return_value=[]), \
+             patch.object(implementation, 'feed_binding', self.module.feed_binding), \
+             redirect_stdout(io.StringIO()):
+            self.assertTrue(early.completed_night_publication(self.root, DAY,
+                self.authority, implementation, NOW))
+            lock.write_bytes(b'changed LOCK')
+            with self.assertRaisesRegex(RuntimeError, 'NIGHT_CHECKPOINT_LOCK_HASH_MISMATCH'):
+                early.completed_night_publication(self.root, DAY, self.authority, implementation, NOW)
+
+    def test_completed_night_must_have_same_authority_checkpoint_and_complete_receipt(self):
+        _, receipt = self.completed_night()
+        for key, value in [('authority_sha256', '3'*64), ('runtime_source_sha', '4'*40),
+                           ('canonical_feed_sha256', '5'*64), ('checkpoint_sha256', '6'*64),
+                           ('site_get_readback', 'PARTIAL'), ('http_success', False),
+                           ('phase', 'PREDEADLINE'), ('pending', 1), ('races', 2),
+                           ('completion_gate', {})]:
+            with self.subTest(key=key):
+                self.write_night_receipt({**receipt, key: value})
+                with self.assertRaisesRegex(RuntimeError, 'NIGHT_'):
+                    self.project()
+        self.relay.build_feed.assert_not_called()
+        self.assertFalse(self.out.exists())
+
+    def test_completed_night_corrupt_receipt_or_changed_immutable_checkpoint_cannot_skip(self):
+        root, receipt = self.completed_night()
+        path = root / 'daily-operation-complete.json'
+        saved = json.loads(path.read_bytes()); saved['site_get_readback'] = 'PARTIAL'
+        path.write_text(json.dumps(saved))
+        with self.assertRaisesRegex(RuntimeError, 'NIGHT_RECEIPT_HASH'):
+            self.project()
+        self.write_night_receipt(receipt)
+        self.module.read_checkpoint.side_effect = RuntimeError('NIGHT_CHECKPOINT_LOCK_HASH_MISMATCH')
+        with self.assertRaisesRegex(RuntimeError, 'NIGHT_CHECKPOINT_LOCK_HASH_MISMATCH'):
+            self.project()
+        self.assertFalse(self.out.exists())
+
+    def test_completed_night_never_suppresses_future_races_or_an_unpublished_night(self):
+        root, receipt = self.completed_night()
+        feed_path = root / 'night-feed.json'
+        feed = json.loads(feed_path.read_bytes())
+        feed['races'][0]['deadline_jst'] = DAY+'T20:32:00+09:00'
+        feed_path.write_text(json.dumps(feed))
+        with self.assertRaisesRegex(RuntimeError, 'NIGHT_FUTURE_RACE'):
+            self.project()
+        (root / 'daily-operation-complete.json').unlink()
+        self.relay.build_feed.return_value['stage'] = 'NIGHT'
+        with self.assertRaisesRegex(RuntimeError, 'EARLY_PUBLICATION_FEED_BINDING'):
+            self.project()
+        self.assertFalse(self.out.exists())
+
     def test_workflow_keeps_persistence_and_handoff_before_fast_publication(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root/'.github/workflows/g11-free-runner.yml').read_text()

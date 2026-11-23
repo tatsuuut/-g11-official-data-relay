@@ -211,4 +211,124 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("steps.research-night.outputs.waiting!='true'",primary)
 
 
+class GenericPublicationReadinessTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name);self.state=self.root/'state';self.state.mkdir()
+        self.feed=self.root/'display/feed.json'
+        self.day='2026-11-23'
+        self.now=datetime.fromisoformat(self.day+'T11:00:00+09:00')
+        self.deadline=self.now+timedelta(hours=1)
+        self.canonical={'observations':{'saved':'unchanged'}}
+        from deme_research_delivery_v1 import RELEASE,compact,sha
+        digest=sha(compact(self.canonical));self.canonical['state_integrity_sha256']=digest
+        self.canonical_path=self.state/'store/shadow/original-display/v2/deme-discovery.json'
+        self.canonical_path.parent.mkdir(parents=True);self.canonical_path.write_text(json.dumps(self.canonical))
+        self.value={'status':'PASS','stage':'PREDEADLINE','operational_date_jst':self.day,
+                    'races':[{'key':'20261123-14-01'}]}
+        self.public={'schema':'G11_P3_DEME_DISCOVERY_V1','available':True,
+            'production_mutated':False,'automatic_adoption':False,'source_state_sha256':digest,
+            'runtime':{'implementation':RELEASE,'operational_date':self.day}}
+        self.previous=self.root/'previous';self.previous.mkdir()
+        self.paired=self.root/'paired'
+        observer=self.paired/'g11/research/mashiro_p3_bridge_v1/observer.py'
+        observer.parent.mkdir(parents=True);observer.write_text('# test observer')
+
+    def write_pair(self):
+        self.feed.parent.mkdir(parents=True,exist_ok=True)
+        self.feed.write_text(json.dumps(self.value))
+        (self.feed.parent/'deme-discovery-public.json').write_text(json.dumps(self.public))
+
+    def run_case(self, *, paired_only=False, recover=None):
+        from contextlib import ExitStack
+        import saved_deme_recovery_v1 as saved
+        if paired_only:(self.previous/'manifest.json').write_text('{}')
+        authority=SimpleNamespace(verify_runtime=Mock())
+        with ExitStack() as stack:
+            out=stack.enter_context(patch.object(runner,'outputs'))
+            stack.enter_context(patch.object(runner,'authority_binding',return_value=(authority,BINDING)))
+            stack.enter_context(patch.object(data,'core_sources',return_value={}))
+            stack.enter_context(patch.object(data,'research_files',return_value={}))
+            stack.enter_context(patch.object(data,'protected_metadata',return_value={'protected':'unchanged'}))
+            stack.enter_context(patch.object(data,'plan_deadlines',return_value={'race':self.deadline}))
+            stack.enter_context(patch.object(data,'read_bundle',return_value={'closed':False}))
+            stack.enter_context(patch.object(data,'validate_source'))
+            stack.enter_context(patch.object(data,'apply_files',side_effect=ValueError('RESEARCH_SEED_CONFLICT') if paired_only else None))
+            stack.enter_context(patch.object(runner,'apply_paired_saved_inputs'))
+            stack.enter_context(patch.object(runner,'fixed_mashiro_research',return_value={'CHANGED':False}))
+            stack.enter_context(patch.object(runner,'paired_mashiro_research',return_value={'CHANGED':True}))
+            capture=stack.enter_context(patch.object(runner,'capture_only_research',return_value={}))
+            stack.enter_context(patch.object(data,'export_bundle',return_value={'bundle_sha256':'c'*64,'members':{},'held_late_count':0}))
+            stack.enter_context(patch.object(runner,'datetime',SimpleNamespace(now=lambda tz:self.now)))
+            recovery=stack.enter_context(patch.object(saved,'recover',side_effect=recover))
+            before=self.canonical_path.read_bytes()
+            runner.run_research(self.state,self.root,self.root,self.previous,self.root/'export',
+                self.day,'g11-state-v4-critical-'+self.day+'-42',self.feed,paired_source=self.paired)
+            self.assertEqual(before,self.canonical_path.read_bytes())
+        return out,recovery,capture
+
+    def test_complete_current_recovery_enables_only_the_generic_display(self):
+        def recover(*args):self.write_pair();return {'readback':'PASS'}
+        out,recovery,capture=self.run_case(recover=recover)
+        recovery.assert_called_once();capture.assert_called_once()
+        self.assertFalse(out.call_args_list[0].kwargs['publication_ready'])
+        self.assertTrue(out.call_args.kwargs['publication_ready'])
+        self.assertFalse(out.call_args.kwargs['closing'])
+
+    def test_paired_only_does_not_use_even_a_valid_stale_generic_pair(self):
+        self.write_pair()
+        out,recovery,capture=self.run_case(paired_only=True)
+        recovery.assert_not_called();capture.assert_not_called()
+        self.assertFalse(out.call_args.kwargs['publication_ready'])
+        self.assertFalse(out.call_args.kwargs['no_change'])
+
+    def test_partial_failed_recovery_cannot_reuse_stale_projection(self):
+        self.write_pair()
+        def recover(*args):
+            self.feed.write_text(json.dumps(self.value))
+            raise ValueError('DEME_RECOVERY_SAVED_READBACK')
+        out,recovery,_=self.run_case(recover=recover)
+        self.assertFalse(out.call_args.kwargs['publication_ready'])
+        self.assertFalse((self.feed.parent/'deme-discovery-public.json').exists())
+
+    def test_pass_without_both_outputs_is_not_publication_ready(self):
+        for missing in ('feed','projection'):
+            with self.subTest(missing=missing):
+                def recover(*args):
+                    self.write_pair()
+                    (self.feed if missing=='feed' else self.feed.parent/'deme-discovery-public.json').unlink()
+                    return {'readback':'PASS'}
+                out,_,_=self.run_case(recover=recover)
+                self.assertFalse(out.call_args.kwargs['publication_ready'])
+
+    def test_wrong_day_schema_runtime_or_state_digest_is_not_ready(self):
+        for target,key,value in (
+            (self.value,'operational_date_jst','2026-11-22'),
+            (self.value,'stage','NIGHT'),
+            (self.public,'schema','OTHER'),
+            (self.public['runtime'],'operational_date','2026-11-22'),
+            (self.public,'source_state_sha256','d'*64),
+            (self.public,'production_mutated',True)):
+            with self.subTest(key=key):
+                old=target[key];target[key]=value;self.write_pair()
+                self.assertFalse(runner.generic_publication_ready(self.state,self.feed,self.day))
+                target[key]=old
+        self.write_pair()
+        self.assertTrue(runner.generic_publication_ready(self.state,self.feed,self.day))
+        self.canonical['observations']['saved']='tampered'
+        self.canonical_path.write_text(json.dumps(self.canonical))
+        self.assertFalse(runner.generic_publication_ready(self.state,self.feed,self.day))
+
+    def test_only_generic_workflow_publication_requires_readiness(self):
+        root=Path(__file__).resolve().parents[1]
+        text=(root/'.github/workflows/g11-isolated-live-research.yml').read_text()
+        generic=text.split('name: Publish only the separate research display',1)[1].split('      - name:',1)[0]
+        self.assertIn("steps.research.outputs.publication_ready=='true'",generic)
+        for name in ('Publish the independent fixed-study app display after verified persistence',
+                     'Publish the isolated same-point Mashiro and P3 comparison'):
+            step=text.split('name: '+name,1)[1].split('      - name:',1)[0]
+            self.assertNotIn('publication_ready',step)
+            self.assertIn('RESEARCH_CHECKPOINT_VERIFIED',step)
+
+
 if __name__=='__main__':unittest.main()
