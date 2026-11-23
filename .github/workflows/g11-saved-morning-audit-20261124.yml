@@ -1,0 +1,44 @@
+name: Read only saved MORNING audit 20261124
+on:
+  push:
+    branches: [codex/saved-morning-audit-20261124]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  saved-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: restored
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: g11-state-v4-published-2026-11-24-45243836258-1-checkpoint
+          fail-on-cache-miss: true
+      - name: Inspect saved evidence without executing the runtime
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          AUDIT_CACHE_KEY: g11-state-v4-published-2026-11-24-45243836258-1-checkpoint
+          AUDIT_CACHE_HIT: ${{steps.restored.outputs.cache-hit}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${AUDIT_CACHE_HIT}" = true
+          mkdir -m 700 .audit
+          exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt --output .audit/state.tar.gz .relay-cache/state.tgz.gpg
+          exec 3<&-
+          env -u G11_PRIVATE_REPO_TOKEN python3 scripts/saved_morning_audit_20261124.py
+          openssl cms -encrypt -aes-256-cbc -binary -outform DER -in .audit/selected.tar.gz -out .audit/selected.cms scripts/saved_morning_audit_20261124.pem
+          rm .audit/state.tar.gz .audit/selected.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: g11-saved-morning-audit-20261124-sealed
+          path: .audit/selected.cms
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: true
