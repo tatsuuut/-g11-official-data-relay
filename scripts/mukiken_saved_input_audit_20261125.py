@@ -24,7 +24,7 @@ MAX_RECORD = 240 * 1024
 MAX_MEMBER = 32 * 1024 * 1024
 MAX_EXPANDED = 8 * 1024 ** 3
 MAX_MEMBERS = 200000
-MAX_CIPHER = 1024 ** 3
+MAX_CIPHER = 4 * 1024 ** 3
 MAX_DOWNLOAD = 4 * 1024 ** 3
 FIELDS = ('標準レースキー','艇番','当地勝率','モーター2連率','全国勝率','全国2連率',
           '平均ST','今節着順','今節ST','取得時刻')
@@ -137,18 +137,25 @@ def plan():
             original_runs={r['source_run_id'] for r in rows.values() if r['day']==day}
             exact=[r for r in found if any(('-'+str(run)) in r['key'] for run in original_runs)]
             selected=max(exact or found,key=lambda r:(r.get('created_at',''),r.get('id',0))) if found else None
+            observed={k:selected.get(k) for k in ('id','key','size_in_bytes')} if selected else None
             status='AVAILABLE' if selected else 'NO_RETAINED_CHECKPOINT'
             if selected and selected['size_in_bytes'] > MAX_CIPHER:
                 status='CHECKPOINT_SIZE_BUDGET';selected=None
             planned[label]=dict(day=day,status=status,key=selected['key'] if selected else '',
                 cache_id=selected['id'] if selected else None,
-                cipher_bytes=selected['size_in_bytes'] if selected else 0)
+                cipher_bytes=observed['size_in_bytes'] if observed else 0,
+                observed_cache_id=observed['id'] if observed else None,
+                observed_cache_key=observed['key'] if observed else None,
+                observed_size_in_bytes=observed['size_in_bytes'] if observed else None,
+                current_limit_bytes=MAX_CIPHER)
         except Exception as exc:
-            planned[label]=dict(day=day,status='METADATA_UNAVAILABLE_'+type(exc).__name__,key='',cipher_bytes=0)
+            planned[label]=dict(day=day,status='METADATA_UNAVAILABLE_'+type(exc).__name__,key='',cipher_bytes=0,
+                observed_cache_id=None,observed_cache_key=None,observed_size_in_bytes=None,current_limit_bytes=MAX_CIPHER)
         output('key_'+label,planned[label]['key'])
     save('plan.json',planned)
     save('working.json',{'records':{},'attempts':[],'downloaded_bytes':0})
-    print('AUDIT_PLAN='+json.dumps({k:{'status':v['status'],'cipher_bytes':v['cipher_bytes']} for k,v in planned.items()},sort_keys=True))
+    logged=('status','cipher_bytes','observed_cache_id','observed_cache_key','observed_size_in_bytes','current_limit_bytes')
+    print('AUDIT_PLAN='+json.dumps({k:{f:v.get(f) for f in logged} for k,v in planned.items()},sort_keys=True))
 
 
 def needed(label):
@@ -357,6 +364,9 @@ def finish():
         'original_bytes_hash_definition':'SHA256 of exact selected tar-member bytes; compared with previously fixed public formal snapshot identity',
         'filtered_records_have_distinct_hashes':{r['key']:digest(compact(r)) for r in rows},
         'downloaded_cipher_bytes':working.get('downloaded_bytes',0),'plaintext_export_limit_bytes':MAX_OUTPUT}}
+    payload['manifest']['resource_limits']={'single_cipher_bytes':MAX_CIPHER,'total_download_bytes':MAX_DOWNLOAD,
+        'expanded_bytes':MAX_EXPANDED,'tar_members':MAX_MEMBERS,'persisted_cache_copies':0,
+        'basis':'Existing 2026-11-25 publish run45520256801/job138890833651 restored published checkpoint45520256801 at 3242848831 bytes. One latest saved checkpoint read authorized; no cap relaxation on overflow.'}
     raw=compact(payload);require(len(raw)<=MAX_OUTPUT,'OUTPUT_5MiB_BUDGET')
     save('selected.json',payload)
     print('AUDIT_EXPORT='+json.dumps({'records':16,'complete':sum(r['status']=='COMPLETE' for r in rows),'plaintext_bytes':len(raw),'sha256':digest(raw)},sort_keys=True))
