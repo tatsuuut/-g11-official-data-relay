@@ -1,0 +1,367 @@
+name: Fixed 16 Muki original input read-only audit
+on:
+  push:
+    branches: [codex/mukiken-input-audit-20261125]
+    paths:
+      - '.github/workflows/g11-mukiken-saved-input-audit-20261125.yml'
+      - 'scripts/mukiken_saved_input_audit_20261125*'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: g11-fixed16-input-audit-20261125
+  cancel-in-progress: false
+jobs:
+  saved-inputs:
+    if: contains(github.event.head_commit.message, '[audit-16-inputs]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/mukiken_saved_input_audit_20261125.py
+            scripts/mukiken_saved_input_audit_20261125_targets.json
+            scripts/mukiken_saved_input_audit_20261125_recipient.pem
+          sparse-checkout-cone-mode: false
+      - name: Verify fixed recipient and plan metadata only
+        id: plan
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: |
+          set -euo pipefail
+          test "$(openssl x509 -in scripts/mukiken_saved_input_audit_20261125_recipient.pem -noout -fingerprint -sha256 | cut -d= -f2 | tr -d :)" = '39421FFB648CEE3B554C248A6F8A4A1890DF2E80C80CAF0DF5780C05C3E0F87E'
+          python3 scripts/mukiken_saved_input_audit_20261125.py plan
+      - name: Check whether latest is still needed
+        id: need-latest
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label latest
+      - name: Restore exact saved latest checkpoint read-only
+        if: steps.need-latest.outputs.needed == 'true'
+        id: restore-latest
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_latest}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan latest
+        if: steps.need-latest.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_latest}}
+          RESTORED_KEY: ${{steps.restore-latest.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label latest
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label latest) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label latest); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label latest
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label latest
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Check whether 20261113 is still needed
+        id: need-20261113
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label 20261113
+      - name: Restore exact saved 20261113 checkpoint read-only
+        if: steps.need-20261113.outputs.needed == 'true'
+        id: restore-20261113
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_20261113}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan 20261113
+        if: steps.need-20261113.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_20261113}}
+          RESTORED_KEY: ${{steps.restore-20261113.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261113
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label 20261113) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label 20261113); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label 20261113
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261113
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Check whether 20261114 is still needed
+        id: need-20261114
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label 20261114
+      - name: Restore exact saved 20261114 checkpoint read-only
+        if: steps.need-20261114.outputs.needed == 'true'
+        id: restore-20261114
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_20261114}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan 20261114
+        if: steps.need-20261114.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_20261114}}
+          RESTORED_KEY: ${{steps.restore-20261114.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261114
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label 20261114) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label 20261114); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label 20261114
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261114
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Check whether 20261115 is still needed
+        id: need-20261115
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label 20261115
+      - name: Restore exact saved 20261115 checkpoint read-only
+        if: steps.need-20261115.outputs.needed == 'true'
+        id: restore-20261115
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_20261115}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan 20261115
+        if: steps.need-20261115.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_20261115}}
+          RESTORED_KEY: ${{steps.restore-20261115.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261115
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label 20261115) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label 20261115); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label 20261115
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261115
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Check whether 20261116 is still needed
+        id: need-20261116
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label 20261116
+      - name: Restore exact saved 20261116 checkpoint read-only
+        if: steps.need-20261116.outputs.needed == 'true'
+        id: restore-20261116
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_20261116}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan 20261116
+        if: steps.need-20261116.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_20261116}}
+          RESTORED_KEY: ${{steps.restore-20261116.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261116
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label 20261116) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label 20261116); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label 20261116
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261116
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Check whether 20261117 is still needed
+        id: need-20261117
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label 20261117
+      - name: Restore exact saved 20261117 checkpoint read-only
+        if: steps.need-20261117.outputs.needed == 'true'
+        id: restore-20261117
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_20261117}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan 20261117
+        if: steps.need-20261117.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_20261117}}
+          RESTORED_KEY: ${{steps.restore-20261117.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261117
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label 20261117) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label 20261117); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label 20261117
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261117
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Check whether 20261119 is still needed
+        id: need-20261119
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label 20261119
+      - name: Restore exact saved 20261119 checkpoint read-only
+        if: steps.need-20261119.outputs.needed == 'true'
+        id: restore-20261119
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_20261119}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan 20261119
+        if: steps.need-20261119.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_20261119}}
+          RESTORED_KEY: ${{steps.restore-20261119.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261119
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label 20261119) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label 20261119); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label 20261119
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261119
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Check whether 20261121 is still needed
+        id: need-20261121
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label 20261121
+      - name: Restore exact saved 20261121 checkpoint read-only
+        if: steps.need-20261121.outputs.needed == 'true'
+        id: restore-20261121
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_20261121}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan 20261121
+        if: steps.need-20261121.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_20261121}}
+          RESTORED_KEY: ${{steps.restore-20261121.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261121
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label 20261121) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label 20261121); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label 20261121
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261121
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Check whether 20261122 is still needed
+        id: need-20261122
+        run: python3 scripts/mukiken_saved_input_audit_20261125.py needed --label 20261122
+      - name: Restore exact saved 20261122 checkpoint read-only
+        if: steps.need-20261122.outputs.needed == 'true'
+        id: restore-20261122
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{steps.plan.outputs.key_20261122}}
+          fail-on-cache-miss: true
+      - name: Authenticate and selectively scan 20261122
+        if: steps.need-20261122.outputs.needed == 'true'
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
+          EXPECTED_KEY: ${{steps.plan.outputs.key_20261122}}
+          RESTORED_KEY: ${{steps.restore-20261122.outputs.cache-matched-key}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test "${EXPECTED_KEY}" != "${RESTORED_KEY}" || ! test -f .relay-cache/state.tgz.gpg; then
+            env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261122
+          else
+            exec 3<<<"${G11_PRIVATE_REPO_TOKEN}"
+            if (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py cipher --label 20261122) && gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --decrypt .relay-cache/state.tgz.gpg 2>.audit/gpg-status.txt | (exec 3<&-; env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py scan --label 20261122); then
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py commit --label 20261122
+            else
+              exec 3<&-
+              env -u G11_PRIVATE_REPO_TOKEN python3 scripts/mukiken_saved_input_audit_20261125.py failed --label 20261122
+            fi
+          fi
+          rm -f .relay-cache/state.tgz.gpg .audit/gpg-status.txt .audit/cipher_failure.json
+      - name: Seal only selected compact receipts
+        id: seal
+        if: always() && steps.plan.outcome == 'success'
+        run: |
+          set -euo pipefail
+          python3 scripts/mukiken_saved_input_audit_20261125.py finish
+          openssl cms -encrypt -aes-256-cbc -binary -outform DER -in .audit/selected.json -out .audit/selected.cms scripts/mukiken_saved_input_audit_20261125_recipient.pem
+          python3 - <<'PYSIZE'
+          from pathlib import Path
+          assert Path('.audit/selected.json').stat().st_size <= 5*1024*1024
+          assert Path('.audit/selected.cms').stat().st_size <= 5*1024*1024
+          PYSIZE
+          rm -f .audit/selected.json .audit/working.json .audit/pending.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.seal.outcome == 'success'
+        with:
+          name: g11-fixed16-original-inputs-20261125-sealed
+          path: .audit/selected.cms
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: true
+      - name: Remove runner-only plaintext and ciphertext copies
+        if: always()
+        run: rm -f .relay-cache/state.tgz.gpg .audit/selected.json .audit/working.json .audit/pending.json .audit/selected.cms .audit/gpg-status.txt .audit/cipher_failure.json
