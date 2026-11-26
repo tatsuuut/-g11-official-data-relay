@@ -14,6 +14,7 @@ CAPTURE_MINUTES = 10
 ODDS_WINDOW_SHA = '7c018b903107ce8ca44eac3224dfc756c12f230ebecd7d41dfc1362bbe799344'
 FORMAL_PLAN_SHA = '8c9d2dc0ffd441dc530bbe7832511f47f274e36778b5be1361e9d87a2eac5344'
 STADIUM_FORMAL_PLAN_SHA = '4fae2103ef5b229ffaec22c32629822281d373f120a1d8d75c9cad8d9863fdac'
+ALTERNATE_FORMAL_PLAN_SHA = '0a9f9f9b650292893a2499ee47b8d7eac9557f0ae9b00c93e775ed69940a8b73'
 AVAILABILITY_WINDOW_SHA = '4d36e7826f48db78fd4dd2b47aa445d3bae24f4b87bff4a02a15538e8cccba4d'
 
 
@@ -52,7 +53,7 @@ def verified_odds_window(official):
         return
     plan_sha = hashlib.sha256(inspect.getsource(original_plan).encode()).hexdigest()
     if (hashlib.sha256(inspect.getsource(original).encode()).hexdigest() != ODDS_WINDOW_SHA
-            or plan_sha not in (FORMAL_PLAN_SHA, STADIUM_FORMAL_PLAN_SHA)
+            or plan_sha not in (FORMAL_PLAN_SHA, STADIUM_FORMAL_PLAN_SHA, ALTERNATE_FORMAL_PLAN_SHA)
             or (availability is not None and (original_availability is None
                 or hashlib.sha256(inspect.getsource(original_availability).encode()).hexdigest()
                     != AVAILABILITY_WINDOW_SHA))):

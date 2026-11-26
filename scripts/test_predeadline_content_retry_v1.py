@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import textwrap
 import types
 import unittest
 from typing import Any
@@ -766,6 +767,64 @@ class RetryTests(unittest.TestCase):
     def test_actual_source_identity_matches_reviewed_hash(self):
         self.assertIn(hashlib.sha256(inspect.getsource(self.original).encode()).hexdigest(), retry.COLLECTOR_SHAS)
         self.assertIn(retry.COLLECTOR_SHA, retry.COLLECTOR_SHAS)
+
+    def test_restricted_collector_preserves_verified_alternate_readback_before_skipping_primary(self):
+        if hashlib.sha256(inspect.getsource(self.original).encode()).hexdigest() != retry.ALTERNATE_COLLECTOR_SHA:
+            self.skipTest('retained collector predates shared alternate reuse')
+        roster = object()
+        for prefix in ('published-exhibition-', 'venue-market-'):
+            (self.root/'snapshots/predeadline'/f'{prefix}{KEY}.json').write_text('retained alternate')
+        self.responses = {task['SOURCE_ID']: ['complete'] for task in self.plan}
+        for corrupt in (False, True):
+            with self.subTest(corrupt=corrupt):
+                calls = []
+                def recheck(store, key, deadline, actual_roster):
+                    self.assertIs(store, self.runner.store)
+                    self.assertEqual(KEY, key)
+                    self.assertEqual(BASE+timedelta(minutes=5), deadline)
+                    self.assertIs(roster, actual_roster)
+                    calls.append(key)
+                    if corrupt:
+                        raise ValueError('RAW_READBACK_BINDING')
+                with patch.dict(self.original.__globals__, {
+                    'PUBLISHED_PREVIEW': types.SimpleNamespace(race_roster=lambda *_: roster, read_observation=recheck),
+                    'VENUE_MARKET': types.SimpleNamespace(recheck=recheck),
+                }):
+                    capture = retry._restricted_collector(self.original, None, None, early_capture=True)
+                    result = capture(self.runner, max_requests=2, early_wait_seconds=0)
+                self.assertEqual([KEY, KEY], calls)
+                self.assertEqual(2 if corrupt else 0, len(self.attempts))
+                self.assertEqual(2 if corrupt else 0, len(result['ACQUIRED']))
+                if not corrupt:
+                    self.assertEqual(['VERIFIED_ALTERNATE_ALREADY_SAVED']*2,
+                        [item['REASON'] for item in result['SKIPPED']])
+                    self.assertEqual([], self.writes)
+
+    def test_shared_input_collector_changes_only_the_exact_reviewed_readback_reuse_block(self):
+        source = inspect.getsource(self.original)
+        if hashlib.sha256(source.encode()).hexdigest() != retry.ALTERNATE_COLLECTOR_SHA:
+            self.skipTest('retained collector predates shared alternate reuse')
+        function = ast.parse(textwrap.dedent(source)).body[0]
+        matches = []
+        for node in ast.walk(function):
+            for _field, value in ast.iter_fields(node):
+                if not isinstance(value, list):
+                    continue
+                for index in range(len(value)-1):
+                    assignment = value[index]
+                    if (isinstance(assignment, ast.Assign)
+                            and any(isinstance(target, ast.Name) and target.id == 'alternate_name'
+                                    for target in assignment.targets)):
+                        matches.append((value, index))
+        self.assertEqual(1, len(matches))
+        statements, index = matches[0]
+        reuse = ast.Module(body=statements[index:index+2], type_ignores=[])
+        self.assertEqual('770a82d96a5d56d641056d0980d3ad1e86c90405f84df43c0ebaaeb6d718b6cf',
+            hashlib.sha256(ast.dump(reuse).encode()).hexdigest())
+        del statements[index:index+2]
+        # Exact run_due_predeadline AST from approved private 2b988a726cebe7c2923212bb97e44b6f2196cfcf.
+        self.assertEqual('cf39162ae8e25f04e1ac312ee2548e7b1ec085adc24d93cbfa4730cdc47a9f18',
+            hashlib.sha256(ast.dump(function).encode()).hexdigest())
 
     def test_unreviewed_source_is_not_compiled(self):
         with patch.object(retry, 'COLLECTOR_SHAS', frozenset({'0'*64})):

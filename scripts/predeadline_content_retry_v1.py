@@ -17,10 +17,12 @@ import textwrap
 import types
 
 COLLECTOR_SHA = '6eef8e082ae3d6c874d83844bbb2fcae04fd0ceab3d829db5a511d29da6a9017'
-# Keep the frozen collector and the reviewed November 11 withdrawal boundary.
+ALTERNATE_COLLECTOR_SHA = '30327ede38a6cab3fcd7e031e82045c7f7b7a70f86687412c6a9b7087e5ad05b'
+# Keep the frozen, withdrawal-aware and verified shared-input reuse collectors.
 COLLECTOR_SHAS = frozenset({
     COLLECTOR_SHA,
     'a40b3bdfb83e88fac0b12485add0536a1a60555ac32b15ba1af1687ddb2f8649',
+    ALTERNATE_COLLECTOR_SHA,
 })
 MAX_WAIT_SECONDS = 30
 MIN_REMAINING_SECONDS = 180
@@ -237,7 +239,7 @@ def capture_pause(store, source_id, now):
 
 
 def _isolate_host(source):
-    # Only the two reviewed collector hashes get here. Keep validation, source
+    # Only the reviewed collector hashes get here. Keep validation, source
     # receipt verification, race scope, immutable writes and cutoff in the original.
     changes = [
         ('        task_index = 0\n', '        deferred = _host_guard(self.store, self.client.clock())\n'
