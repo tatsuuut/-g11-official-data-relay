@@ -451,7 +451,81 @@ class FollowupTest(unittest.TestCase):
                 run=lambda *a, **kw: self.fail('unexpected dispatch'))
             self.assertEqual('needed=false\n', output.read_text())
 
+    def alternate(self, key=GOOD, captured=None):
+        stamp = captured or (BASE+timedelta(minutes=1)).isoformat()
+        return {'SNAPSHOT_SHA256': 'a'*64, 'SNAPSHOT': {'PAYLOAD': {
+            'STATUS': 'BOATCAST_OFFICIAL_PUBLISHED_MARKET', 'PUBLISHER': 'race.boatcast.jp',
+            'RACE_KEY': key, 'KIND': 'ODDS3T', 'CAPTURED_AT_JST': stamp}},
+            'MARKET_RECEIPT': {'HOST': 'race.boatcast.jp', 'SHA256': 'b'*64,
+                               'CAPTURED_AT_JST': stamp}}
+
+    def test_alternate_only_market_is_handed_off_after_raw_recheck(self):
+        self.snapshots.clear(); calls = []
+        def checked(key, deadline):
+            calls.append(key)
+            return self.alternate() if key == GOOD else None
+        rows = adapter.followup_odds(self.morning, self.critical, self.snapshots.get,
+            self.now, True, recheck_alternate=checked)
+        self.assertEqual([BAD, GOOD], calls)
+        self.assertEqual([GOOD], [r['RACE_KEY'] for r in rows])
+
+    def test_primary_priority_never_reads_an_alternate_or_duplicates_a_race(self):
+        rows = adapter.followup_odds(self.morning, self.critical, self.snapshots.get,
+            self.now, False, recheck_alternate=lambda *_: self.fail('duplicate input read'))
+        self.assertEqual([BAD, GOOD], [r['RACE_KEY'] for r in rows])
+
+    def test_closed_or_previously_handed_off_alternate_never_queues_again(self):
+        self.snapshots.clear()
+        old = lambda key, deadline: self.alternate(key, (BASE-timedelta(seconds=1)).isoformat())
+        self.assertEqual([], adapter.followup_odds(self.morning, self.critical,
+            self.snapshots.get, self.now, True, recheck_alternate=old))
+        self.assertEqual([], adapter.followup_odds(self.morning, self.critical,
+            self.snapshots.get, BASE+timedelta(minutes=7), False,
+            recheck_alternate=lambda *_: self.fail('closed input read')))
+
+    def test_bad_alternate_does_not_starve_a_healthy_later_race(self):
+        self.snapshots.pop('odds3t-' + BAD)
+        def rejected(*_):
+            raise ValueError('RAW_HASH_MISMATCH')
+        with contextlib.redirect_stderr(io.StringIO()) as log:
+            rows = adapter.followup_odds(self.morning, self.critical, self.snapshots.get,
+                self.now, True, recheck_alternate=rejected)
+        self.assertEqual([GOOD], [r['RACE_KEY'] for r in rows])
+        self.assertIn('G11_FOLLOWUP_ALTERNATE_REJECTED=', log.getvalue())
+        self.assertNotIn('RAW_HASH_MISMATCH', log.getvalue())
+
+    def test_wrong_alternate_clock_host_hash_or_race_is_rejected(self):
+        from copy import deepcopy
+        self.snapshots.clear()
+        base = self.alternate()
+        for field, value in [('RACE_KEY', BAD), ('KIND', 'BEFOREINFO'),
+                             ('CAPTURED_AT_JST', (self.now+timedelta(seconds=1)).isoformat())]:
+            changed = deepcopy(base); changed['SNAPSHOT']['PAYLOAD'][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                adapter.followup_odds(self.morning, self.critical, self.snapshots.get,
+                    self.now, True, recheck_alternate=lambda key, _: changed if key == GOOD else None)
+        for field, value in [('HOST', 'unknown.example'), ('SHA256', 'bad')]:
+            changed = deepcopy(base); changed['MARKET_RECEIPT'][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'RECEIPT_BINDING'):
+                adapter.followup_odds(self.morning, self.critical, self.snapshots.get,
+                    self.now, True, recheck_alternate=lambda key, _: changed if key == GOOD else None)
+
+    def test_each_early_dispatch_gate_accepts_a_verified_alternate_only_count(self):
+        import re
+        import subprocess
+        source = (Path(__file__).resolve().parents[1]/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
+        filters = re.findall(r"jq -e '([^']*LAST_TIMELY_ALTERNATE_MARKET_COUNT[^']*)'", source)
+        self.assertEqual(len(filters), 3)
+        for query in filters:
+            for primary, alternate, expected in [(0, 1, 0), (1, 0, 0), (0, 0, 1), (0, None, 1), (0, 'yes', 1), (0, True, 1), (0, 1.5, 1), (0, -1, 1)]:
+                critical = {'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_TIMELY_SOURCE_COUNT': primary}
+                if alternate is not None: critical['LAST_TIMELY_ALTERNATE_MARKET_COUNT'] = alternate
+                result = subprocess.run(['jq', '-e', query], input=json.dumps({'CRITICAL': critical}),
+                    text=True, capture_output=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

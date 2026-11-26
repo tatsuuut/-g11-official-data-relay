@@ -160,7 +160,7 @@ def isolate_predeadline_inputs():
         wild._collect_pre_race_packets, wild.run_predeadline, display.capture_due = originals
 
 
-def followup_odds(morning, critical, load_snapshot, now, early_sent):
+def followup_odds(morning, critical, load_snapshot, now, early_sent, *, recheck_alternate=None):
     """Select saved, unexpired odds not covered by an accepted early handoff."""
     day = now.date().isoformat()
     if morning.get('OPERATIONAL_DATE_JST') != day or now.utcoffset() is None:
@@ -190,12 +190,28 @@ def followup_odds(morning, critical, load_snapshot, now, early_sent):
         if now >= deadline:
             continue
         verified = load_snapshot(name)
+        alternate = False
+        if verified is None and recheck_alternate is not None:
+            try:
+                verified = recheck_alternate(key, deadline)
+            except (OSError, KeyError, TypeError, ValueError) as error:
+                print('G11_FOLLOWUP_ALTERNATE_REJECTED=' + json.dumps({
+                    'race_key': key, 'error_type': type(error).__name__}, sort_keys=True), file=sys.stderr)
+                continue
+            alternate = verified is not None
         if verified is None:
             continue
         payload = verified['SNAPSHOT']['PAYLOAD']
         if (payload.get('RACE_KEY') != key or payload.get('KIND') != 'ODDS3T'
-                or payload.get('STATUS') != 'PREDEADLINE_SOURCE_COMPLETE'):
+                or (not alternate and payload.get('STATUS') != 'PREDEADLINE_SOURCE_COMPLETE')):
             raise ValueError('FOLLOWUP_SNAPSHOT_BINDING')
+        if alternate:
+            receipt = verified['MARKET_RECEIPT']
+            if (receipt.get('HOST') != payload.get('PUBLISHER')
+                    or receipt.get('CAPTURED_AT_JST') != payload.get('CAPTURED_AT_JST')
+                    or re.fullmatch(r'[a-f0-9]{64}', str(verified.get('SNAPSHOT_SHA256'))) is None
+                    or re.fullmatch(r'[a-f0-9]{64}', str(receipt.get('SHA256'))) is None):
+                raise ValueError('FOLLOWUP_ALTERNATE_RECEIPT_BINDING')
         captured = datetime.fromisoformat(payload['CAPTURED_AT_JST'])
         if captured.utcoffset() is None or not captured <= now < deadline:
             raise ValueError('FOLLOWUP_SNAPSHOT_TIME')
@@ -328,13 +344,23 @@ def _handoff_main():
         if not (root/'store/snapshots/predeadline'/f'{name}.json').is_file():
             return None
         return store.load_verified_snapshot('predeadline', name)
+    def alternate(key, deadline):
+        if not (root/'store/snapshots/predeadline'/('venue-market-' + key + '.json')).is_file():
+            return None
+        from g11.canonical import venue_market_v1 as markets, published_preview_v1 as preview
+        checked = markets.recheck(store, key, deadline, preview.race_roster(morning, key))
+        receipts = [receipt for receipt in checked['SNAPSHOT']['SOURCE_RECEIPTS']
+                    if markets.source_matches(receipt, key)]
+        if len(receipts) != 1:
+            raise ValueError('FOLLOWUP_ALTERNATE_PRINCIPAL_RECEIPT')
+        return {**checked, 'MARKET_RECEIPT': receipts[0]}
     critical = metadata.get('CRITICAL', {})
     if os.environ.get('G11_WARM_FOLLOWUP') == 'success':
         first = json.loads((Path(os.environ['GITHUB_WORKSPACE']) /
             '.relay-output/first-critical-result.json').read_bytes())['CRITICAL']
         critical = first_handoff_boundary(first, critical, args.operational_date, os.environ['GITHUB_RUN_ID'])
     rows = followup_odds(morning, critical, load, now,
-                         args.early_sent == 'true')
+                         args.early_sent == 'true', recheck_alternate=alternate)
     rows = without_published_goripan(rows, args.operational_date)
     print('G11_WILD4_FOLLOWUP_INPUTS=' + json.dumps(rows, sort_keys=True))
     dispatch_followup(rows, args.operational_date, os.environ.get('GITHUB_OUTPUT'))
@@ -343,5 +369,6 @@ def _handoff_main():
 
 if __name__ == '__main__':
     raise SystemExit(_handoff_main())
+
 
 
