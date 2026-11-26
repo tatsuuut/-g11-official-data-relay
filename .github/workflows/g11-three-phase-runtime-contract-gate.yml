@@ -878,7 +878,7 @@ jobs:
           from pathlib import Path
           caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
           worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert 'g11-wild4-shadow-lock-only.yml@51ab075f75e497a3b8d72caa11a4cd60e12fcaa2' in caller
+          assert 'g11-wild4-shadow-lock-only.yml@4760c1267a492811d6df7895db8241b8b59287b8' in caller
           assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
           # Compare the frozen worker after removing the exact reviewed additions.
           import hashlib
@@ -899,7 +899,7 @@ jobs:
           # Admit only these exact reviewed alternate input transport additions.
           alternate_start=current.index('      - name: Detect retained live alternate market quotes\n')
           alternate_end=current.index('      - name: Check for a matching unexpired official odds packet\n',alternate_start)
-          assert hashlib.sha256(current[alternate_start:alternate_end].encode()).hexdigest() == '546e134063b0af157bd10e30550f6197727fd3f515ae611ba1375df5e9003997'
+          assert hashlib.sha256(current[alternate_start:alternate_end].encode()).hexdigest() == 'a9d80e69e93571dd15d59a8c38e8f20f194e42ddfbaf7b493550ce7d9ae88039'
           current=current[:alternate_start]+current[alternate_end:]
           alternate_start=current.index("          alternate_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'alternate-wild4-odds.json'\n")
           alternate_end=current.index("          print('WILD4_VERIFIED_INPUT_UNION='",alternate_start)

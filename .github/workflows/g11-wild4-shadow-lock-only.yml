@@ -1180,7 +1180,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: b6d96a7b4acb6604afb756f8604d0463fa661f35
+          ref: 50e1fa5552c02c7fcf17caa2aa38bed736949bb1
           path: .g11-alternate-input
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           persist-credentials: false
@@ -1196,7 +1196,7 @@ jobs:
           DAY: ${{ steps.day.outputs.day }}
         run: |
           set -euo pipefail
-          test "$(git -C .g11-alternate-input rev-parse HEAD)" = 'b6d96a7b4acb6604afb756f8604d0463fa661f35'
+          test "$(git -C .g11-alternate-input rev-parse HEAD)" = '50e1fa5552c02c7fcf17caa2aa38bed736949bb1'
           python3 -S .g11-alternate-input/g11/relay/verified_wild_alternate_odds_v1.py "${GITHUB_WORKSPACE}/${STORE}" "${DAY}" "${RUNNER_TEMP}/alternate-wild4-odds.tmp" "${G11_PUBLIC_RUNTIME_HELPERS}"
           if [ -s "${RUNNER_TEMP}/alternate-wild4-odds.tmp" ]; then
             mv "${RUNNER_TEMP}/alternate-wild4-odds.tmp" "${RUNNER_TEMP}/alternate-wild4-odds.json"
