@@ -878,7 +878,7 @@ jobs:
           from pathlib import Path
           caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
           worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert 'g11-wild4-shadow-lock-only.yml@3e9252e8b08fa0c63344d826e1db4adb3e8b328a' in caller
+          assert 'g11-wild4-shadow-lock-only.yml@af94d9f1c8aaff5edf4e4dfbb242f6aae6c9db75' in caller
           assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
           # The live workflow may add only the reviewed read-only dependency step.
           import hashlib
@@ -887,11 +887,11 @@ jobs:
           # Admit only these exact reviewed alternate input transport additions.
           alternate_start=current.index('      - name: Detect retained live alternate market quotes\n')
           alternate_end=current.index('      - name: Check for a matching unexpired official odds packet\n',alternate_start)
-          assert hashlib.sha256(current[alternate_start:alternate_end].encode()).hexdigest() == '19bc1d73450b93642d6aa6d7ff440ddf7df1985dc53387cbc97449925e1501a4'
+          assert hashlib.sha256(current[alternate_start:alternate_end].encode()).hexdigest() == '546e134063b0af157bd10e30550f6197727fd3f515ae611ba1375df5e9003997'
           current=current[:alternate_start]+current[alternate_end:]
           alternate_start=current.index("          alternate_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'alternate-wild4-odds.json'\n")
           alternate_end=current.index("          print('WILD4_VERIFIED_INPUT_UNION='",alternate_start)
-          assert hashlib.sha256(current[alternate_start:alternate_end].encode()).hexdigest() == '3e64073d734525c7222831cd9b1950819cf2ec32333930e77e96d9929661276e'
+          assert hashlib.sha256(current[alternate_start:alternate_end].encode()).hexdigest() == '4e8f8693dc8381eceda2801efb95c9706791b0a027b65671ffeef504b758c988'
           current=current[:alternate_start]+current[alternate_end:]
           start=current.index('      - name: Checkout pinned optional player context transport\n')
           end=current.index('      - name: Checkout notification input reader only\n',start)
