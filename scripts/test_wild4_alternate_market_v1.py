@@ -17,7 +17,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / '.github/workflows/g11-wild4-shadow-lock-only.yml'
 DAY = '2026-11-27'
-ADMISSION = 'BOATCAST_LIVE_RECEIPT_EXACT_120_V1'
+ADMISSION = 'VERIFIED_ALTERNATE_LIVE_RECEIPT_EXACT_120_V2'
 
 
 def digest(value):
@@ -102,6 +102,27 @@ class AlternateWorkerTests(unittest.TestCase):
         self.assertEqual(calls[-1][1]['ODDS_MISSING_RACE_COUNT'], 2)
         sealed = calls[-1][1]
         self.assertEqual(sealed['CONTENT_SHA256'], digest({k:v for k,v in sealed.items() if k != 'CONTENT_SHA256'}))
+
+    def test_verifier_admission_v2_preserves_each_original_source(self):
+        alternate = self.alternate(['20261127-01-01', '20261127-24-01'])
+        urls = ['https://race.boatcast.jp/txt/01/bc_smt_od3_20261127_01_01.txt',
+                'https://www.omurakyotei.jp/yosou/sp/odds/?day=20261127&race=01']
+        for row, url in zip(alternate['RECORDS'], urls, strict=True):
+            row['ODDS_SOURCE'] = url
+        merged, _ = self.merge(None, alternate)
+        self.assertEqual([r['ODDS_SOURCE'] for r in merged['RECORDS']], urls)
+        self.assertTrue(all(r['ODDS_SOURCE_ADMISSION'] == ADMISSION for r in merged['RECORDS']))
+
+    def test_legacy_v1_envelope_and_packet_admission_are_rejected(self):
+        old_admission = 'BOATCAST_LIVE_RECEIPT_EXACT_120_V1'
+        for field in ('INPUT_ADMISSION', 'ODDS_SOURCE_ADMISSION'):
+            alternate = self.alternate(['20261127-01-01'])
+            if field == 'INPUT_ADMISSION':
+                alternate[field] = old_admission
+            else:
+                alternate['RECORDS'][0][field] = old_admission
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'BOUNDARY'):
+                self.merge(None, alternate)
 
     def test_missing_alternate_is_noop_and_wrong_admission_is_rejected(self):
         ordinary = {'RECORDS': [{'STANDARD_RACE_KEY': '20261127-01-01'}]}

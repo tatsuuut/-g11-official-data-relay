@@ -1076,7 +1076,7 @@ def main() -> int:
         # verifier and input union; model, LOCK and learning bodies stay frozen.
         # Date/cache-bound saved MORNING delivery adds transport only; no prediction code.
         cap = (131_997 if name == ".github/workflows/g11-free-runner.yml" else
-               150_340 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
+               150_360 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
         text = path.read_text(encoding="utf-8")

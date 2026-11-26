@@ -1180,7 +1180,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tatsuuut/boat-brain-lab
-          ref: 9e9c889afbf89baccd1ebe9521555a41980aaf11
+          ref: b6d96a7b4acb6604afb756f8604d0463fa661f35
           path: .g11-alternate-input
           token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
           persist-credentials: false
@@ -1196,7 +1196,7 @@ jobs:
           DAY: ${{ steps.day.outputs.day }}
         run: |
           set -euo pipefail
-          test "$(git -C .g11-alternate-input rev-parse HEAD)" = '9e9c889afbf89baccd1ebe9521555a41980aaf11'
+          test "$(git -C .g11-alternate-input rev-parse HEAD)" = 'b6d96a7b4acb6604afb756f8604d0463fa661f35'
           python3 -S .g11-alternate-input/g11/relay/verified_wild_alternate_odds_v1.py "${GITHUB_WORKSPACE}/${STORE}" "${DAY}" "${RUNNER_TEMP}/alternate-wild4-odds.tmp" "${G11_PUBLIC_RUNTIME_HELPERS}"
           if [ -s "${RUNNER_TEMP}/alternate-wild4-odds.tmp" ]; then
             mv "${RUNNER_TEMP}/alternate-wild4-odds.tmp" "${RUNNER_TEMP}/alternate-wild4-odds.json"
@@ -1295,12 +1295,12 @@ jobs:
               # original raw receipt, morning roster and deadline readback.
               alternate=json.loads(alternate_path.read_bytes())
               alternate=merge_verified_odds(None,alternate,day)
-              if (alternate.get('INPUT_ADMISSION')!='BOATCAST_LIVE_RECEIPT_EXACT_120_V1'
+              if (alternate.get('INPUT_ADMISSION')!='VERIFIED_ALTERNATE_LIVE_RECEIPT_EXACT_120_V2'
                   or alternate.get('ORDINARY_TRAINING_STORE_MUTATED') is not False
                   or alternate.get('PRODUCTION_MUTATED') is not False):
                   raise ValueError('ALTERNATE_MARKET_INPUT_BOUNDARY')
               for row in alternate['RECORDS']:
-                  if (row.get('ODDS_SOURCE_ADMISSION')!='BOATCAST_LIVE_RECEIPT_EXACT_120_V1'
+                  if (row.get('ODDS_SOURCE_ADMISSION')!='VERIFIED_ALTERNATE_LIVE_RECEIPT_EXACT_120_V2'
                       or row.get('UPSTREAM_PACKET') is None):
                       raise ValueError('ALTERNATE_MARKET_PACKET_BOUNDARY')
               # Existing ordinary packets are immutable and retain priority.

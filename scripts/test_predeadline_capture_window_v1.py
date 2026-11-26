@@ -385,7 +385,8 @@ class FormalPlanTests(unittest.TestCase):
     def test_unknown_formal_source_keeps_both_gates_and_collector_at_seven_minutes(self):
         market=self.official.CanonicalRunner._validated_odds_only_market
         formal=self.invocation._bind_predeadline_plan
-        with patch.multiple(window, FORMAL_PLAN_SHA='0'*64, STADIUM_FORMAL_PLAN_SHA='0'*64):
+        with patch.multiple(window, FORMAL_PLAN_SHA='0'*64, STADIUM_FORMAL_PLAN_SHA='0'*64,
+                ALTERNATE_FORMAL_PLAN_SHA='0'*64):
             with window.verified_odds_window(self.official) as admitted:
                 self.assertFalse(admitted)
                 self.assertIs(market,self.official.CanonicalRunner._validated_odds_only_market)
