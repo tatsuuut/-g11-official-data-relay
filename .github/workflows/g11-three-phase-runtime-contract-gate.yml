@@ -878,12 +878,21 @@ jobs:
           from pathlib import Path
           caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
           worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert 'g11-wild4-shadow-lock-only.yml@b0a22712cf64043934c66bb7956e5b2f92a64f5d' in caller
+          assert 'g11-wild4-shadow-lock-only.yml@3e9252e8b08fa0c63344d826e1db4adb3e8b328a' in caller
           assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
           # The live workflow may add only the reviewed read-only dependency step.
           import hashlib
           current=Path('.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
           assert hashlib.sha256(worker.encode()).hexdigest() == 'b9755c0b5690d16f8d8a45f0ae5493084bcf8c19470bc92397e305152d05c045'
+          # Admit only these exact reviewed alternate input transport additions.
+          alternate_start=current.index('      - name: Detect retained live alternate market quotes\n')
+          alternate_end=current.index('      - name: Check for a matching unexpired official odds packet\n',alternate_start)
+          assert hashlib.sha256(current[alternate_start:alternate_end].encode()).hexdigest() == '19bc1d73450b93642d6aa6d7ff440ddf7df1985dc53387cbc97449925e1501a4'
+          current=current[:alternate_start]+current[alternate_end:]
+          alternate_start=current.index("          alternate_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'alternate-wild4-odds.json'\n")
+          alternate_end=current.index("          print('WILD4_VERIFIED_INPUT_UNION='",alternate_start)
+          assert hashlib.sha256(current[alternate_start:alternate_end].encode()).hexdigest() == '3e64073d734525c7222831cd9b1950819cf2ec32333930e77e96d9929661276e'
+          current=current[:alternate_start]+current[alternate_end:]
           start=current.index('      - name: Checkout pinned optional player context transport\n')
           end=current.index('      - name: Checkout notification input reader only\n',start)
           added=current[start:end]
@@ -895,6 +904,7 @@ jobs:
           "$(go env GOPATH)/bin/actionlint" "$WILD4_WORKFLOW_PATH"
           python3 .g11-context-guard/scripts/test_wild4_input_context_health_v1.py -q
           python3 .g11-context-guard/scripts/test_wild4_retained_lock_v1.py -q
+          python3 -m unittest discover -s scripts -p test_wild4_alternate_market_v1.py -v
           python3 -c 'from g11.wild_pack.v1 import runtime_orchestrator_v1, prospective_oos_v1, test_prospective_oos_v1, test_bet_oos_collection_v1'
           python3 .g11-context-guard/scripts/test_wild4_frozen_source_context_readback_v1.py -q
           python3 .g11-context-continuity/scripts/test_wild4_publication_continuity_v1.py -q
