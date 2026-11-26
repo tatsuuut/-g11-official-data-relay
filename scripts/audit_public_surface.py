@@ -9,6 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/test_wild4_alternate_market_v1.py",
     "scripts/postprocess_delivery_v1.py",
     "scripts/test_postprocess_delivery_v1.py",
     "scripts/live_refusal_recovery_v1.py",
@@ -1071,11 +1072,11 @@ def main() -> int:
         # No prediction code or model is admitted by this larger YAML budget.
         # Reviewed continuation admission/follow-up routing adds 169 bytes.
         # One optional post-readback stage caller adds 754 bytes; no new data.
-        # The historical WILD4 workflow exceeds the default budget; only its
-        # bounded routing and one optional sparse checkout are admitted here.
+        # WILD4 additionally admits the exact pinned read-only alternate market
+        # verifier and input union; model, LOCK and learning bodies stay frozen.
         # Date/cache-bound saved MORNING delivery adds transport only; no prediction code.
         cap = (131_997 if name == ".github/workflows/g11-free-runner.yml" else
-               147_000 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
+               150_340 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
         text = path.read_text(encoding="utf-8")

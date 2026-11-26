@@ -1164,6 +1164,43 @@ jobs:
           if [ -s "${RUNNER_TEMP}/venue-wild4-odds.tmp" ]; then
             mv "${RUNNER_TEMP}/venue-wild4-odds.tmp" "${RUNNER_TEMP}/venue-wild4-odds.json"
           fi
+      - name: Detect retained live alternate market quotes
+        if: inputs.lineage_readback_date == '' && steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.canonical_ready == 'true' && steps.day.outputs.day >= '2026-11-27'
+        id: alternate-market
+        env:
+          STORE: ${{ steps.decrypted.outputs.store }}
+          DAY: ${{ steps.day.outputs.day }}
+        run: |
+          shopt -s nullglob
+          quotes=("${STORE}"/snapshots/predeadline/venue-market-"${DAY//-/}"-??-??.json)
+          if [ "${#quotes[@]}" -gt 0 ]; then echo 'present=true' >> "${GITHUB_OUTPUT}"; fi
+      - name: Load isolated live alternate market verifier
+        if: steps.alternate-market.outputs.present == 'true'
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 9e9c889afbf89baccd1ebe9521555a41980aaf11
+          path: .g11-alternate-input
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          sparse-checkout: |
+            g11
+            p3
+      - name: Recheck live alternate market receipts for frozen WILD inference
+        if: steps.alternate-market.outputs.present == 'true'
+        continue-on-error: true
+        env:
+          STORE: ${{ steps.decrypted.outputs.store }}
+          DAY: ${{ steps.day.outputs.day }}
+        run: |
+          set -euo pipefail
+          test "$(git -C .g11-alternate-input rev-parse HEAD)" = '9e9c889afbf89baccd1ebe9521555a41980aaf11'
+          python3 -S .g11-alternate-input/g11/relay/verified_wild_alternate_odds_v1.py "${GITHUB_WORKSPACE}/${STORE}" "${DAY}" "${RUNNER_TEMP}/alternate-wild4-odds.tmp" "${G11_PUBLIC_RUNTIME_HELPERS}"
+          if [ -s "${RUNNER_TEMP}/alternate-wild4-odds.tmp" ]; then
+            mv "${RUNNER_TEMP}/alternate-wild4-odds.tmp" "${RUNNER_TEMP}/alternate-wild4-odds.json"
+          fi
       - name: Check for a matching unexpired official odds packet
         if: steps.state-ready.outputs.ready == 'true' && steps.decrypted.outputs.runtime_ready == 'true'
         id: availability
@@ -1251,6 +1288,31 @@ jobs:
                   print('WILD4_VENUE_INPUT_QUARANTINED='+json.dumps(receipt,sort_keys=True))
               except (KeyError, TypeError, ValueError) as exc:
                   print('WILD4_STADIUM_INPUT_UNAVAILABLE='+type(exc).__name__)
+          alternate_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'alternate-wild4-odds.json'
+          if alternate_path.is_file():
+              import json
+              # This file is written only by the separate pinned verifier after
+              # original raw receipt, morning roster and deadline readback.
+              alternate=json.loads(alternate_path.read_bytes())
+              alternate=merge_verified_odds(None,alternate,day)
+              if (alternate.get('INPUT_ADMISSION')!='BOATCAST_LIVE_RECEIPT_EXACT_120_V1'
+                  or alternate.get('ORDINARY_TRAINING_STORE_MUTATED') is not False
+                  or alternate.get('PRODUCTION_MUTATED') is not False):
+                  raise ValueError('ALTERNATE_MARKET_INPUT_BOUNDARY')
+              for row in alternate['RECORDS']:
+                  if (row.get('ODDS_SOURCE_ADMISSION')!='BOATCAST_LIVE_RECEIPT_EXACT_120_V1'
+                      or row.get('UPSTREAM_PACKET') is None):
+                      raise ValueError('ALTERNATE_MARKET_PACKET_BOUNDARY')
+              # Existing ordinary packets are immutable and retain priority.
+              existing={r['STANDARD_RACE_KEY'] for r in chosen['RECORDS']} if chosen else set()
+              alternate['RECORDS']=[r for r in alternate['RECORDS'] if r['STANDARD_RACE_KEY'] not in existing]
+              alternate['ODDS_PACKET_RACE_COUNT']=len(alternate['RECORDS'])
+              alternate['ODDS_MISSING_RACE_COUNT']=alternate['UPSTREAM_RACE_COUNT']-len(alternate['RECORDS'])
+              alternate.pop('CONTENT_SHA256',None)
+              alternate['CONTENT_SHA256']=train.daily_sha(alternate)
+              if alternate['RECORDS']:
+                  chosen=merge_verified_odds(chosen,alternate,day)
+              print('WILD4_VERIFIED_ALTERNATE_INPUT_COUNT='+str(len(alternate['RECORDS'])))
           print('WILD4_VERIFIED_INPUT_UNION='+str(len(chosen['RECORDS']) if chosen else 0))
           if chosen is not None:
               from g11.wild_pack.v1 import wild_bet_bootstrap_v1 as b
