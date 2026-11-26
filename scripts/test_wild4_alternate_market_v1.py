@@ -58,7 +58,14 @@ class AlternateWorkerTests(unittest.TestCase):
                 self.assertEqual(sha256(block.encode()).hexdigest(), expected_sha)
         start = self.source.index('          def frozen_source_context_readback(')
         end = self.source.index('      - name: Lock future races', start)
-        self.assertEqual(sha256(self.source[start:end].encode()).hexdigest(),
+        context = self.source[start:end]
+        # The owner-retirement helper changes the checkout identity only.
+        # Keep the frozen context implementation hash after that exact rewrite.
+        pinned = 'source_commit = "b575480a4b452b57e663cd27d871c234f10cfa41"'
+        self.assertEqual(context.count(pinned), 1)
+        context = context.replace(pinned,
+            'source_commit = "7faaacfec8a8643a588af7e23d062fc787ba24b8"')
+        self.assertEqual(sha256(context.encode()).hexdigest(),
                          'f19be16cb99ea6cc43f19c491fd7d073257bd5bdcec3ffd91140e73cc70697db')
 
     def merge(self, ordinary, alternate):
