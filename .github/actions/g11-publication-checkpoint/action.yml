@@ -73,7 +73,7 @@ runs:
         test "${CHECKPOINT_KEY}" = "g11-state-v4-critical-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
         test "${DELTA_KEY}" = "g11-state-v4-delta-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
         python3 -c 'import os,sys;sys.path.insert(0,"scripts");from encrypt_runtime_state_v1 import compact_ready,require;v=compact_ready(os.environ["CHECKPOINT_KEY"]);require(v is not None and v["delta_key"]==os.environ["DELTA_KEY"],"REMOTE_READBACK")'
-        jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS" and .CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0' .relay-output/result.json >/dev/null
+        jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS" and (.CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0 or (if ((.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) | type) == "number" then (.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) > 0 and (.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) == ((.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) | floor) else false end))' .relay-output/result.json >/dev/null
         if [ "${PREWARM_STATUS:-}" = sent ] || [ "${PREWARM_STATUS:-}" = attempted ]; then
           echo 'attempted=true' >> "${GITHUB_OUTPUT}"
           if [ "${PREWARM_STATUS}" = sent ]; then echo 'sent=true' >> "${GITHUB_OUTPUT}"; fi
@@ -150,7 +150,7 @@ runs:
         test "${CHECKPOINT_KEY}" = "g11-state-v4-critical-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
         sha256sum -c .relay-output/publication-state.sha256
         jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
-        if ! jq -e '.CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0' .relay-output/result.json >/dev/null; then
+        if ! jq -e '(.CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0 or (if ((.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) | type) == "number" then (.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) > 0 and (.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) == ((.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) | floor) else false end))' .relay-output/result.json >/dev/null; then
           echo 'WILD4_EARLY_HANDOFF=NO_NEW_INPUT'
           exit 0
         fi
@@ -224,7 +224,7 @@ runs:
         test "${CHECKPOINT_KEY}" = "g11-state-v4-critical-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
         sha256sum -c .relay-output/publication-state.sha256
         jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS"' .relay-output/result.json >/dev/null
-        if ! jq -e '.CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0' .relay-output/result.json >/dev/null; then
+        if ! jq -e '(.CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0 or (if ((.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) | type) == "number" then (.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) > 0 and (.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) == ((.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) | floor) else false end))' .relay-output/result.json >/dev/null; then
           echo 'WILD4_EARLY_HANDOFF=NO_NEW_INPUT'
           exit 0
         fi
@@ -237,3 +237,4 @@ runs:
           -f predeadline_checkpoint_key="${CHECKPOINT_KEY}"
         echo 'sent=true' >> "${GITHUB_OUTPUT}"
         echo "WILD4_EARLY_HANDOFF=DISPATCH_ACCEPTED_${DISPATCH_STAGE}"
+
