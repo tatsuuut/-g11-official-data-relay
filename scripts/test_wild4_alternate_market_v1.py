@@ -104,9 +104,10 @@ class AlternateWorkerTests(unittest.TestCase):
         self.assertEqual(sealed['CONTENT_SHA256'], digest({k:v for k,v in sealed.items() if k != 'CONTENT_SHA256'}))
 
     def test_verifier_admission_v2_preserves_each_original_source(self):
-        alternate = self.alternate(['20261127-01-01', '20261127-24-01'])
+        alternate = self.alternate(['20261127-01-01', '20261127-24-01', '20261127-20-12'])
         urls = ['https://race.boatcast.jp/txt/01/bc_smt_od3_20261127_01_01.txt',
-                'https://www.omurakyotei.jp/yosou/sp/odds/?day=20261127&race=01']
+                'https://www.omurakyotei.jp/yosou/sp/odds/?day=20261127&race=01',
+                'https://firestore.googleapis.com/v1/projects/onemark-d07ee/databases/(default)/documents/odds/202611272012']
         for row, url in zip(alternate['RECORDS'], urls, strict=True):
             row['ODDS_SOURCE'] = url
         merged, _ = self.merge(None, alternate)
