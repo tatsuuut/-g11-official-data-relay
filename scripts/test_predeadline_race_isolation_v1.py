@@ -312,12 +312,50 @@ class IsolationTest(unittest.TestCase):
             'build_capture_audit': audit, '_write_immutable': lambda path, _: saved.append(path),
             '_json_bytes': lambda x: json.dumps(x).encode(), '_append_control': lambda *_: None,
         })
-        fn = adapter._compile(ns['capture_due'], adapter.DISPLAY_SHA, adapter._display_source)
-        result = fn(self.root, now=BASE)
+        fn = adapter._compile(ns['capture_due'], adapter.DISPLAY_SHAS, adapter._display_source)
+        import inspect
+        shared_reader = hashlib.sha256(inspect.getsource(ns['capture_due']).encode()).hexdigest() == adapter.SHARED_DISPLAY_SHA
+        if shared_reader:
+            # Exercise the actual shared reader with saved raw bytes. A failed
+            # research audit must leave the next race readable, without I/O.
+            import base64
+            for key in (BAD, GOOD):
+                before = self.root/'snapshots/predeadline'/('beforeinfo-' + key + '.json')
+                before.parent.mkdir(parents=True, exist_ok=True)
+                before.write_text('{}')
+            shared = types.ModuleType('g11.canonical.shared_original_display_v1')
+            shared.WINDOW = timedelta(minutes=12)
+            shared.load = lambda *_args, **_kwargs: {
+                'BYTES': base64.b64encode(b'official').decode(), 'SHA256': 'a'*64,
+                'CAPTURED_AT': BASE.isoformat(), 'URL': url('retained'),
+                'HOST': 'example.test', 'PROVIDER': 'BOATCAST'}
+            shared.recheck = lambda *_: {}
+            canonical = types.ModuleType('g11.canonical')
+            canonical.shared_original_display_v1 = shared
+            parent = types.ModuleType('g11'); parent.canonical = canonical
+            with patch.dict(sys.modules, {'g11': parent, 'g11.canonical': canonical,
+                    'g11.canonical.shared_original_display_v1': shared}):
+                result = fn(self.root, now=BASE, opener=lambda *_a, **_k: self.fail('research fetched'))
+            self.assertEqual(0, result['NETWORK_REQUESTS'])
+            self.assertEqual('SHARED_READ_ONLY', result['SOURCE_POLICY'])
+            self.assertEqual(inspect.getsource(ns['capture_due']),
+                             adapter._display_source(inspect.getsource(ns['capture_due'])))
+        else:
+            result = fn(self.root, now=BASE)
         self.assertEqual([GOOD], result['ACQUIRED'])
         self.assertEqual([{'RACE_KEY': BAD, 'REASON': 'BEFOREINFO_TIMING_FIELDS'}], result['FAILED'])
-        self.assertEqual('BEFOREINFO_TIMING_FIELDS', control['FAILURES'][BAD]['REASON'])
+        if not shared_reader:
+            self.assertEqual('BEFOREINFO_TIMING_FIELDS', control['FAILURES'][BAD]['REASON'])
         self.assertEqual(3, len(saved))
+
+    def test_unreviewed_display_change_is_rejected(self):
+        ns = load_functions('g11/canonical/original_display_shadow.py', {'capture_due'}, {
+            'urlopen': lambda *_a, **_k: None})
+        import inspect
+        source = inspect.getsource(ns['capture_due'])
+        with patch.object(adapter.inspect, 'getsource', return_value=source + '# changed\n'):
+            with self.assertRaisesRegex(RuntimeError, 'UNREVIEWED_SOURCE:capture_due'):
+                adapter._compile(ns['capture_due'], adapter.DISPLAY_SHAS, adapter._display_source)
 
 
 class FollowupTest(unittest.TestCase):
@@ -416,3 +454,4 @@ class FollowupTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

@@ -29,6 +29,10 @@ BET_HANDOFF_SHAS = frozenset({
     '7ee0f00a7062ac524865b3a6cdd0af3b8d94ceea5bf5156a96f4e9e7efe9443e',
 })
 DISPLAY_SHA = '69c84eb70e24ca43e3ca46aa987b3cdd2db965b3884a97a084bd61ad8efa896d'
+# The shared reader already isolates each retained capture and never fetches.
+# Retain the historical network reader's exact patch for frozen daily runtimes.
+SHARED_DISPLAY_SHA = 'd1b4d9435fd0cdec26d8e99fa58713da6942bc8e0c1341ba9193596bafcf74fc'
+DISPLAY_SHAS = frozenset({DISPLAY_SHA, SHARED_DISPLAY_SHA})
 
 
 def _replace(source, before, after):
@@ -107,6 +111,8 @@ def _handoff_source(source):
 
 
 def _display_source(source):
+    if hashlib.sha256(source.encode()).hexdigest() == SHARED_DISPLAY_SHA:
+        return source
     return _replace(source,
         '        audit = build_capture_audit(\n'
         '            store, race_key, parsed, raw_sha, captured, url\n'
@@ -139,7 +145,7 @@ def isolate_predeadline_inputs():
         })
         handoff = _compile(originals[1], BET_HANDOFF_SHAS, _handoff_source,
                            {'_collect_pre_race_packets': collector})
-        capture = _compile(originals[2], DISPLAY_SHA, _display_source)
+        capture = _compile(originals[2], DISPLAY_SHAS, _display_source)
     except RuntimeError as exc:
         # Unknown future sources retain their own semantics; never claim a patch
         # was applied and never block canonical acquisition for an optional fix.
@@ -337,4 +343,5 @@ def _handoff_main():
 
 if __name__ == '__main__':
     raise SystemExit(_handoff_main())
+
 
