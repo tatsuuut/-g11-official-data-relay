@@ -1075,8 +1075,10 @@ def main() -> int:
         # WILD4 additionally admits the exact pinned read-only alternate market
         # verifier and input union; model, LOCK and learning bodies stay frozen.
         # Date/cache-bound saved MORNING delivery adds transport only; no prediction code.
+        # The named seed2 owner command and fingerprint add exactly 669 bytes;
+        # model, LOCK, promotion and learning implementations remain frozen.
         cap = (131_997 if name == ".github/workflows/g11-free-runner.yml" else
-               150_360 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
+               151_029 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")
         text = path.read_text(encoding="utf-8")

@@ -878,12 +878,24 @@ jobs:
           from pathlib import Path
           caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
           worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert 'g11-wild4-shadow-lock-only.yml@af94d9f1c8aaff5edf4e4dfbb242f6aae6c9db75' in caller
+          assert 'g11-wild4-shadow-lock-only.yml@51ab075f75e497a3b8d72caa11a4cd60e12fcaa2' in caller
           assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
-          # The live workflow may add only the reviewed read-only dependency step.
+          # Compare the frozen worker after removing the exact reviewed additions.
           import hashlib
           current=Path('.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
           assert hashlib.sha256(worker.encode()).hexdigest() == 'b9755c0b5690d16f8d8a45f0ae5493084bcf8c19470bc92397e305152d05c045'
+          # Admit the exact owner-authorized candidate command, while every
+          # existing prediction, LOCK, promotion and learning body stays frozen.
+          owner_start=current.index("      - name: Apply the owner's named seed2 retirement after verified completed NIGHT\n")
+          owner_end=current.index('      - name:',owner_start+10)
+          assert hashlib.sha256(current[owner_start:owner_end].encode()).hexdigest() == '2cf50a53f4a27cf4986163faed91bca061e025c5f41e7ff24b1ec31897c055d6'
+          current=current[:owner_start]+current[owner_end:]
+          owner_entry=',"g11/wild_pack/v1/goripan_owner_retirement_20261127.py":"e2a86a5a782161f7b86b267893bada9b18a4f615e85725b7e49a2f01e77bb0c1"'
+          assert current.count(owner_entry)==1
+          current=current.replace(owner_entry,'')
+          owner_source='b575480a4b452b57e663cd27d871c234f10cfa41'
+          assert current.count(owner_source)==3
+          current=current.replace(owner_source,'7faaacfec8a8643a588af7e23d062fc787ba24b8')
           # Admit only these exact reviewed alternate input transport additions.
           alternate_start=current.index('      - name: Detect retained live alternate market quotes\n')
           alternate_end=current.index('      - name: Check for a matching unexpired official odds packet\n',alternate_start)
