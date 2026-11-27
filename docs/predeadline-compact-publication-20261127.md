@@ -64,3 +64,33 @@ normal next-run replay, continued cumulative deltas, newer/older target order,
 wrong or missing bases, digest/inventory/authority mismatches, and the existing
 three-phase and saved-LOCK contracts. Production capture, formal LOCK and
 before-deadline public readback are recorded separately for each engine.
+
+## Continued capture and WILD preparation
+
+The first rollout proved that the initial compact checkpoint could precede
+publication, but the continued capture still waited for the later full backup.
+On its second production cycle, all three engines reached Gamagori 7R and
+Kiryu 7R before their deadlines, with only about 32 and 41 seconds remaining
+at the WILD public readbacks. That did not establish the five-minute target.
+
+The warm transport therefore has a separate immutable `-warm` delta and cache
+path, while retaining the actual parent run's canonical critical checkpoint
+identity. It authenticates and retains the first delta, protects the LOCKs and
+bindings created by the first capture, and proves the second target before
+publishing the warm forecasts. Same-run recovery orders the first delta,
+critical full, warm delta and later published full in that order. A warm proof
+failure returns to the existing later complete backup and saved publication.
+
+WILD preparation starts before the continued capture and waits for the exact
+warm delta. It uses the existing serialized worker, model bindings and LOCK
+rules. A parent step that definitively skipped saving its warm checkpoint can
+stop that exact waiting child; incomplete or unavailable metadata cannot
+authorize inference. Public helper and worker transport changes are delivered
+through reviewed complete commit SHAs. The seven prediction, model, input,
+LOCK, settlement and learning blocks remain byte-identical to 0634adb.
+
+The reviewed helper snapshot is `e209d6f16ea046527e8571aeb7b5ec8d2de3622a`.
+The caller pins the worker to `8e224b3e88b51142e8d06b5523301a48259c4959`,
+which in turn pins that helper snapshot. CI keeps the previous frozen worker
+comparison against exact 0634adb source and separately verifies the new worker
+file digest and all seven unchanged protected blocks.

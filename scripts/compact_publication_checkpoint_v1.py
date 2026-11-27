@@ -120,6 +120,8 @@ def restore(day, base_key):
 def verify_manifest(manifest, archive, *, root, cipher, ready, base, result):
     """Prove complete reconstruction without rewriting any live state file."""
     day, run = ready['day'], ready['run_id']
+    require(checkpoint.compact_manifest_stage(ready) == checkpoint.compact_manifest_stage(manifest),
+            'MANIFEST_STAGE')
     require(base.get('schema') == BASE_SCHEMA and base.get('day') == day
             and base.get('base_key') == ready['base_key'] == manifest['base_key']
             and base.get('cipher_sha256') == manifest['base_cipher_sha256']
@@ -156,12 +158,23 @@ def verify_manifest(manifest, archive, *, root, cipher, ready, base, result):
             and gate.get('LAST_TIMELY_SOURCE_COUNT', 0) > 0
             and gate.get('AUTHORITY_SHA256') == owner['authority_sha256']
             and gate.get('RUNTIME_SOURCE_SHA') == owner['runtime_source_sha'], 'TARGET_BINDING')
-    return {'schema': PROOF_SCHEMA, 'day': day, 'run_id': run,
+    proof = {'schema': PROOF_SCHEMA, 'day': day, 'run_id': run,
         'checkpoint_key': ready['checkpoint_key'], 'base_key': ready['base_key'],
         'base_cipher_sha256': base['cipher_sha256'], 'delta_key': ready['delta_key'],
         'delta_cipher_sha256': ready['cipher_sha256'],
         'target_inventory_sha256': digest(manifest['target']),
         'authority_sha256': owner['authority_sha256'], 'runtime_source_sha': owner['runtime_source_sha']}
+    if checkpoint.compact_manifest_stage(manifest) == 'warm':
+        require(ready['publication_key'] == manifest['publication_key']
+                and ready['publication_attempt'] == manifest['publication_attempt'], 'PUBLICATION_STAGE_KEY')
+        checkpoint.validate_prior_target(manifest)
+        protected = checkpoint.protected_inventory(root, manifest['prior_target'], owner, day)
+        require(protected == manifest['prior_protected'], 'PRIOR_PROTECTED_SET')
+        proof.update(capture_stage='warm', publication_attempt=ready['publication_attempt'],
+            publication_key=ready['publication_key'], prior_delta_key=manifest['prior_delta_key'],
+            prior_delta_cipher_sha256=manifest['prior_delta_cipher_sha256'],
+            prior_target_inventory_sha256=digest(manifest['prior_target']))
+    return proof
 
 
 def require_remote_base(base_key, *, query=None):
@@ -182,19 +195,26 @@ def require_remote_base(base_key, *, query=None):
                     for row in value['actions_caches']), 'REMOTE_BASE_MISSING')
 
 
-def verify(key, readback_hit):
-    proof_path = OUT / 'compact-publication-proof.json'
+def verify(key, readback_hit, *, capture_stage='critical'):
+    proof_path = OUT / ('warm-publication-proof.json' if capture_stage == 'warm' else 'compact-publication-proof.json')
     proof_path.unlink(missing_ok=True)
     require(readback_hit == 'true', 'EXACT_READBACK')
-    ready = checkpoint.compact_ready(key)
+    ready = checkpoint.compact_ready(key, capture_stage=capture_stage)
     require(ready is not None and ready['day'] >= '2026-11-27'
             and ready['day'] == datetime.now(JST).date().isoformat(),
             'CURRENT_READY')
+    require(checkpoint.compact_manifest_stage(ready) == capture_stage, 'CAPTURE_STAGE')
     base = json.loads((OUT / 'authenticated-base.json').read_bytes())
     with tempfile.TemporaryDirectory(prefix='g11-compact-publication-') as folder:
         archive = Path(folder) / 'readback.tgz'
-        decrypt(OUT / 'early-delta.tgz.gpg', archive)
-        manifest = checkpoint.inspect_delta(archive, day=ready['day'], checkpoint_key=key)
+        decrypt(checkpoint.compact_paths(capture_stage)[0], archive)
+        manifest = checkpoint.inspect_delta(archive, day=ready['day'], checkpoint_key=ready['checkpoint_key'])
+        if capture_stage == 'warm':
+            first, first_sha = checkpoint.authenticated_first_manifest(secret(), day=ready['day'], run_id=ready['run_id'])
+            require(manifest['prior_target'] == first['target']
+                    and manifest['prior_delta_key'] == first['delta_key']
+                    and manifest['prior_delta_cipher_sha256'] == first_sha,
+                    'FIRST_TARGET_BINDING')
         proof = verify_manifest(manifest, archive, root=Path('.relay-state'),
             cipher=Path('.relay-cache/state.tgz.gpg'), ready=ready, base=base,
             result=json.loads((OUT / 'result.json').read_bytes()))
@@ -212,12 +232,13 @@ def main():
     parser.add_argument('--base-key', default='')
     parser.add_argument('--checkpoint-key')
     parser.add_argument('--readback-hit')
+    parser.add_argument('--capture-stage', choices=('critical', 'warm'), default='critical')
     args = parser.parse_args()
     if args.mode == 'restore':
         require(args.day is not None, 'RESTORE_DAY')
         restore(args.day, args.base_key)
     else:
-        verify(args.checkpoint_key, args.readback_hit)
+        verify(args.checkpoint_key, args.readback_hit, capture_stage=args.capture_stage)
 
 
 if __name__ == '__main__':

@@ -78,6 +78,81 @@ def checkpoint_day(key):
     return match.group(1)
 
 
+def validate_compact_keys(day, checkpoint_key, delta_key):
+    """Bind either publication slot to the real parent run, never a fake run."""
+    match = re.fullmatch(r'g11-state-v4-critical-' + re.escape(day) + r'-([0-9]+)', checkpoint_key)
+    require(match is not None, 'TARGET_KEY')
+    initial = f'g11-state-v4-delta-{day}-{match.group(1)}'
+    if delta_key == initial:
+        return 'critical'
+    require(day >= '2026-11-27' and delta_key == initial + '-warm', 'STAGE_KEY')
+    return 'warm'
+
+
+def compact_manifest_stage(value):
+    day, run = value['day'], value['run_id']
+    stage = validate_compact_keys(day, value['checkpoint_key'], value['delta_key'])
+    require(value['checkpoint_key'] == f'g11-state-v4-critical-{day}-{run}'
+            and value.get('capture_stage', 'critical') == stage, 'STAGE_BINDING')
+    if stage == 'warm':
+        attempt = value.get('publication_attempt')
+        require(isinstance(attempt, str) and re.fullmatch('[1-9][0-9]*', attempt)
+                and value.get('publication_key') == f'g11-state-v4-published-{day}-{run}-{attempt}-checkpoint',
+                'WARM_PUBLICATION_KEY')
+    else:
+        require(not any(key in value for key in ('publication_attempt', 'publication_key')), 'INITIAL_STAGE_FIELDS')
+    return stage
+
+
+def validate_prior_target(manifest, *, owner=None, reader=None):
+    if compact_manifest_stage(manifest) != 'warm':
+        return
+    prior = validate_inventory(manifest.get('prior_target'))
+    protected = manifest.get('prior_protected')
+    require(isinstance(protected, dict) and bool(protected)
+            and manifest.get('prior_delta_key') == f'g11-state-v4-delta-{manifest["day"]}-{manifest["run_id"]}'
+            and re.fullmatch('[a-f0-9]{64}', str(manifest.get('prior_delta_cipher_sha256'))), 'PRIOR_IDENTITY')
+    required = {name for name in prior['files'] if name.startswith((
+        'store/snapshots/morning/', 'store/snapshots/predeadline/',
+        'daily-runtime/' + manifest['day'] + '/bindings/'))}
+    authority = 'daily-runtime/' + manifest['day'] + '/authority.json'
+    required.add(authority)
+    require(required <= protected.keys()
+            and prior['files'].get(authority) == manifest['base']['files'].get(authority)
+            and all(prior['files'].get(name) == item == manifest['target']['files'].get(name)
+                    for name, item in protected.items()), 'PRIOR_LOCK_CHANGED')
+    if owner is not None:
+        expected = protected_inventory(None, prior, owner, manifest['day'], reader=reader)
+        require(expected == protected, 'PRIOR_PROTECTED_SET')
+
+
+def compact_paths(stage):
+    require(stage in {'critical', 'warm'}, 'CAPTURE_STAGE')
+    prefix = 'warm-delta' if stage == 'warm' else 'early-delta'
+    folder = Path('.relay-output')
+    return folder / (prefix + '.tgz.gpg'), folder / (prefix + '-ready.json')
+
+
+def protected_inventory(root, inventory, owner, day, *, reader=None):
+    """Preserve prior native prediction LOCKs while allowing new bindings."""
+    files = inventory['files']
+    names = {name for name in files if name.startswith((
+        'store/snapshots/morning/', 'store/snapshots/predeadline/',
+        'daily-runtime/' + day + '/bindings/'))}
+    names.add('daily-runtime/' + day + '/authority.json')
+    if owner.get('source_archive'):
+        names.add('daily-runtime/' + day + '/' + owner['source_archive'])
+    names.update('store/' + name for name in owner.get('model_files', {}))
+    reader = reader or (lambda name: (Path(root) / name).read_bytes())
+    for name in tuple(names):
+        if name.startswith('daily-runtime/' + day + '/bindings/'):
+            raw = reader(name)
+            require(name in files and hashlib.sha256(raw).hexdigest() == files[name]['sha256'], 'PRIOR_BINDING_BYTES')
+            names.update('store/' + path for path in json.loads(raw).get('lock_files', {}))
+    require(all(name in files for name in names), 'PRIOR_PROTECTED_FILES')
+    return {name: files[name] for name in sorted(names)}
+
+
 def prewarm_identity(base_key, checkpoint_key):
     """A preparation key never authorizes inference or prefix fallback."""
     day = checkpoint_day(base_key)
@@ -119,7 +194,8 @@ def wait_for_compact(base_key, checkpoint_key, delta_key, *, maximum=420, clock=
     """Poll only exact saved cache metadata; never fetch official race inputs."""
     day = prewarm_identity(base_key, checkpoint_key)
     run = checkpoint_key.split(day + '-')[1]
-    require(delta_key == f'g11-state-v4-delta-{day}-{run}' and 0 < maximum <= 420, 'PREWARM_WAIT')
+    validate_compact_keys(day, checkpoint_key, delta_key)
+    require(0 < maximum <= 420, 'PREWARM_WAIT')
     clock, sleeper = clock or time.monotonic, sleeper or time.sleep
     repository = os.environ['GITHUB_REPOSITORY']
     require(repository == 'tatsuuut/-g11-official-data-relay', 'PREWARM_REPOSITORY')
@@ -169,7 +245,8 @@ def validate_inventory(value):
     return value
 
 
-def delta_manifest(root, base, base_key, base_cipher_sha):
+def delta_manifest(root, base, base_key, base_cipher_sha, *, capture_stage='critical', publication_attempt='1',
+                   first_target=None, first_delta_cipher_sha256=None):
     root = Path(root)
     state = json.loads((root / 'relay-state.json').read_bytes())
     day, critical = state.get('OPERATIONAL_DATE_JST'), state.get('CRITICAL', {})
@@ -189,10 +266,23 @@ def delta_manifest(root, base, base_key, base_cipher_sha):
     authority_name = 'daily-runtime/' + day + '/authority.json'
     require(base['files'].get(authority_name) == target['files'].get(authority_name), 'BASE_AUTHORITY_CHANGED')
     changed = sorted(name for name, item in target['files'].items() if base['files'].get(name) != item)
-    return {'schema': DELTA_SCHEMA, 'day': day, 'run_id': run_id,
+    require(capture_stage in {'critical', 'warm'}, 'CAPTURE_STAGE')
+    manifest = {'schema': DELTA_SCHEMA, 'day': day, 'run_id': run_id,
             'checkpoint_key': f'g11-state-v4-critical-{day}-{run_id}',
             'delta_key': f'g11-state-v4-delta-{day}-{run_id}', 'base_key': base_key,
             'base_cipher_sha256': base_cipher_sha, 'base': base, 'target': target, 'changed': changed}
+    if capture_stage == 'warm':
+        validate_inventory(first_target)
+        require(re.fullmatch('[a-f0-9]{64}', str(first_delta_cipher_sha256)), 'PRIOR_CIPHER')
+        protected = protected_inventory(root, first_target, authority, day)
+        require(all(target['files'].get(name) == item for name, item in protected.items()), 'PRIOR_LOCK_CHANGED')
+        manifest.update(capture_stage='warm', publication_attempt=publication_attempt,
+            publication_key=f'g11-state-v4-published-{day}-{run_id}-{publication_attempt}-checkpoint',
+            delta_key=f'g11-state-v4-delta-{day}-{run_id}-warm', prior_target=first_target,
+            prior_delta_key=f'g11-state-v4-delta-{day}-{run_id}',
+            prior_delta_cipher_sha256=first_delta_cipher_sha256, prior_protected=protected)
+    compact_manifest_stage(manifest)
+    return manifest
 
 
 def write_delta(root, manifest, destination):
@@ -224,10 +314,11 @@ def inspect_delta(archive_path, *, day, checkpoint_key):
         require(manifest.get('schema') == DELTA_SCHEMA and manifest.get('day') == day
                 and manifest.get('checkpoint_key') == checkpoint_key
                 and checkpoint_key == f'g11-state-v4-critical-{day}-{manifest.get("run_id")}'
-                and manifest.get('delta_key') == f'g11-state-v4-delta-{day}-{manifest.get("run_id")}'
                 and checkpoint_day(manifest.get('base_key', '')) == day
                 and re.fullmatch('[a-f0-9]{64}', manifest.get('base_cipher_sha256', '')), 'MANIFEST_BINDING')
+        compact_manifest_stage(manifest)
         base, target = validate_inventory(manifest.get('base')), validate_inventory(manifest.get('target'))
+        validate_prior_target(manifest)
         changed = sorted(name for name, item in target['files'].items() if base['files'].get(name) != item)
         require(manifest.get('changed') == changed, 'CHANGE_SET')
         require([m.name for m in members[1:]] == ['changes/' + n for n in changed], 'MEMBER_SET')
@@ -241,6 +332,13 @@ def apply_delta(archive_path, root, *, day, checkpoint_key, base_cipher):
     manifest = inspect_delta(archive_path, day=day, checkpoint_key=checkpoint_key)
     require(file_sha(base_cipher) == manifest['base_cipher_sha256'], 'BASE_CIPHER')
     require(snapshot_state(root) == manifest['base'], 'BASE_INVENTORY')
+    if compact_manifest_stage(manifest) == 'warm':
+        owner = json.loads((root / 'daily-runtime' / day / 'authority.json').read_bytes())
+        with tarfile.open(archive_path, 'r:gz') as source:
+            def read_prior(name):
+                return (source.extractfile('changes/' + name).read() if name in manifest['changed']
+                        else (root / name).read_bytes())
+            validate_prior_target(manifest, owner=owner, reader=read_prior)
     stage = Path(tempfile.mkdtemp(prefix='.g11-delta-verified-', dir=root.parent))
     backup = stage.with_name(stage.name + '.base')
     started = time.monotonic()
@@ -310,15 +408,47 @@ def encrypt_gzip_file(source, output, passphrase_fd):
         temporary.unlink(missing_ok=True)
 
 
-def prepare_compact_checkpoint(root, base_cipher, base_key, *, secret):
+def authenticated_first_manifest(secret, *, day, run_id):
+    cipher, _ = compact_paths('critical')
+    proof = json.loads((Path('.relay-output') / 'compact-publication-proof.json').read_bytes())
+    require(proof.get('schema') == 'G11_COMPLETE_COMPACT_PUBLICATION_PROOF_V1'
+            and proof.get('day') == day and proof.get('run_id') == run_id
+            and proof.get('delta_cipher_sha256') == file_sha(cipher), 'FIRST_PUBLICATION_PROOF')
+    with tempfile.TemporaryDirectory(prefix='g11-first-compact-') as folder:
+        archive = Path(folder) / 'first.tgz'
+        with secret_pipe(secret) as fd:
+            result = subprocess.run(['gpg', '--batch', '--yes', '--pinentry-mode', 'loopback',
+                '--passphrase-fd', str(fd), '--decrypt', '--output', str(archive), str(cipher)],
+                pass_fds=(fd,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+        require(result.returncode == 0, 'FIRST_AUTHENTICATION')
+        manifest = inspect_delta(archive, day=day, checkpoint_key=f'g11-state-v4-critical-{day}-{run_id}')
+    require(compact_manifest_stage(manifest) == 'critical'
+            and proof.get('checkpoint_key') == manifest['checkpoint_key']
+            and proof.get('delta_key') == manifest['delta_key']
+            and proof.get('base_key') == manifest['base_key']
+            and proof.get('base_cipher_sha256') == manifest['base_cipher_sha256']
+            and proof.get('target_inventory_sha256') == hashlib.sha256(canonical(manifest['target'])).hexdigest(),
+            'FIRST_MANIFEST_BINDING')
+    return manifest, file_sha(cipher)
+
+
+def prepare_compact_checkpoint(root, base_cipher, base_key, *, secret, capture_stage='critical'):
     folder = Path('.relay-output')
-    encrypted, ready = folder / 'early-delta.tgz.gpg', folder / 'early-delta-ready.json'
+    encrypted, ready = compact_paths(capture_stage)
     encrypted.unlink(missing_ok=True); ready.unlink(missing_ok=True)
     try:
         saved = json.loads((folder / 'base-inventory.json').read_bytes())
         require(saved.get('schema') == DELTA_SCHEMA, 'BASE_INDEX_SCHEMA')
         require(Path(base_cipher).is_file(), 'BASE_CIPHER_MISSING')
-        manifest = delta_manifest(root, saved['inventory'], base_key, file_sha(base_cipher))
+        prior = {}
+        if capture_stage == 'warm':
+            state = json.loads((Path(root) / 'relay-state.json').read_bytes())
+            first, first_sha = authenticated_first_manifest(secret, day=state['OPERATIONAL_DATE_JST'],
+                run_id=state['CRITICAL']['LAST_CRITICAL_RUN_ID'])
+            require(first['base_key'] == base_key and first['base'] == saved['inventory'], 'FIRST_BASE')
+            prior = {'first_target': first['target'], 'first_delta_cipher_sha256': first_sha}
+        manifest = delta_manifest(root, saved['inventory'], base_key, file_sha(base_cipher),
+            capture_stage=capture_stage, publication_attempt=os.environ.get('GITHUB_RUN_ATTEMPT', '1'), **prior)
         require(manifest['run_id'] == os.environ.get('GITHUB_RUN_ID'), 'CURRENT_RUN')
         require(int(base_key.split(manifest['day'] + '-')[1].split('-')[0]) < int(manifest['run_id']), 'BASE_RUN')
         started = time.monotonic()
@@ -328,7 +458,8 @@ def prepare_compact_checkpoint(root, base_cipher, base_key, *, secret):
             require(archive.stat().st_size < min(DELTA_LIMIT, Path(base_cipher).stat().st_size // 4), 'NOT_SMALLER')
             with secret_pipe(secret) as fd:
                 encrypt_gzip_file(archive, encrypted, fd)
-        atomic_json(ready, {k: manifest[k] for k in ('day', 'run_id', 'checkpoint_key', 'delta_key', 'base_key')} |
+        atomic_json(ready, {k: manifest[k] for k in ('day', 'run_id', 'checkpoint_key', 'delta_key', 'base_key',
+                    'capture_stage', 'publication_attempt', 'publication_key') if k in manifest} |
                     {'cipher_sha256': file_sha(encrypted)})
         print('G11_COMPACT_CHECKPOINT=READY BYTES=' + str(encrypted.stat().st_size)
               + ' CHANGED=' + str(len(manifest['changed'])) + ' SECONDS=' + str(round(time.monotonic() - started, 3)), flush=True)
@@ -338,16 +469,16 @@ def prepare_compact_checkpoint(root, base_cipher, base_key, *, secret):
         print('G11_COMPACT_CHECKPOINT=FULL_FALLBACK TYPE=' + type(error).__name__, flush=True)
 
 
-def compact_ready(checkpoint_key):
-    folder = Path('.relay-output')
+def compact_ready(checkpoint_key, *, capture_stage='critical'):
+    cipher, ready = compact_paths(capture_stage)
     try:
-        value = json.loads((folder / 'early-delta-ready.json').read_bytes())
-        require(value['checkpoint_key'] == checkpoint_key
-                and checkpoint_key == f'g11-state-v4-critical-{value["day"]}-{value["run_id"]}'
-                and value['delta_key'] == f'g11-state-v4-delta-{value["day"]}-{value["run_id"]}'
+        value = json.loads(ready.read_bytes())
+        stage = compact_manifest_stage(value)
+        require((value.get('publication_key') if stage == 'warm' else value['checkpoint_key']) == checkpoint_key
+                and stage == capture_stage
                 and value['run_id'] == os.environ['GITHUB_RUN_ID']
                 and checkpoint_day(value['base_key']) == value['day']
-                and file_sha(folder / 'early-delta.tgz.gpg') == value['cipher_sha256'], 'READY_BINDING')
+                and file_sha(cipher) == value['cipher_sha256'], 'READY_BINDING')
         return value
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -465,13 +596,14 @@ def main():
     parser.add_argument('--prepare-gzip', action='store_true')
     parser.add_argument('--delta-base-key')
     parser.add_argument('--delta-only', action='store_true')
+    parser.add_argument('--capture-stage', choices=('critical', 'warm'), default='critical')
     parser.add_argument('--compact-ready')
     args = parser.parse_args()
     if args.prepare_gzip:
         prepare_gzip_acceleration()
         return
     if args.compact_ready:
-        value = compact_ready(args.compact_ready)
+        value = compact_ready(args.compact_ready, capture_stage=args.capture_stage)
         if value:
             with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
                 output.write('key=' + value['delta_key'] + '\n')
@@ -482,7 +614,8 @@ def main():
         with os.fdopen(os.dup(3), 'rb') as source:
             secret = source.readline(4097)
         require(0 < len(secret) <= 4096 and secret.endswith(b'\n'), 'SECRET_INPUT')
-        prepare_compact_checkpoint(args.state_root, args.output, args.delta_base_key or '', secret=secret)
+        prepare_compact_checkpoint(args.state_root, args.output, args.delta_base_key or '', secret=secret,
+                                   capture_stage=args.capture_stage)
         if not args.delta_only:
             with secret_pipe(secret) as fd:
                 encrypt(args.state_root, args.output, passphrase_fd=fd)

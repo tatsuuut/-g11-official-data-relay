@@ -697,14 +697,17 @@ class RetryTests(unittest.TestCase):
         self.assertIn("steps.critical.outputs.warm=='true'", warm)
         self.assertIn('G11_WARM_CONTINUATION_READY: ${{steps.predeadline-chain.outputs.ready}}', warm)
         chain = source[offsets[2]:].split('      - name:', 1)[0]
-        self.assertGreater(chain.index("echo 'ready=true'"), chain.index('predeadline_dispatch_v1.py'))
+        self.assertIn('warm_publication_orchestrator_v1.py chain', chain)
+        import warm_publication_orchestrator_v1 as publication
+        body = inspect.getsource(publication.chain)
+        self.assertGreater(body.index("output(ready='true')"), body.index('predeadline_dispatch_v1.py'))
         publish = source[offsets[-2]:].split('      - name:', 1)[0]
         self.assertIn("steps.publication-state-verified.outputs.ready=='true'", publish)
         self.assertIn("G11_WARM_PUBLICATION:", publish)
         followup = source[offsets[-1]:].split('      - name:', 1)[0]
         self.assertIn('if: always()&&!cancelled()&&', followup)
         self.assertIn("steps.publication-state-verified.outputs.ready=='true'", followup)
-        self.assertIn("steps.warm.outcome == 'success' && steps.critical-retry.outcome == 'success'", source)
+        self.assertIn("steps.warm.outcome == 'success' && (steps.critical-retry.outcome == 'success' || steps.warm-publish.outcome == 'success')", source)
 
     def test_warm_start_checks_receipt_preserves_first_cutoff_and_enforces_residual_budget(self):
         root = self.root

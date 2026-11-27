@@ -624,7 +624,8 @@ class FollowupTest(unittest.TestCase):
         import subprocess
         source = (Path(__file__).resolve().parents[1]/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
         filters = re.findall(r"jq -e '([^']*LAST_TIMELY_ALTERNATE_MARKET_COUNT[^']*)'", source)
-        self.assertEqual(len(filters), 3)
+        self.assertEqual(len(filters), 2)
+        self.assertIn('scripts/warm_publication_orchestrator_v1.py handoff', source)
         for query in filters:
             for primary, alternate, expected in [(0, 1, 0), (1, 0, 0), (0, 0, 1), (0, None, 1), (0, 'yes', 1), (0, True, 1), (0, 1.5, 1), (0, -1, 1)]:
                 critical = {'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_TIMELY_SOURCE_COUNT': primary}
@@ -632,6 +633,34 @@ class FollowupTest(unittest.TestCase):
                 result = subprocess.run(['jq', '-e', query], input=json.dumps({'CRITICAL': critical}),
                     text=True, capture_output=True)
                 self.assertEqual(result.returncode, expected, result.stderr)
+        # The compact gate now runs through the production Python adapter.
+        # Exercise the same valid/invalid counts there; only IO is replaced.
+        import warm_publication_orchestrator_v1 as warm
+        day, run = '2026-11-27', '43'
+        key = 'g11-state-v4-critical-' + day + '-' + run
+        ready = {'day': day, 'run_id': run, 'checkpoint_key': key,
+                 'delta_key': key.replace('-critical-', '-delta-')}
+        for primary, alternate, expected in [(0, 1, 0), (1, 0, 0), (0, 0, 1), (0, None, 1),
+                                              (0, 'yes', 1), (0, True, 1), (0, 1.5, 1), (0, -1, 1)]:
+            gate = {'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_TIMELY_SOURCE_COUNT': primary}
+            if alternate is not None:
+                gate['LAST_TIMELY_ALTERNATE_MARKET_COUNT'] = alternate
+            with self.subTest(compact_primary=primary, compact_alternate=alternate), \
+                    patch.dict(os.environ, {'GITHUB_RUN_ID': run}), \
+                    patch.object(warm.checkpoint, 'compact_ready', return_value=ready), \
+                    patch.object(warm, 'read', return_value={'CRITICAL': gate}), \
+                    patch.object(warm, 'output') as output, \
+                    patch.object(warm.subprocess, 'run') as dispatch, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                if expected == 0:
+                    warm.handoff(day, key, 'critical', '')
+                    dispatch.assert_called_once()
+                    self.assertIn('predeadline_checkpoint_key=' + key, dispatch.call_args.args[0])
+                else:
+                    with self.assertRaisesRegex(ValueError, 'HANDOFF_INPUT'):
+                        warm.handoff(day, key, 'critical', '')
+                    dispatch.assert_not_called()
+                    output.assert_not_called()
 
 
 if __name__ == '__main__':

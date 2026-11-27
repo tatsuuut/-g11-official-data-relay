@@ -281,6 +281,8 @@ class CompletePrefixTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'scripts').mkdir()
+            (root / 'scripts/warm_publication_orchestrator_v1.py').write_bytes(
+                (audit.ROOT / 'scripts/warm_publication_orchestrator_v1.py').read_bytes())
             target = root / 'scripts/predeadline_dispatch_v1.py'
             for needle, code in mutations:
                 target.write_text(source.replace(needle, 'REMOVED_GUARD'))

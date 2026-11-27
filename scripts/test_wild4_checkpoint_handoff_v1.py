@@ -304,10 +304,18 @@ class CompactDispatchTests(unittest.TestCase):
         import encrypt_runtime_state_v1 as archive
         action=(ROOT/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
         block=action.split('    - name: Start WILD4 from a verified full reconstruction before large backup transfer\n',1)[1].split('    - name:',1)[0]
-        script=textwrap.dedent(block.split('      run: |\n',1)[1])
+        self.assertIn('scripts/warm_publication_orchestrator_v1.py handoff',block)
+        script=' '.join(line.strip() for line in block.split('      run: >-\n',1)[1].splitlines())
+        for name,value in (('wild4-day',DAY),('cache-key',KEY),('capture-stage','critical'),('prewarm',prewarm)):
+            script=script.replace('${{ inputs.'+name+' }}',value)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);out=root/'.relay-output';out.mkdir();(root/'scripts').mkdir()
             (root/'scripts/encrypt_runtime_state_v1.py').write_text((ROOT/'scripts/encrypt_runtime_state_v1.py').read_text())
+            (root/'scripts/warm_publication_orchestrator_v1.py').write_text((ROOT/'scripts/warm_publication_orchestrator_v1.py').read_text())
+            (root/'bin').mkdir()
+            gh=root/'bin/gh'
+            gh.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$TEST_CALLS"\nexit "$TEST_STATUS"\n')
+            gh.chmod(0o755)
             cipher=out/'early-delta.tgz.gpg';cipher.write_bytes(b'complete authenticated compact checkpoint')
             delta_key='g11-state-v4-delta-'+DAY+'-123'
             archive.atomic_json(out/'early-delta-ready.json',{'day':DAY,'run_id':'123','checkpoint_key':KEY,
@@ -317,9 +325,8 @@ class CompactDispatchTests(unittest.TestCase):
             output=root/'output';calls=root/'calls'
             env={**os.environ,'GITHUB_OUTPUT':str(output),'TEST_CALLS':str(calls),'GITHUB_RUN_ID':'123',
                 'OPERATIONAL_DATE':DAY,'CHECKPOINT_KEY':KEY,'DELTA_KEY':delta_key,'TEST_STATUS':str(dispatch_status),
-                'PREWARM_STATUS':prewarm}
-            stub='gh() { printf "%s\\n" "$@" >> "$TEST_CALLS"; return "$TEST_STATUS"; }\n timeout() { shift 3; "$@"; }\n'
-            result=subprocess.run(['bash','-c',stub+script],cwd=root,env=env,text=True,capture_output=True,timeout=10)
+                'PREWARM_STATUS':prewarm,'PATH':str(root/'bin')+os.pathsep+os.environ['PATH']}
+            result=subprocess.run(['bash','-c',script],cwd=root,env=env,text=True,capture_output=True,timeout=10)
             return result,output.read_text() if output.exists() else '',calls.read_text() if calls.exists() else ''
 
     def test_full_reconstruction_can_start_before_large_backup_but_canonical_gate_is_unchanged(self):

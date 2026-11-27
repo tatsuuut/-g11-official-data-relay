@@ -35,6 +35,12 @@ on:
         description: Exact authenticated complete reconstruction checkpoint
         required: false
         type: string
+      capture_stage:
+        description: Exact critical or warm saved capture represented by the delta
+        required: false
+        default: critical
+        type: choice
+        options: [critical, warm]
       prewarm_base_key:
         description: Exact encrypted base prepared before the new official input is acquired
         required: false
@@ -471,10 +477,11 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'LIVE-predeadline-')
         )
       )
-    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@51ab075f75e497a3b8d72caa11a4cd60e12fcaa2
+    uses: tatsuuut/-g11-official-data-relay/.github/workflows/g11-wild4-shadow-lock-only.yml@8e224b3e88b51142e8d06b5523301a48259c4959
     with:
       predeadline_checkpoint_key: ${{ inputs.predeadline_checkpoint_key || '' }}
       predeadline_delta_key: ${{ inputs.predeadline_delta_key || '' }}
+      capture_stage: ${{ inputs.capture_stage || 'critical' }}
       prewarm_base_key: ${{ inputs.prewarm_base_key || '' }}
       night_checkpoint_key: ${{ inputs.night_checkpoint_key || '' }}
       lineage_readback_date: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[goripan-promotion]') && '2026-10-07' || '' }}

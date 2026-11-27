@@ -39,11 +39,11 @@ def digest(value):
 def checkpoint_rank(key):
     """Logical target first; an older run's late full cannot hide newer LOCKs."""
     match = re.fullmatch(r'g11-state-v4-(delta|critical|published)-(20\d{2}-\d{2}-\d{2})-'
-                         r'([0-9]+)(?:-([0-9]+)-checkpoint)?', key)
+                         r'([0-9]+)(?:(-warm)|-([0-9]+)-checkpoint)?', key)
     require(match is not None, 'KEY')
-    lane, _day, run, attempt = match.groups()
-    require(lane == 'published' or attempt is None, 'KEY_STAGE')
-    return int(run), {'delta': 0, 'critical': 1, 'published': 2}[lane], int(attempt or 0)
+    lane, _day, run, warm, attempt = match.groups()
+    require((lane == 'published' or attempt is None) and (not warm or lane == 'delta'), 'KEY_STAGE')
+    return int(run), 2 if warm else {'delta': 0, 'critical': 1, 'published': 3}[lane], int(attempt or 0)
 
 
 def cache_order(row):
@@ -53,7 +53,7 @@ def cache_order(row):
 
 def choose_delta_key(day, caches, full_key):
     datetime.strptime(day, '%Y-%m-%d')
-    pattern = re.compile(r'g11-state-v4-delta-' + re.escape(day) + r'-[0-9]+')
+    pattern = re.compile(r'g11-state-v4-delta-' + re.escape(day) + r'-[0-9]+(?:-warm)?')
     candidates = [row for row in caches if isinstance(row, dict)
                   and row.get('ref') == 'refs/heads/main'
                   and pattern.fullmatch(str(row.get('key', '')))]
@@ -70,11 +70,12 @@ def _secret():
     return value
 
 
-def _decrypt(destination):
-    require(DELTA.is_file() and not DELTA.is_symlink(), 'DELTA_MISSING')
+def _decrypt(destination, *, cipher=None):
+    cipher = cipher or DELTA
+    require(cipher.is_file() and not cipher.is_symlink(), 'DELTA_MISSING')
     with checkpoint.secret_pipe(_secret()) as fd:
         result = subprocess.run(['gpg', '--batch', '--yes', '--pinentry-mode', 'loopback',
-            '--passphrase-fd', str(fd), '--decrypt', '--output', str(destination), str(DELTA)],
+            '--passphrase-fd', str(fd), '--decrypt', '--output', str(destination), str(cipher)],
             pass_fds=(fd,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
     require(result.returncode == 0, 'AUTHENTICATION')
 
@@ -104,8 +105,8 @@ def _metadata(archive, manifest):
 
 
 def _inspect(archive, day, delta_key):
-    require(re.fullmatch(r'g11-state-v4-delta-' + re.escape(day) + r'-[0-9]+', delta_key), 'DELTA_KEY')
-    key = delta_key.replace('g11-state-v4-delta-', 'g11-state-v4-critical-', 1)
+    require(re.fullmatch(r'g11-state-v4-delta-' + re.escape(day) + r'-[0-9]+(?:-warm)?', delta_key), 'DELTA_KEY')
+    key = delta_key.removesuffix('-warm').replace('g11-state-v4-delta-', 'g11-state-v4-critical-', 1)
     manifest = checkpoint.inspect_delta(archive, day=day, checkpoint_key=key)
     require(isinstance(manifest.get('run_id'), str) and re.fullmatch('[0-9]+', manifest['run_id'])
             and manifest['delta_key'] == delta_key
@@ -115,6 +116,17 @@ def _inspect(archive, day, delta_key):
             and manifest['base']['files'][name] == manifest['target']['files'].get(name), 'AUTHORITY_CHANGED')
     state = _metadata(archive, manifest)
     return manifest, state
+
+
+def _delta_cipher(delta_key):
+    return checkpoint.compact_paths('warm')[0] if delta_key.endswith('-warm') else DELTA
+
+
+def _decrypt_selected(archive, delta_key):
+    if delta_key.endswith('-warm'):
+        _decrypt(archive, cipher=_delta_cipher(delta_key))
+    else:
+        _decrypt(archive)
 
 
 def inspect_recovery(day, delta_key, cache_hit, full_key):
@@ -127,16 +139,18 @@ def inspect_recovery(day, delta_key, cache_hit, full_key):
                 and checkpoint_rank(delta_key) > checkpoint_rank(full_key), 'STALE_DELTA')
     with tempfile.TemporaryDirectory(prefix='g11-compact-recovery-', dir=os.environ.get('RUNNER_TEMP')) as folder:
         archive = Path(folder) / 'delta.tgz'
-        _decrypt(archive)
+        _decrypt_selected(archive, delta_key)
         manifest, state = _inspect(archive, day, delta_key)
     gate = state['CRITICAL']
     value = {'schema': SCHEMA, 'day': day, 'run_id': manifest['run_id'],
         'checkpoint_key': manifest['checkpoint_key'], 'delta_key': delta_key,
         'base_key': manifest['base_key'], 'base_cipher_sha256': manifest['base_cipher_sha256'],
-        'delta_cipher_sha256': checkpoint.file_sha(DELTA), 'manifest_sha256': digest(manifest),
+        'delta_cipher_sha256': checkpoint.file_sha(_delta_cipher(delta_key)), 'manifest_sha256': digest(manifest),
         'base_inventory_sha256': digest(manifest['base']),
         'target_inventory_sha256': digest(manifest['target']),
         'authority_sha256': gate['AUTHORITY_SHA256'], 'runtime_source_sha': gate['RUNTIME_SOURCE_SHA']}
+    if checkpoint.compact_manifest_stage(manifest) == 'warm':
+        value.update(capture_stage='warm', publication_key=manifest['publication_key'])
     checkpoint.atomic_json(PROOF, value)
     if output := os.environ.get('GITHUB_OUTPUT'):
         with open(output, 'a') as handle:
@@ -169,13 +183,13 @@ def replay(day, base_key):
     proof = json.loads(PROOF.read_bytes())
     require(proof.get('schema') == SCHEMA and proof.get('day') == day
             and proof.get('base_key') == base_key and checkpoint.checkpoint_day(base_key) == day
-            and checkpoint.file_sha(DELTA) == proof.get('delta_cipher_sha256')
+            and checkpoint.file_sha(_delta_cipher(proof['delta_key'])) == proof.get('delta_cipher_sha256')
             and checkpoint.file_sha(CIPHER) == proof.get('base_cipher_sha256'), 'REPLAY_BINDING')
     saved = json.loads((OUT / 'base-inventory.json').read_bytes())
     require(saved.get('schema') == checkpoint.DELTA_SCHEMA, 'BASE_INDEX')
     with tempfile.TemporaryDirectory(prefix='g11-compact-replay-', dir=os.environ.get('RUNNER_TEMP')) as folder:
         archive = Path(folder) / 'delta.tgz'
-        _decrypt(archive)
+        _decrypt_selected(archive, proof['delta_key'])
         manifest, state = _inspect(archive, day, proof['delta_key'])
         require(manifest['base_key'] == base_key and manifest['run_id'] == proof['run_id']
                 and manifest['checkpoint_key'] == proof['checkpoint_key']

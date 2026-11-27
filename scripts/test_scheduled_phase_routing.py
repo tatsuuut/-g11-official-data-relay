@@ -1,5 +1,6 @@
 """Run the production shell resolver against delayed cron and day boundaries."""
 import os
+import ast
 import re
 from pathlib import Path
 import subprocess
@@ -149,8 +150,24 @@ class ScheduledPhaseRoutingTests(unittest.TestCase):
                 if mode == "bootstrap":
                     self.assertIn("run: bash scripts/bootstrap_after_morning.sh", step)
                     step += (WORKFLOW.parents[2] / "scripts/bootstrap_after_morning.sh").read_text()
-                self.assertIn('python3 scripts/predeadline_dispatch_v1.py',step)
-                self.assertIn('--mode '+mode,step)
+                    self.assertIn('python3 scripts/predeadline_dispatch_v1.py',step)
+                    self.assertIn('--mode '+mode,step)
+                else:
+                    self.assertIn('scripts/warm_publication_orchestrator_v1.py chain', step)
+                    source = (ROOT / 'scripts/warm_publication_orchestrator_v1.py').read_text()
+                    chain = next(node for node in ast.parse(source).body
+                                 if isinstance(node, ast.FunctionDef) and node.name == 'chain')
+                    dispatch = next(node for node in ast.walk(chain)
+                        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and isinstance(node.func.value, ast.Name) and node.func.value.id == 'subprocess'
+                        and node.func.attr == 'run')
+                    argv = dispatch.args[0].elts
+                    self.assertEqual([ast.literal_eval(argv[i]) for i in (1, 2, 4, 5)],
+                                     ['scripts/predeadline_dispatch_v1.py', '--day', '--mode', mode])
+                    self.assertEqual(argv[3].id, 'day')
+                    self.assertTrue(any(item.arg == 'check' and ast.literal_eval(item.value) is True
+                                        for item in dispatch.keywords))
+                    step += ast.get_source_segment(source, chain)
                 self.assertNotIn('-X POST',step)
 
     def test_live_rerun_cannot_reuse_runtime_cache_identity(self):
