@@ -276,6 +276,11 @@ def _isolate_host(source):
          '                continue\n'
          '            try:\n                receipt, parsed = '),
         ('                delay = max(0.0, (exc.retry_at - now).total_seconds())\n',
+         '                if exc.reason == "LIVE_RECOVERY_DEADLINE_TOO_CLOSE":\n'
+         '                    task_deferred.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"],\n'
+         '                                          "REASON": exc.reason, "RETRY_AT_JST": _format_jst(exc.retry_at)})\n'
+         '                    task_index += 1\n'
+         '                    continue\n'
          '                if exc.reason in ("HOST_PAUSED", "LIVE_RECOVERY_ADMISSION_REQUIRED",\n'
          '                                   "LIVE_RECOVERY_CLAIM_DEFERRED", "LIVE_RECOVERY_CLAIM_SPENT"):\n'
          '                    deferred = {"REASON": exc.reason, "RETRY_AT_JST": _format_jst(exc.retry_at)}\n'

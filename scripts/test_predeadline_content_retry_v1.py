@@ -580,6 +580,40 @@ class RetryTests(unittest.TestCase):
                             for row in result['TASK_DEFERRED']))
         self.assertEqual(self.writes,[])
 
+    def test_short_recovery_window_defers_only_that_race_without_starving_later_inputs(self):
+        self.setup_paced_day()
+        self.now = datetime.fromisoformat('2026-11-27T11:26:13+09:00')
+        self.prior_start = self.now - timedelta(minutes=1)
+        first_key, later_key = '20261127-14-06', '20261127-18-07'
+        self.plan = []
+        for key, remaining in ((first_key, 40), (later_key, 300)):
+            cutoff = self.now + timedelta(seconds=remaining)
+            for kind in ('BEFOREINFO', 'ODDS3T'):
+                self.plan.append(dict(SOURCE_ID=kind.lower()+'-'+key, RACE_KEY=key, KIND=kind,
+                    URL='https://www.boatrace.jp/fixture/'+kind+'/'+key,
+                    DUE_AT_JST=(cutoff-timedelta(minutes=7)).isoformat(),
+                    MUST_FINISH_BEFORE_JST=cutoff.isoformat()))
+        considered, fetched = [], []
+        def fetch(sid, url, validator):
+            considered.append(sid)
+            if sid.endswith(first_key):
+                raise Deferred(self.now+timedelta(seconds=40), 'LIVE_RECOVERY_DEADLINE_TOO_CLOSE')
+            fetched.append(sid)
+            self.attempts.append((sid, self.now))
+            return {'CAPTURED_AT_JST': self.now.isoformat()}, validator(b'complete')
+        self.runner.client.fetch_validated_once = fetch
+        result = self.run_capture()
+        expected_later = [row['SOURCE_ID'] for row in self.plan if row['RACE_KEY'] == later_key]
+        self.assertEqual(result['ACQUIRED'], expected_later)
+        self.assertEqual(fetched, expected_later)
+        self.assertEqual({row['SOURCE_ID'] for row in result['TASK_DEFERRED']},
+                         {row['SOURCE_ID'] for row in self.plan if row['RACE_KEY'] == first_key})
+        self.assertTrue(all(row['REASON'] == 'LIVE_RECOVERY_DEADLINE_TOO_CLOSE'
+                            for row in result['TASK_DEFERRED']))
+        self.assertIsNone(result['DEFERRED'])
+        self.assertEqual(considered, [row['SOURCE_ID'] for row in self.plan])
+        self.assertTrue(all(seconds <= retry.DEGRADED_SPACING_SECONDS for seconds in self.sleeps))
+
     def test_recovery_claim_deferrals_reach_existing_fallback_without_official_http(self):
         # Replay the reviewed frozen collector and unchanged fallback selector.
         # The recovery service is refused before any official request starts.
