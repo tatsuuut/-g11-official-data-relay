@@ -14,7 +14,7 @@ import textwrap
 import types
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import predeadline_content_retry_v1 as retry
 
@@ -579,6 +579,95 @@ class RetryTests(unittest.TestCase):
         self.assertTrue(any(row['SOURCE_ID']==odds and row['REASON']=='PIPELINE_STOPPED'
                             for row in result['TASK_DEFERRED']))
         self.assertEqual(self.writes,[])
+
+    def test_recovery_claim_deferrals_reach_existing_fallback_without_official_http(self):
+        # Replay the reviewed frozen collector and unchanged fallback selector.
+        # The recovery service is refused before any official request starts.
+        source_root = Path(os.environ.get('G11_RETRY_SOURCE_ROOT',
+            Path(__file__).resolve().parents[1] / '.g11-private'))
+        failover_path = source_root / 'g11/canonical/live_source_failover_v1.py'
+        tree = ast.parse(failover_path.read_text())
+        tree.body = [node for node in tree.body
+                     if not isinstance(node, ast.ImportFrom) or node.level == 0]
+        for reason in ('LIVE_RECOVERY_ADMISSION_REQUIRED', 'LIVE_RECOVERY_CLAIM_DEFERRED',
+                       'LIVE_RECOVERY_CLAIM_SPENT'):
+            with self.subTest(reason=reason):
+                self.attempts.clear(); self.sleeps.clear(); self.writes.clear()
+                self.setup_paced_day()
+                self.now = datetime.fromisoformat('2026-11-27T11:26:13+09:00')
+                self.prior_start = self.now - timedelta(minutes=1)
+                self.state['PAUSE_UNTIL'] = {'www.boatrace.jp':
+                    datetime.fromisoformat('2026-11-27T11:22:21+09:00')}
+                open_keys = {'20261127-14-06', '20261127-18-07'}
+                future, closed, excluded = ('20261127-13-04', '20261127-02-02', '20261127-11-04')
+                self.plan = []
+                for key, delta in [(key, 5) for key in sorted(open_keys)] + [
+                        (future, 9), (closed, -1), (excluded, 5)]:
+                    cutoff = self.now + timedelta(minutes=delta)
+                    for kind in ('BEFOREINFO', 'ODDS3T'):
+                        self.plan.append(dict(SOURCE_ID=kind.lower()+'-'+key,
+                            RACE_KEY=key, KIND=kind,
+                            URL='https://www.boatrace.jp/fixture/'+kind+'/'+key,
+                            DUE_AT_JST=(cutoff-timedelta(minutes=7)).isoformat(),
+                            MUST_FINISH_BEFORE_JST=cutoff.isoformat()))
+                self.runner._formal_prediction_scope = lambda *_a, **_k: (
+                    {}, open_keys | {future, closed}, [])
+                def load(stage, name):
+                    self.assertEqual((stage, name), ('morning', 'official-day-input'))
+                    return {'SNAPSHOT': {'PAYLOAD': {
+                        'OPERATIONAL_DATE_JST': '2026-11-27', 'PREDEADLINE_PLAN': self.plan,
+                        'SCOPE': {'EXPECTED_RACE_COUNT': len({r['RACE_KEY'] for r in self.plan})}}}}
+                self.runner.store.load_verified_snapshot = load
+                admission_calls = []
+                def denied(source_id, _url, _validator):
+                    admission_calls.append(source_id)
+                    raise Deferred(self.now+timedelta(seconds=60), reason)
+                self.runner.client.fetch_validated_once = denied
+                capture = retry._restricted_collector(self.original, None, None,
+                    early_capture=True, isolate_host=True)
+                result = capture(self.runner, max_requests=8, early_wait_seconds=0)
+                self.assertEqual(admission_calls, [self.plan[0]['SOURCE_ID']])
+                self.assertEqual(result['DEFERRED']['REASON'], reason)
+                self.assertEqual({row['RACE_KEY'] for row in result['TASK_DEFERRED']},
+                                 open_keys | {future})
+                self.assertTrue(all(row['REASON'] == reason for row in result['TASK_DEFERRED']))
+                self.assertFalse(self.writes); self.assertFalse(self.sleeps)
+
+                preview, market = Mock(return_value=[]), Mock(return_value=[])
+                namespace = dict(preview=types.SimpleNamespace(capture_missing=preview),
+                    markets=types.SimpleNamespace(capture_due=market),
+                    availability=types.SimpleNamespace(load_verified=lambda *_: None))
+                exec(compile(tree, str(failover_path), 'exec'), namespace)
+                fallback = namespace['capture'](self.runner, result)['LIVE_SOURCE_FAILOVER']
+                self.assertEqual(set(fallback['ELIGIBLE_BEFOREINFO']), open_keys)
+                self.assertEqual(set(fallback['ELIGIBLE_ODDS3T']), open_keys)
+                self.assertEqual({row['PRIMARY_SOURCE_ID'] for row in fallback['FAILED_INPUTS']},
+                    {kind+'-'+key for kind in ('beforeinfo', 'odds3t') for key in open_keys})
+                preview.assert_called_once_with(self.runner, race_keys=open_keys, allow_missing=True)
+                market.assert_called_once_with(self.runner, max_requests=1,
+                    race_keys=open_keys, allow_missing=True)
+                preview.reset_mock(); market.reset_mock()
+                self.state['STOPPED'] = True
+                self.assertEqual(namespace['capture'](self.runner, result)['LIVE_SOURCE_FAILOVER']['STATUS'],
+                                 'GLOBAL_STOPPED')
+                preview.assert_not_called(); market.assert_not_called()
+                self.state['STOPPED'] = False
+                missing_alone = {**result, 'TASK_DEFERRED': [], 'DEFERRED': None}
+                self.assertEqual(namespace['capture'](self.runner, missing_alone)['LIVE_SOURCE_FAILOVER']['STATUS'],
+                                 'NO_FAILED_OPEN_INPUTS')
+                preview.assert_not_called(); market.assert_not_called()
+
+    def test_unknown_recovery_deferral_keeps_original_global_failure_policy(self):
+        self.setup_paced_day()
+        self.prior_start = self.now - timedelta(minutes=1)
+        def denied(*_args):
+            raise Deferred(self.now+timedelta(seconds=60), 'LIVE_RECOVERY_UNKNOWN_POLICY')
+        self.runner.client.fetch_validated_once = denied
+        capture = retry._restricted_collector(self.original, None, None, isolate_host=True)
+        result = capture(self.runner, max_requests=8, early_wait_seconds=0)
+        self.assertEqual(result['DEFERRED']['REASON'], 'LIVE_RECOVERY_UNKNOWN_POLICY')
+        self.assertEqual(result['TASK_DEFERRED'], [])
+        self.assertFalse(self.writes); self.assertFalse(self.sleeps)
 
     def test_transient_empty_pair_retries_in_process_and_saves_before_cutoff(self):
         result = self.run_capture()

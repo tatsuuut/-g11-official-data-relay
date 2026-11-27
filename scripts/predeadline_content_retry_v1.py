@@ -241,6 +241,10 @@ def capture_pause(store, source_id, now):
 def _isolate_host(source):
     # Only the reviewed collector hashes get here. Keep validation, source
     # receipt verification, race scope, immutable writes and cutoff in the original.
+    # A refused recovery claim makes the same exact due sources unavailable
+    # without starting official HTTP. Preserve those per-task reasons after the
+    # host pause expires so the existing fallback selector can see them. The
+    # selector still owns its T-7 window, provider budget and global STOP gate.
     changes = [
         ('        task_index = 0\n', '        deferred = _host_guard(self.store, self.client.clock())\n'
          '        cancelled_days = _cancelled_days(self.store, plan, self.client.clock())\n        task_index = 0\n'),
@@ -272,7 +276,8 @@ def _isolate_host(source):
          '                continue\n'
          '            try:\n                receipt, parsed = '),
         ('                delay = max(0.0, (exc.retry_at - now).total_seconds())\n',
-         '                if exc.reason == "HOST_PAUSED":\n'
+         '                if exc.reason in ("HOST_PAUSED", "LIVE_RECOVERY_ADMISSION_REQUIRED",\n'
+         '                                   "LIVE_RECOVERY_CLAIM_DEFERRED", "LIVE_RECOVERY_CLAIM_SPENT"):\n'
          '                    deferred = {"REASON": exc.reason, "RETRY_AT_JST": _format_jst(exc.retry_at)}\n'
          '                    task_deferred.append({"SOURCE_ID": task["SOURCE_ID"], "RACE_KEY": task["RACE_KEY"], **deferred})\n'
          '                    task_index += 1\n'
