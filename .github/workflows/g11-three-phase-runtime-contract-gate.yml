@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${EXHIBITION_PRIVATE_SOURCE_SHA}"
-          python3 tools/verify_p3_original_input_runtime_patch_v1.py
+          PYTHONPATH=. python3 tools/verify_p3_original_input_runtime_patch_v1.py
       - name: Verify immutable raw exhibition transport and unchanged predictors offline
         working-directory: .g11-exhibition-candidate
         run: >-
