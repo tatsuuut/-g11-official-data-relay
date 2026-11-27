@@ -7,6 +7,7 @@ import ast
 import contextlib
 from datetime import datetime, timedelta
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -100,6 +101,7 @@ class IsolationTest(unittest.TestCase):
         self.modules = patch.dict(sys.modules, {'g11.canonical.official_pipeline': self.official})
         self.modules.start(); self.addCleanup(self.modules.stop)
         ns = {'Path': Path, 'datetime': Clock, 'JST': JST, '_require': require,
+            'WildRuntimeOrchestratorError': GateError,
             '_true_ai_day_root': lambda *_: self.root/'features',
             '_load_manifest_artifact': lambda _: ({'ARTIFACT_SHA256': 'b'*64}, {
                 'SCHEMA': 'G11_TRUE_AI_MORNING_FEATURE_BATCH_V1',
@@ -162,6 +164,55 @@ class IsolationTest(unittest.TestCase):
         for key in expected: self.packet(key).unlink()
         self.collect(self.root, BASE.date())
         self.assertEqual(expected, {key: self.packet(key).read_bytes() for key in expected})
+
+    def test_shared_exhibition_collector_keeps_both_frozen_source_versions(self):
+        self.assertTrue({adapter.COLLECT_SHA,
+            '030e03f3a70cbaa5101c1c123f33708e75d4b28fb9d4d5408518393238ebe1fb',
+            adapter.SHARED_EXHIBITION_COLLECT_SHA} <= adapter.COLLECT_SHAS)
+
+    def shared_preview(self, key, *, failure=None):
+        """Provide retained-input doubles only; this path has no HTTP callable."""
+        source = self.root/'snapshots/predeadline'/('beforeinfo-' + key + '.json')
+        source.unlink()
+        source.with_name('published-exhibition-' + key + '.json').write_text('{}')
+        publisher = types.ModuleType('g11.canonical.published_preview_v1')
+        publisher.race_roster = lambda *_: {'saved': 'morning'}
+        def read(*args):
+            if failure:
+                raise failure
+            return {'SNAPSHOT_SHA256': 'd'*64, 'SNAPSHOT': {
+                'PAYLOAD': {'CAPTURED_AT_JST': BASE.isoformat(),
+                            'PARSED': {'START_TIMING': .13}},
+                'SOURCE_RECEIPTS': [{'SOURCE_ID': 'retained-exhibition', 'SHA256': 'e'*64}]}}
+        publisher.read_observation = read
+        canonical = types.ModuleType('g11.canonical')
+        canonical.official_pipeline, canonical.published_preview_v1 = self.official, publisher
+        g11 = types.ModuleType('g11'); g11.canonical = canonical
+        return patch.dict(sys.modules, {'g11': g11, 'g11.canonical': canonical,
+            'g11.canonical.published_preview_v1': publisher})
+
+    def test_shared_exhibition_reaches_same_predictor_and_retains_source_receipts(self):
+        if hashlib.sha256(inspect.getsource(self.original).encode()).hexdigest() != adapter.SHARED_EXHIBITION_COLLECT_SHA:
+            self.skipTest('historical collector has no shared-exhibition input')
+        self.bad.clear()
+        with self.shared_preview(GOOD):
+            self.assertTrue(self.collect(self.root, BASE.date()))
+        proof = json.loads(self.packet(GOOD).read_text())['SOURCES']['BEFOREINFO']
+        self.assertEqual(proof['SNAPSHOT_SHA256'], 'd'*64)
+        self.assertEqual(proof['SOURCE_RECEIPTS'], [{'SOURCE_ID': 'retained-exhibition', 'SHA256': 'e'*64}])
+        self.assertEqual(dict(self.calls)[GOOD], {'START_TIMING': .13})
+
+    def test_invalid_shared_exhibition_does_not_starve_a_valid_other_venue(self):
+        if hashlib.sha256(inspect.getsource(self.original).encode()).hexdigest() != adapter.SHARED_EXHIBITION_COLLECT_SHA:
+            self.skipTest('historical collector has no shared-exhibition input')
+        self.bad.clear()
+        with self.shared_preview(BAD, failure=ValueError('raw receipt rejected')):
+            self.assertTrue(self.collect(self.root, BASE.date()))
+        self.assertFalse(self.packet(BAD).exists())
+        self.assertTrue(self.packet(GOOD).exists())
+        self.assertEqual([GOOD], [key for key, _ in self.calls])
+        self.assertEqual(self.reports[-1][3], [{
+            'RACE_KEY': BAD, 'REASON': 'PRE_RACE_SHARED_BEFOREINFO:' + BAD + ':ValueError'}])
 
     def test_existing_lock_is_not_recalculated_or_rewritten(self):
         self.collect(self.root, BASE.date())
