@@ -267,7 +267,7 @@ class SplitEncryptionTests(unittest.TestCase):
             with patch.object(sys,'argv',args),patch.object(archive.os,'dup',side_effect=lambda _:duplicate(fd)), \
                     patch.object(archive,'prepare_compact_checkpoint') as prepare,patch.object(archive,'encrypt') as full:
                 archive.main()
-                prepare.assert_called_once_with(root,output,base_key,secret=secret)
+                prepare.assert_called_once_with(root,output,base_key,secret=secret,capture_stage='critical')
                 self.assertEqual(full.call_count,0 if delta_only else 1)
                 self.assertEqual(output.read_bytes(),b'unchanged exact base ciphertext')
 
@@ -307,7 +307,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(source.index('    - name: Verify complete compact publication reconstruction\n'),indexes[1])
         workflow=(ROOT/'.github/workflows/g11-free-runner.yml').read_text()
         critical=workflow.split('      - name: Encrypt critical state before optional work\n',1)[1].split('      - name:',1)[0]
-        self.assertIn('--delta-only',critical)
+        self.assertIn('warm_publication_orchestrator_v1.py critical-encrypt',critical)
+        import warm_publication_orchestrator_v1 as publication
+        self.assertIn('prepare_compact_checkpoint', __import__('inspect').getsource(publication.critical_encrypt))
         save=workflow.split('      - name: Save early encrypted critical checkpoint\n',1)[1].split('      - name:',1)[0]
         self.assertIn("encrypt-full: 'true'",save)
 
@@ -317,7 +319,12 @@ class WorkflowTests(unittest.TestCase):
         for name in ['Encrypt critical state before optional work', 'Encrypt changed state before persistence',
                      'Persist delivery receipts', 'Keep the predeadline relay alive between delayed cron starts', 'Rescue']:
             step = text.split('      - name: '+name+'\n', 1)[1].split('      - name:', 1)[0]
-            script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+            if '        run: |\n' not in step:
+                script = step.split('        run: ', 1)[1].strip()
+                self.assertIn('warm_publication_orchestrator_v1.py', script)
+                compile((ROOT/'scripts/warm_publication_orchestrator_v1.py').read_text(), 'actual-chain-and-encrypt-helper', 'exec')
+            else:
+                script = textwrap.dedent(step.split('        run: |\n', 1)[1])
             result = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True)
             self.assertEqual(0, result.returncode, name + ': ' + result.stderr)
 
@@ -336,7 +343,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('uses: actions/cache/save@', step('Save state'))
         self.assertIn("steps.deme-live.outcome!='success'", step('Save state'))
         self.assertIn("steps.delivery-checkpoint.outputs.ready=='true'", step(order[-1]))
-        self.assertEqual(3, text.count('python3 scripts/encrypt_runtime_state_v1.py'))
+        self.assertEqual(2, text.count('python3 scripts/encrypt_runtime_state_v1.py'))
+        self.assertIn('scripts/warm_publication_orchestrator_v1.py critical-encrypt', text)
 
     def test_normal_and_rescue_live_defer_research_and_failed_publish_keeps_it(self):
         import itertools

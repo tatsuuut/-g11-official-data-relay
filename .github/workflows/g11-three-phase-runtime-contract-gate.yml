@@ -908,6 +908,10 @@ jobs:
           test_compact_publication_checkpoint_v1
           test_compact_runtime_recovery_v1
           test_compact_cancel_recovery_v1
+          test_compact_warm_recovery_v1
+          test_compact_warm_stage_v1
+          test_wild4_compact_transport_v1
+          test_warm_publication_orchestrator_v1
 
       - name: Verify November 8 short LIVE cycle and saved-only retries
         run: python3 -m unittest discover -s scripts -p test_predeadline_fast_lane_v1.py -v
@@ -1110,6 +1114,14 @@ jobs:
             scripts/test_wild4_publication_continuity_v1.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Checkout the reviewed pre-warm transport baseline
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 0634adb64f933439ca0cd65c3f15e7d733db95af
+          path: .g11-warm-transport-baseline
+          sparse-checkout: .github/workflows/g11-wild4-shadow-lock-only.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Verify input-context rejection and next-run immutable ledger continuity
         env:
           WILD4_WORKFLOW_PATH: .g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml
@@ -1119,11 +1131,17 @@ jobs:
           from pathlib import Path
           caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
           worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert 'g11-wild4-shadow-lock-only.yml@51ab075f75e497a3b8d72caa11a4cd60e12fcaa2' in caller
+          assert 'g11-wild4-shadow-lock-only.yml@WARM_WORKER_COMMIT_SHA' in caller
           assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
           # Compare the frozen worker after removing the exact reviewed additions.
           import hashlib
-          current=Path('.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
+          warm_current=Path('.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
+          assert '.github/actions/g11-public-python@WARM_HELPER_COMMIT_SHA' in warm_current
+          assert hashlib.sha256(warm_current.encode()).hexdigest() == 'WARM_WORKER_FILE_SHA256'
+          # Preserve the previous exact historical comparison in full, then
+          # separately bind the reviewed warm transport to its immutable SHA.
+          current=Path('.g11-warm-transport-baseline/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
+          assert hashlib.sha256(current.encode()).hexdigest() == '4e157c133856a415e5c9e8880c754921991056c4628041a3f75a4317502c3a5c'
           assert hashlib.sha256(worker.encode()).hexdigest() == 'b9755c0b5690d16f8d8a45f0ae5493084bcf8c19470bc92397e305152d05c045'
           # Admit the exact owner-authorized candidate command, while every
           # existing prediction, LOCK, promotion and learning body stays frozen.

@@ -88,6 +88,7 @@ class ExactReadbackRetryTests(unittest.TestCase):
         def expression(value):
             value = value.removeprefix('${{').removesuffix('}}').strip()
             value = value.replace('inputs.wild4-day', repr(''))
+            value = value.replace('inputs.capture-stage', repr('critical'))
             value = value.replace('inputs.warm-day', repr(''))
             value = value.replace('inputs.allow-compact', repr('false'))
             # This fixture supplies an already encrypted checkpoint, retaining

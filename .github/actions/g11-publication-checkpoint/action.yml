@@ -26,6 +26,9 @@ inputs:
   allow-compact:
     description: Accept a fully verified base and remote delta before the later complete backup.
     default: 'false'
+  capture-stage:
+    description: Independently saved critical or warm capture target.
+    default: 'critical'
 outputs:
   ready:
     description: True only after complete remote compact proof or full exact byte readback.
@@ -46,14 +49,14 @@ runs:
       id: compact
       if: inputs.wild4-day != ''
       shell: bash
-      run: python3 scripts/encrypt_runtime_state_v1.py --compact-ready '${{ inputs.cache-key }}'
+      run: python3 scripts/encrypt_runtime_state_v1.py --compact-ready '${{ inputs.cache-key }}' --capture-stage '${{ inputs.capture-stage }}'
     - name: Save authenticated replacements and complete inventories
       id: compact-save
       if: steps.compact.outputs.key != ''
       continue-on-error: true
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
-        path: .relay-output/early-delta.tgz.gpg
+        path: ${{ inputs.capture-stage == 'warm' && '.relay-output/warm-delta.tgz.gpg' || '.relay-output/early-delta.tgz.gpg' }}
         key: ${{ steps.compact.outputs.key }}
     - name: Read back the exact compact checkpoint
       id: compact-readback
@@ -61,7 +64,7 @@ runs:
       continue-on-error: true
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
-        path: .relay-output/early-delta.tgz.gpg
+        path: ${{ inputs.capture-stage == 'warm' && '.relay-output/warm-delta.tgz.gpg' || '.relay-output/early-delta.tgz.gpg' }}
         key: ${{ steps.compact.outputs.key }}
         fail-on-cache-miss: true
     - name: Start WILD4 from a verified full reconstruction before large backup transfer
@@ -69,29 +72,10 @@ runs:
       if: steps.compact-readback.outputs.cache-hit == 'true'
       continue-on-error: true
       shell: bash
-      env:
-        OPERATIONAL_DATE: ${{ inputs.wild4-day }}
-        CHECKPOINT_KEY: ${{ inputs.cache-key }}
-        DELTA_KEY: ${{ steps.compact.outputs.key }}
-        PREWARM_STATUS: ${{ inputs.prewarm }}
-      run: |
-        set -euo pipefail
-        test "${CHECKPOINT_KEY}" = "g11-state-v4-critical-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
-        test "${DELTA_KEY}" = "g11-state-v4-delta-${OPERATIONAL_DATE}-${GITHUB_RUN_ID}"
-        python3 -c 'import os,sys;sys.path.insert(0,"scripts");from encrypt_runtime_state_v1 import compact_ready,require;v=compact_ready(os.environ["CHECKPOINT_KEY"]);require(v is not None and v["delta_key"]==os.environ["DELTA_KEY"],"REMOTE_READBACK")'
-        jq -e '.CRITICAL.CRITICAL_CHECKPOINT_STATUS == "PASS" and (.CRITICAL.LAST_TIMELY_SOURCE_COUNT > 0 or (if ((.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) | type) == "number" then (.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) > 0 and (.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) == ((.CRITICAL.LAST_TIMELY_ALTERNATE_MARKET_COUNT // 0) | floor) else false end))' .relay-output/result.json >/dev/null
-        if [ "${PREWARM_STATUS:-}" = sent ] || [ "${PREWARM_STATUS:-}" = attempted ]; then
-          echo 'attempted=true' >> "${GITHUB_OUTPUT}"
-          if [ "${PREWARM_STATUS}" = sent ]; then echo 'sent=true' >> "${GITHUB_OUTPUT}"; fi
-          echo 'WILD4_COMPACT_HANDOFF=EXISTING_PREWARM_DISPATCH'
-          exit 0
-        fi
-        echo 'attempted=true' >> "${GITHUB_OUTPUT}"
-        timeout --signal=TERM --kill-after=2s 12s gh workflow run 364923281 \
-          -f mode=wild4 -f operational_date="${OPERATIONAL_DATE}" \
-          -f predeadline_checkpoint_key="${CHECKPOINT_KEY}" -f predeadline_delta_key="${DELTA_KEY}"
-        echo 'sent=true' >> "${GITHUB_OUTPUT}"
-        echo 'WILD4_COMPACT_HANDOFF=DISPATCH_ACCEPTED_BEFORE_FULL_TRANSFER'
+      run: >-
+        python3 -S scripts/warm_publication_orchestrator_v1.py handoff
+        --day '${{ inputs.wild4-day }}' --key '${{ inputs.cache-key }}'
+        --capture-stage '${{ inputs.capture-stage }}' --prewarm '${{ inputs.prewarm }}'
     - name: Verify complete compact publication reconstruction
       id: compact-verified
       if: inputs.allow-compact == 'true' && steps.compact-readback.outputs.cache-hit == 'true'
@@ -103,6 +87,11 @@ runs:
         python3 -S scripts/compact_publication_checkpoint_v1.py verify
         --checkpoint-key '${{ inputs.cache-key }}'
         --readback-hit '${{ steps.compact-readback.outputs.cache-hit }}'
+        --capture-stage '${{ inputs.capture-stage }}'
+    - name: Keep warm failure on the ordinary later full checkpoint path
+      if: inputs.capture-stage == 'warm' && steps.compact-verified.outputs.ready != 'true'
+      shell: bash
+      run: exit 1
     - name: Encrypt the complete state before full backup and canonical publication
       if: inputs.encrypt-full == 'true' && steps.compact-verified.outputs.ready != 'true'
       shell: bash

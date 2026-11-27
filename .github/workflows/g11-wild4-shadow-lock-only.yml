@@ -18,6 +18,11 @@ on:
         type: string
         required: false
         default: ""
+      capture_stage:
+        description: Exact saved capture stage; legacy critical or second-pass warm
+        type: string
+        required: false
+        default: "critical"
       prewarm_base_key:
         description: Optional exact encrypted base prepared before new official input
         type: string
@@ -51,6 +56,7 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       TZ: Asia/Tokyo
+      CAPTURE_STAGE: ${{ inputs.capture_stage || 'critical' }}
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
         id: preparation
@@ -131,14 +137,19 @@ jobs:
               or re.fullmatch(r'g11-state-v4-critical-'+re.escape(day)+r'-[0-9]+',live_checkpoint) is None):
               raise SystemExit('PREDEADLINE_CHECKPOINT_IDENTITY')
           delta=os.environ.get('PREDEADLINE_DELTA_KEY','')
-          if delta and (not live_checkpoint or delta!=live_checkpoint.replace('g11-state-v4-critical-','g11-state-v4-delta-',1)):
-              raise SystemExit('PREDEADLINE_DELTA_IDENTITY')
-          warm=os.environ.get('PREWARM_BASE_KEY','')
-          if warm:
+          stage=os.environ.get('CAPTURE_STAGE','critical')
+          if stage not in {'critical','warm'} or (stage=='warm' and not delta):
+              raise SystemExit('PREDEADLINE_CAPTURE_STAGE')
+          if delta:
               import sys
               sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
-              from encrypt_runtime_state_v1 import prewarm_identity
+              from encrypt_runtime_state_v1 import validate_compact_keys
+              if not live_checkpoint or validate_compact_keys(day,live_checkpoint,delta)!=stage:
+                  raise SystemExit('PREDEADLINE_DELTA_IDENTITY')
+          warm=os.environ.get('PREWARM_BASE_KEY','')
+          if warm:
               if not delta or checkpoint or readback: raise SystemExit('PREWARM_LIVE_ONLY')
+              from encrypt_runtime_state_v1 import prewarm_identity
               if prewarm_identity(warm,live_checkpoint)!=day: raise SystemExit('PREWARM_DAY')
           with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
               output.write('day='+day+'\n')
@@ -158,7 +169,7 @@ jobs:
         continue-on-error: ${{ inputs.prewarm_base_key != '' }}
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          path: .relay-output/early-delta.tgz.gpg
+          path: ${{ inputs.capture_stage == 'warm' && '.relay-output/warm-delta.tgz.gpg' || '.relay-output/early-delta.tgz.gpg' }}
           key: ${{ inputs.predeadline_delta_key }}
           fail-on-cache-miss: ${{ inputs.prewarm_base_key == '' }}
       - name: Wait only for the exact new saved handoff after preparation
@@ -169,20 +180,13 @@ jobs:
           PREWARM_BASE_KEY: ${{ inputs.prewarm_base_key }}
           CHECKPOINT_KEY: ${{ inputs.predeadline_checkpoint_key }}
           DELTA_KEY: ${{ inputs.predeadline_delta_key }}
-        run: |
-          python3 - <<'PY'
-          import os,sys
-          sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
-          from encrypt_runtime_state_v1 import wait_for_compact
-          available=wait_for_compact(os.environ['PREWARM_BASE_KEY'],os.environ['CHECKPOINT_KEY'],os.environ['DELTA_KEY'])
-          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('available='+str(available).lower()+'\n')
-          PY
+        run: python3 -S "${G11_PUBLIC_RUNTIME_HELPERS}/wild4_compact_transport_v1.py" wait
       - name: Restore the exact handoff after bounded visibility wait
         id: compact-cache-retry
         if: inputs.prewarm_base_key != '' && steps.compact-cache.outputs.cache-hit != 'true' && steps.handoff.outputs.available == 'true'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          path: .relay-output/early-delta.tgz.gpg
+          path: ${{ inputs.capture_stage == 'warm' && '.relay-output/warm-delta.tgz.gpg' || '.relay-output/early-delta.tgz.gpg' }}
           key: ${{ inputs.predeadline_delta_key }}
           fail-on-cache-miss: true
       - name: Authenticate compact manifest before choosing its exact base
@@ -199,26 +203,9 @@ jobs:
           test '${{ steps.compact-cache.outputs.cache-hit == 'true' || steps.compact-cache-retry.outputs.cache-hit == 'true' }}' = true
           exec 3<<<"${STATE_PASSPHRASE}"
           gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-            --decrypt --output "${RUNNER_TEMP}/g11-compact.tgz" .relay-output/early-delta.tgz.gpg
+            --decrypt --output "${RUNNER_TEMP}/g11-compact.tgz" '.relay-output/${{ inputs.capture_stage == 'warm' && 'warm-delta' || 'early-delta' }}.tgz.gpg'
           exec 3<&-
-          python3 - <<'PYCOMPACT'
-          import os,pathlib,sys
-          sys.path.insert(0,os.environ['G11_PUBLIC_RUNTIME_HELPERS'])
-          from encrypt_runtime_state_v1 import inspect_delta,require
-          value=inspect_delta(pathlib.Path(os.environ['RUNNER_TEMP'])/'g11-compact.tgz',
-              day=os.environ['OPERATIONAL_DATE'],checkpoint_key=os.environ['PREDEADLINE_CHECKPOINT_KEY'])
-          require(value['delta_key']==os.environ['PREDEADLINE_DELTA_KEY'],'REQUESTED_KEY')
-          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
-          reuse=(value['base_key']==os.environ.get('PREPARED_BASE_KEY')
-              and (temp/'g11-prewarm-base').is_dir() and (temp/'g11-prewarm-cipher.tgz.gpg').is_file())
-          if not reuse:
-              import shutil
-              shutil.rmtree(temp/'g11-prewarm-base',ignore_errors=True)
-              (temp/'g11-prewarm-cipher.tgz.gpg').unlink(missing_ok=True)
-          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
-              output.write('base_key='+value['base_key']+'\nuse_prewarm='+str(reuse).lower()+'\n')
-          print('WILD4_AUTHENTICATED_DELTA=PASS BASE='+value['base_key'])
-          PYCOMPACT
+          python3 -S "${G11_PUBLIC_RUNTIME_HELPERS}/wild4_compact_transport_v1.py" manifest
       - name: Restore current encrypted canonical state
         id: canonical-cache
         if: (inputs.predeadline_delta_key == '' || steps.compact.outputs.base_key != '') && steps.compact.outputs.use_prewarm != 'true'

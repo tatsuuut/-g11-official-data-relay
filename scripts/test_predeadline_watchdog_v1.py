@@ -697,12 +697,14 @@ class PredeadlineChainTests(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] /
                   '.github/workflows/g11-free-runner.yml').read_text()
         step = source.split('        id: predeadline-chain\n', 1)[1].split('\n      - ', 1)[0]
-        script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        script = step.split('        run: ', 1)[1].strip()
+        self.assertIn('scripts/warm_publication_orchestrator_v1.py chain', script)
         # Keep jq and the real shell control flow. Replace only external I/O
         # and the deliberate delay; POST is recorded rather than sent.
         stubs = '''
 python3() {
   case "$1" in
+    -S) command "$TEST_PYTHON" "$TEST_CHAIN_DRIVER" ;;
     scripts/dynamic_last_race_heartbeat.py) printf '%s\\n' "$TEST_HEARTBEAT" ;;
     scripts/critical_saved_publication_v1.py) printf '0\\n' ;;
     scripts/predeadline_dispatch_v1.py) command "$TEST_PYTHON" "$TEST_DISPATCH_DRIVER" "$@" ;;
@@ -764,10 +766,28 @@ curl() {
                     print('G11_SAFE_PREDEADLINE_DISPATCH=HELD REASON=' + str(exc))
                     raise SystemExit(1)
                 '''))
+            chain_driver = Path(tmp) / 'chain_driver.py'
+            chain_driver.write_text(textwrap.dedent('''\
+                import os, sys
+                from unittest.mock import patch
+                import warm_publication_orchestrator_v1 as warm
+                actual_run = warm.subprocess.run
+                def run(command, **kwargs):
+                    assert command[1] == 'scripts/predeadline_dispatch_v1.py'
+                    return actual_run([sys.executable, os.environ['TEST_DISPATCH_DRIVER'],
+                                       *command[1:]], **kwargs)
+                with patch('dynamic_last_race_heartbeat.decision', return_value=os.environ['TEST_HEARTBEAT']), \\
+                     patch('critical_saved_publication_v1.continuation_delay', return_value=0), \\
+                     patch.object(warm, 'read', return_value={}), \\
+                     patch.object(warm.time, 'sleep'), \\
+                     patch.object(warm.subprocess, 'run', side_effect=run):
+                    warm.chain(os.environ['OPERATIONAL_DATE'])
+                '''))
             env = dict(os.environ, GH_TOKEN='test', GITHUB_RUN_ID='39915815315',
                        GITHUB_RUN_NUMBER='200', GITHUB_REPOSITORY='tatsuuut/-g11-official-data-relay',
                        GITHUB_REF='refs/heads/main', TEST_PYTHON=sys.executable,
                        TEST_DISPATCH_DRIVER=str(driver),
+                       TEST_CHAIN_DRIVER=str(chain_driver), GITHUB_OUTPUT=str(Path(tmp)/'output'),
                        PYTHONPATH=str(Path(__file__).resolve().parent),
                        OPERATIONAL_DATE='2026-10-23', TEST_HEARTBEAT=heartbeat,
                        TEST_POST_STATUS=str(post_status), TEST_POSTS=str(posts),

@@ -336,7 +336,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertLess(WORKFLOW.index('id: encrypt-state'), WORKFLOW.index('id: publication-state-verified'))
 
     def test_frozen_isolated_lane_executes_no_optional_work_before_full_backup(self):
-        lane = WORKFLOW.split('      - name: Resume remaining capture slots', 1)[1]
+        lane = WORKFLOW[WORKFLOW.index('      - name: Checkout hash-locked research runtime\n'):]
         lane = lane.split('      - name: Encrypt changed state before persistence', 1)[0]
         values = {'steps.due.outputs.phase': 'predeadline', 'steps.authority.outputs.frozen': 'true',
                   'steps.authority.outputs.rescue_bootstrap': 'false',

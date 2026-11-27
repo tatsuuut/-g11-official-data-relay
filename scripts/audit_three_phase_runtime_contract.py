@@ -10,6 +10,7 @@ hooks are still present before a change is accepted.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 from pathlib import Path
 import re
@@ -114,7 +115,7 @@ def audit_public() -> dict[str, object]:
     continuation_start = free.index(
         "- name: Keep the predeadline relay alive between delayed cron starts"
     )
-    continuation_end = free.index("- name: Checkout hash-locked research runtime")
+    continuation_end = free.index("\n      - ", continuation_start + 10)
     continuation = free[continuation_start:continuation_end]
     require_text(continuation, "steps.critical.outcome=='success'",
                  "PREDEADLINE_CRITICAL_CAPTURE_CHAIN_AUTHORITY")
@@ -131,18 +132,26 @@ def audit_public() -> dict[str, object]:
                  "WILD4_HANDOFF_REQUIRES_SAVED_READBACK")
     require("steps.runtime.outcome" not in continuation,
             "PREDEADLINE_OPTIONAL_RUNTIME_CHAIN_AUTHORITY")
-    require_text(
-        continuation,
-        "--continuation-delay",
-        "PREDEADLINE_CHAIN_SPACING",
-    )
-    require_text(continuation, "scripts/dynamic_last_race_heartbeat.py", "PREDEADLINE_MORNING_DEADLINE_POLICY")
-    require("-ge 2110" not in continuation, "PREDEADLINE_FIXED_2110_CUTOFF")
-    require_text(
-        continuation,
-        'python3 scripts/predeadline_dispatch_v1.py --day "${OPERATIONAL_DATE}" --mode continuation',
-        "PREDEADLINE_CHAIN_DISPATCH_TARGET",
-    )
+    require_text(continuation, "scripts/warm_publication_orchestrator_v1.py chain",
+                 "PREDEADLINE_CHAIN_ADAPTER")
+    chain_module = (ROOT / "scripts/warm_publication_orchestrator_v1.py").read_text(encoding="utf-8")
+    chain_ast = ast.parse(chain_module)
+    chain_function = next((node for node in chain_ast.body
+                           if isinstance(node, ast.FunctionDef) and node.name == "chain"), None)
+    require(chain_function is not None, "PREDEADLINE_CHAIN_IMPLEMENTATION")
+    chain_body = ast.get_source_segment(chain_module, chain_function)
+    for needle, code in (
+        ("from dynamic_last_race_heartbeat import decision", "PREDEADLINE_MORNING_DEADLINE_POLICY"),
+        ("from critical_saved_publication_v1 import continuation_delay", "PREDEADLINE_CHAIN_SPACING"),
+        ("time.sleep(continuation_delay(", "PREDEADLINE_CHAIN_SPACING_EXECUTED"),
+        ("if first not in ('CONTINUE', 'CHECK_HANDOFF'):", "PREDEADLINE_CHAIN_FIRST_HANDOFF"),
+        ("if after not in ('CONTINUE', 'CHECK_HANDOFF'):", "PREDEADLINE_CHAIN_SECOND_HANDOFF"),
+        ("'scripts/predeadline_dispatch_v1.py', '--day', day, '--mode', 'continuation'", "PREDEADLINE_CHAIN_DISPATCH_TARGET"),
+        ("check=True", "PREDEADLINE_CHAIN_DISPATCH_FAILURE"),
+        ("output(ready='true')", "PREDEADLINE_CHAIN_ACCEPTED_CONTINUATION"),
+    ):
+        require_text(chain_body, needle, code)
+    require("-ge 2110" not in continuation + chain_body, "PREDEADLINE_FIXED_2110_CUTOFF")
     dispatch_source = (ROOT / "scripts/predeadline_dispatch_v1.py").read_text(encoding="utf-8")
     # The shell delegates its duplicate guard to the bounded dispatcher.
     # Preserve the same event/status/newer-run checks at that actual boundary.
