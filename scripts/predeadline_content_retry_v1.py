@@ -77,9 +77,45 @@ def _warm_pending(runner, now, latest_due, *, satisfied=()):
     return pending
 
 
-def _clean_capture(result):
-    return not any(result.get(name) for name in
-                   ('DEFERRED', 'REJECTED', 'TASK_DEFERRED', 'RETRYABLE_FAILURES', 'UNAVAILABLE'))
+def _clean_capture(result, *, terminal=()):
+    return (not any(result.get(name) for name in
+                    ('DEFERRED', 'REJECTED', 'TASK_DEFERRED', 'RETRYABLE_FAILURES'))
+            and all(row.get('SOURCE_ID') in terminal for row in result.get('UNAVAILABLE', ())))
+
+
+def _warm_terminal_unavailable(result, runner, now):
+    """Do not let closed, plan-bound tasks hold unrelated eligible races."""
+    if not result.get('UNAVAILABLE'):
+        return set()
+    morning = runner.store.load_verified_snapshot('morning', 'official-day-input')
+    plan = morning['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN']
+    by_source = {task['SOURCE_ID']: task for task in plan}
+    if len(by_source) != len(plan):
+        raise ValueError('WARM_SOURCE_BINDING')
+    terminal = set()
+    for row in result['UNAVAILABLE']:
+        sid, key = row.get('SOURCE_ID'), row.get('RACE_KEY')
+        task = by_source.get(sid)
+        if (task is None or key != task['RACE_KEY']
+                or task['KIND'] not in {'BEFOREINFO', 'ODDS3T'}
+                or sid != task['KIND'].lower() + '-' + key
+                or not re.fullmatch(now.strftime('%Y%m%d')
+                    + r'-(?:0[1-9]|1[0-9]|2[0-4])-(?:0[1-9]|1[0-2])', key)):
+            continue
+        due = datetime.fromisoformat(task['DUE_AT_JST'])
+        end = datetime.fromisoformat(task['MUST_FINISH_BEFORE_JST'])
+        if (now.utcoffset() != timedelta(hours=9)
+                or any(at.utcoffset() != timedelta(hours=9) or at.date() != now.date()
+                       for at in (due, end)) or end - due != timedelta(minutes=7)):
+            raise ValueError('WARM_SOURCE_BINDING')
+        verified_withdrawal = (row.get('REASON') == 'OFFICIAL_WITHDRAWAL_UNSUPPORTED_FIELD_SIZE'
+            and isinstance(row.get('AVAILABILITY_SNAPSHOT_SHA256'), str)
+            and re.fullmatch('[a-f0-9]{64}', row['AVAILABILITY_SNAPSHOT_SHA256']))
+        # The native collector rechecks withdrawal receipts and raw input before
+        # returning its evidence SHA. Unknown live failures remain blocking.
+        if now >= end or verified_withdrawal:
+            terminal.add(sid)
+    return terminal
 
 
 def _verified_alternates(result):
@@ -95,14 +131,17 @@ def arm_normal_warm(first, runner, max_requests, *, early_capture):
     if (not early_capture or os.environ.get('G11_URGENT_WARM_HANDOFF') != 'true'
             or os.environ.get('G11_WARM_CAPTURE_REMAINING') or now.date() < WARM_HANDOFF_FROM
             or max_requests != 8 or not 0 < len(first['ACQUIRED']) < max_requests
-            or 'WARM_REMAINING' in first or not _clean_capture(first)):
+            or 'WARM_REMAINING' in first):
         return first
     try:
+        terminal = _warm_terminal_unavailable(first, runner, now)
+        if not _clean_capture(first, terminal=terminal):
+            return first
         # No wait before the first LOCK/publication. A task becoming due during
         # that existing delivery can use this worker instead of another restore.
         pending = _warm_pending(runner, now, now + timedelta(
             seconds=WARM_PUBLICATION_RESERVE_SECONDS + MAX_WARM_DUE_WAIT_SECONDS),
-            satisfied=_verified_alternates(first))
+            satisfied=_verified_alternates(first) | terminal)
     except (OSError, KeyError, TypeError, ValueError) as exc:
         _report('NORMAL_WARM_SELECTION_SKIPPED', error_type=type(exc).__name__)
         return first
@@ -123,11 +162,14 @@ def resume_at_warm_due(first, runner, capture, max_requests):
     run_id = os.environ.get('GITHUB_RUN_ID')
     if (not run_id or os.environ.get('G11_WARM_FIRST_PUBLIC_READBACK') != run_id
             or os.environ.get('G11_WARM_CAPTURE_REMAINING') != str(max_requests)
-            or first['ACQUIRED'] or not _clean_capture(first)):
+            or first['ACQUIRED']):
         return first
     now = runner.client.clock()
     try:
-        satisfied = _verified_alternates(first)
+        terminal = _warm_terminal_unavailable(first, runner, now)
+        if not _clean_capture(first, terminal=terminal):
+            return first
+        satisfied = _verified_alternates(first) | terminal
         pending = _warm_pending(runner, now, now + timedelta(seconds=MAX_WARM_DUE_WAIT_SECONDS),
                                 satisfied=satisfied)
         future = [row for row in pending if now < row[0]]

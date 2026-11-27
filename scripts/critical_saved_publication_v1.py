@@ -26,7 +26,7 @@ SAVED_PROJECTOR_SHA = 'ce17fedac3770fe73f8059ceeb0a833c0bfdbc0b4d67902ebd4994ccd
 
 
 def newest_checkpoint_key(day, caches):
-    """Use creation order, never access order, across the two saved lanes."""
+    """Use target order for compact recovery, retaining legacy creation order."""
     import re
     datetime.strptime(day, '%Y-%m-%d')
     pattern = re.compile(r'g11-state-v4-(?:critical|published)-' + re.escape(day) + r'-[0-9]+(?:-[0-9]+-checkpoint)?$')
@@ -35,6 +35,9 @@ def newest_checkpoint_key(day, caches):
                   and pattern.fullmatch(str(row.get('key', '')))]
     if not candidates:
         return ''
+    from compact_runtime_recovery_v1 import EFFECTIVE_FROM, cache_order
+    if day >= EFFECTIVE_FROM:
+        return max(candidates, key=cache_order)['key']
     return max(candidates, key=lambda row: (datetime.fromisoformat(
         row['created_at'].replace('Z', '+00:00')), row['id']))['key']
 
@@ -50,9 +53,22 @@ def select_restore(day):
         response = subprocess.run(['gh', 'api', url], check=True, capture_output=True, text=True)
         caches.extend(json.loads(response.stdout)['actions_caches'])
     key = newest_checkpoint_key(day, caches)
+    from compact_runtime_recovery_v1 import EFFECTIVE_FROM, choose_delta_key
+    delta = ''
+    if day >= EFFECTIVE_FROM:
+        url = (f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/caches?"
+               f"key=g11-state-v4-delta-{day}-&ref=refs%2Fheads%2Fmain"
+               '&per_page=100&sort=created_at&direction=desc')
+        response = subprocess.run(['gh', 'api', url], check=True, capture_output=True, text=True)
+        caches.extend(json.loads(response.stdout)['actions_caches'])
+        delta = choose_delta_key(day, caches, key)
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         output.write('cache_key=' + key + '\n')
+        if day >= EFFECTIVE_FROM:
+            output.write('delta_key=' + delta + '\n')
     print('G11_RESTORE_NEWEST_CHECKPOINT=' + (key or 'NO_SAME_DAY_CHECKPOINT'))
+    if delta:
+        print('G11_RESTORE_NEWER_COMPACT=' + delta)
 
 
 def require(ok, code):

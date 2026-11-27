@@ -280,7 +280,7 @@ class SplitEncryptionTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_compact_dispatch_precedes_full_encryption_but_canonical_publication_still_requires_full_readback(self):
+    def test_compact_proof_can_precede_publication_with_complete_full_readback_fallback(self):
         source=(ROOT/'.github/actions/g11-publication-checkpoint/action.yml').read_text()
         names=['Start WILD4 from a verified full reconstruction before large backup transfer',
                'Encrypt the complete state before full backup and canonical publication',
@@ -296,7 +296,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('--passphrase', (ROOT/'scripts/encrypt_runtime_state_v1.py').read_text())
         self.assertIn('set -euo pipefail',full)
         self.assertNotIn('continue-on-error',full)
+        self.assertIn("steps.compact-verified.outputs.ready != 'true'", full)
+        self.assertIn('value: ${{ steps.compact-verified.outputs.ready || steps.verified.outputs.ready }}',source)
+        self.assertIn('full-ready:',source)
         self.assertIn('value: ${{ steps.verified.outputs.ready }}',source)
+        proof=source.split('    - name: Verify complete compact publication reconstruction\n',1)[1].split('    - name:',1)[0]
+        self.assertIn("inputs.allow-compact == 'true'",proof)
+        self.assertIn("steps.compact-readback.outputs.cache-hit == 'true'",proof)
+        self.assertIn('scripts/compact_publication_checkpoint_v1.py verify',proof)
+        self.assertLess(source.index('    - name: Verify complete compact publication reconstruction\n'),indexes[1])
         workflow=(ROOT/'.github/workflows/g11-free-runner.yml').read_text()
         critical=workflow.split('      - name: Encrypt critical state before optional work\n',1)[1].split('      - name:',1)[0]
         self.assertIn('--delta-only',critical)
