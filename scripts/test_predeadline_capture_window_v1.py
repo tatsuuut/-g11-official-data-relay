@@ -350,6 +350,55 @@ class FormalPlanTests(unittest.TestCase):
             self.assertTrue(self.official.CanonicalRunner._g11_ten_minute_odds_window)
         self.assertEqual(before,(self.bridge,self.context,self.sources))
 
+    def test_reviewed_inner_replacement_retains_t10_guard_and_uses_new_decoder(self):
+        from exhibition_input_compatibility_v1 import _keep_wrappers
+        replacement=actual_formal_binding()
+        checked=[]
+        native_require=replacement._require
+        def observed_require(condition,reason):
+            checked.append(reason)
+            return native_require(condition,reason)
+        replacement._require=observed_require
+        original=self.invocation._bind_predeadline_plan
+        with window.verified_odds_window(self.official):
+            wrapped=self.invocation._bind_predeadline_plan
+            self.bind()  # Populate the cache for the original frozen decoder.
+            transplanted=_keep_wrappers(wrapped,replacement._bind_predeadline_plan)
+            self.assertIs(transplanted.__wrapped__,replacement._bind_predeadline_plan)
+            self.assertIs(wrapped.__wrapped__,original)
+            self.invocation._bind_predeadline_plan=transplanted
+            self.assertEqual(self.bridge['PREDEADLINE_PLAN'],self.bind()['TASKS'])
+            self.assertTrue(checked)
+            self.context['ODDS_CAPTURED_AT_JST']=(NOW-timedelta(seconds=1)).isoformat()
+            with self.assertRaisesRegex(self.invocation.FormalP3InvocationError,
+                    'P07_PREDEADLINE_FRESHNESS_BINDING:ODDS3T'):
+                self.bind()
+
+    def test_reviewed_inner_replacement_retains_t10_guard_and_uses_new_decoder(self):
+        from exhibition_input_compatibility_v1 import _keep_wrappers
+        replacement_module=actual_formal_binding()
+        replacement=replacement_module._bind_predeadline_plan
+        checked=[]
+        native_require=replacement_module._require
+        def observed_require(condition,reason):
+            checked.append(reason)
+            return native_require(condition,reason)
+        replacement_module._require=observed_require
+        with window.verified_odds_window(self.official):
+            wrapper=self.invocation._bind_predeadline_plan
+            # Populate the old decoder cache before the exhibition adapter
+            # replaces the inner function. Its old cached globals cannot win.
+            self.bind()
+            adapted=_keep_wrappers(wrapper,replacement)
+            self.assertIs(adapted.__wrapped__,replacement)
+            self.assertIs(adapted.__code__,wrapper.__code__)
+            self.invocation._bind_predeadline_plan=adapted
+            self.assertEqual(self.bridge['PREDEADLINE_PLAN'],self.bind()['TASKS'])
+            self.assertIn('P07_PREDEADLINE_FRESHNESS_BINDING:BEFOREINFO',checked)
+            self.context['ODDS_CAPTURED_AT_JST']=(NOW-timedelta(seconds=1)).isoformat()
+            with self.assertRaisesRegex(replacement_module.FormalP3InvocationError,'P07_PREDEADLINE_FRESHNESS_BINDING:ODDS3T'):
+                self.bind()
+
     def test_exhibition_packet_keeps_each_resource_inside_its_seven_minute_window(self):
         import inspect
         import sys

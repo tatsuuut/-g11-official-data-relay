@@ -6,6 +6,7 @@ identity, immutable saves and cutoff guards keep their original authority.
 """
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from functools import wraps
 import hashlib
 import inspect
 
@@ -68,10 +69,23 @@ def verified_odds_window(official):
         '_require(due <= captured < deadline, "ODDS_ONLY_CAPTURE_WINDOW")',
         '_require(_captured_in_window(due, deadline, captured), "ODDS_ONLY_CAPTURE_WINDOW")',
     )], {'_captured_in_window': captured_in_window})
-    adapted_plan = replace_pinned(original_plan, plan_sha, [(
-        'and due <= captured < deadline,',
-        'and _captured_in_window(due, deadline, captured),',
-    )], {'_captured_in_window': captured_in_window})
+    def compile_plan(function):
+        source_sha = hashlib.sha256(inspect.getsource(function).encode()).hexdigest()
+        if source_sha not in (FORMAL_PLAN_SHA, STADIUM_FORMAL_PLAN_SHA,
+                              ALTERNATE_FORMAL_PLAN_SHA, BOATCAST_FORMAL_PLAN_SHA):
+            raise ValueError('EARLY_CAPTURE_FORMAL_PLAN_SOURCE_CHANGED')
+        return replace_pinned(function, source_sha, [(
+            'and due <= captured < deadline,',
+            'and _captured_in_window(due, deadline, captured),',
+        )], {'_captured_in_window': captured_in_window})
+    compiled_plans = {}
+    @wraps(original_plan)
+    def adapted_plan(*args, **kwargs):
+        # Retain the T10 guard when the approved input overlay transplants
+        # the reviewed plan decoder beneath this existing wrapper.
+        if original_plan not in compiled_plans:
+            compiled_plans[original_plan] = compile_plan(original_plan)
+        return compiled_plans[original_plan](*args, **kwargs)
     adapted_availability = None
     if original_availability is not None:
         adapted_availability = replace_pinned(original_availability, AVAILABILITY_WINDOW_SHA, [(

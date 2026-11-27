@@ -13,6 +13,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import io
+import inspect
 import json
 import os
 from pathlib import Path
@@ -93,9 +94,13 @@ def prepare_state(state, frozen):
     from g11.canonical.test_official_pipeline import make_verified_snapshot, beforeinfo_html, odds_html
     from g11.growth_p3.v1_1 import current_runtime_v1 as current
     from g11.relay import daily_runtime_authority_v1 as daily
+    from rescue_night_result_parser_v1 import official_input_compatibility
+    from racer_period_source_v1 import official_period_url
+    from morning_source_receipt_limit_v1 import receipt_limit
+    import predeadline_capture_window_v1 as capture_window
 
     clock = {"now": ACTIVATED}
-    store = official.OfficialArtifactStore.initialize(state / "store", DAY, 2, DAY + "T07:00:00+09:00")
+    store = official.OfficialArtifactStore.initialize(state / "store", DAY, 15, DAY + "T07:00:00+09:00")
     synthetic_authority(state, frozen, store, daily, current, official)
     text = json.dumps(make_verified_snapshot()["SNAPSHOT"]["PAYLOAD"], ensure_ascii=False)
     text = (text.replace("20260826", "20261127").replace("2026-08-26", DAY)
@@ -103,18 +108,59 @@ def prepare_state(state, frozen):
             .replace("T08:23:00", "T23:23:00").replace("T08:53:00", "T23:52:00")
             .replace('"08:30"', '"23:30"').replace('"09:00"', '"23:59"'))
     morning = json.loads(text)
+    columns = {name: index for index, name in enumerate(morning["RAW38_FIELDS"])}
+    template_race, template_rows = deepcopy(morning["RACES"][0]), deepcopy(morning["RAW38_ROWS"][:6])
+    for venue, number in [("05", n) for n in range(3, 13)] + [("06", n) for n in range(1, 4)]:
+        key = f"20261127-{venue}-{number:02d}"
+        race = deepcopy(template_race)
+        race.update(venue_code=venue, venue_name="多摩川" if venue == "05" else "浜名湖",
+                    race_no=number, deadline_jst=DAY + "T12:00:00+09:00")
+        morning["RACES"].append(race)
+        for original in template_rows:
+            row = deepcopy(original)
+            for field, value in {"場": race["venue_name"], "場コード": venue,
+                                 "節識別子": "20261127-" + venue, "節キー": "20261127-" + venue,
+                                 "R": number, "標準レースキー": key,
+                                 "艇キー": key + "-" + str(row[columns["艇番"]]),
+                                 "モーターキー": f"20261127-{venue}-{row[columns['モーター番号']]}-2026-2",
+                                 "締切": "12:00"}.items():
+                row[columns[field]] = value
+            morning["RAW38_ROWS"].append(row)
+        for kind in ("BEFOREINFO", "ODDS3T"):
+            due = datetime.fromisoformat(race["deadline_jst"]) - timedelta(minutes=7)
+            url = (official.beforeinfo_url if kind == "BEFOREINFO" else official.odds3t_url)(
+                CUTOFF.date(), venue, number)
+            morning["PREDEADLINE_PLAN"].append({"SOURCE_ID": kind.lower() + "-" + key,
+                "KIND": kind, "RACE_KEY": key, "DUE_AT_JST": due.isoformat(),
+                "MUST_FINISH_BEFORE_JST": race["deadline_jst"], "URL": url})
+    morning["SCOPE"] = {"EXPECTED_VENUE_COUNT": 2, "EXPECTED_RACE_COUNT": 15}
     for row in morning["RAW38_ROWS"]:
-        row[morning["RAW38_FIELDS"].index("公式URL")] = official.schedule_url(CUTOFF.date())
+        row[columns["公式URL"]] = official.racelist_url(CUTOFF.date(), row[columns["場コード"]], row[columns["R"]])
+        row[columns["source"]] = official.FORMAL_GATE.CANONICAL_RECOVERY_SOURCE_ROUTE
     receipts = []
-    for sid, url in (("schedule-b-20261127", official.schedule_url(CUTOFF.date())),
-                     ("racer-period-fan2605", "https://www.boatrace.jp/owpc/pc/extra/data/fan2605.lzh")):
+    period_url = official_period_url(CUTOFF.date())
+    sources = [("schedule-b-20261127", official.schedule_url(CUTOFF.date())),
+               ("racer-period-" + period_url.rsplit("/", 1)[1].removesuffix(".lzh"), period_url)]
+    for days in range(1, 7):
+        prior = CUTOFF.date() - timedelta(days=days)
+        sources.append((f"result-k-{prior:%Y%m%d}",
+                        f"https://www1.mbrace.or.jp/od2/K/{prior:%Y%m}/k{prior:%y%m%d}.lzh"))
+    for race in morning["RACES"]:
+        key = f"20261127-{race['venue_code']}-{race['race_no']:02d}"
+        sources.append(("racelist-recovery-" + key,
+                        official.racelist_url(CUTOFF.date(), race["venue_code"], race["race_no"])))
+    for sid, url in sources:
         receipts.append(store.commit_response(sid, url, CUTOFF - timedelta(hours=2), sid.encode(),
                         content_type="application/test", final_url=url))
     store.commit_snapshot("morning", "official-day-input", morning, receipts)
+    verified_morning = store.load_verified_snapshot("morning", "official-day-input")
+    require(len(receipts) == 23 and receipt_limit(verified_morning) == 23,
+            "expanded MORNING fixture does not bind its 23 original official receipts")
     client = official.OfficialHttpClient(store, clock=lambda: clock["now"],
         opener=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("unplanned national HTTP")))
     runner = official.CanonicalRunner(store, client=client)
-    morning_result = runner.run_morning_predictions()
+    with official_input_compatibility():
+        morning_result = runner.run_morning_predictions()
     require(KEY in morning_result["COMPLETED"], "frozen native MORNING did not complete")
     wild_admission = store.root / "g11/wild-pack-oos/morning" / DAY / "position-oos-admission.manifest.json"
     wild_admission.parent.mkdir(parents=True, exist_ok=True)
@@ -133,7 +179,13 @@ def prepare_state(state, frozen):
         {"STATUS": "PREDEADLINE_SOURCE_COMPLETE", "KIND": "BEFOREINFO", "RACE_KEY": PRIOR_KEY,
          "CAPTURED_AT_JST": receipt["CAPTURED_AT_JST"], "PARSED": official.parse_beforeinfo_html(raw)}, [receipt])
     put_odds(store, official, PRIOR_KEY, prior_capture, odds_html())
-    prior_result = runner.run_due_predeadline_predictions()
+    class PriorClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = clock["now"]
+            return value.astimezone(tz) if tz is not None else value.replace(tzinfo=None)
+    with patch.object(capture_window, "datetime", PriorClock), official_input_compatibility():
+        prior_result = runner.run_due_predeadline_predictions()
     require(PRIOR_KEY in prior_result["COMPLETED"], "frozen earlier formal forecast missing")
     daily.seal(state, DAY, "PREDEADLINE")
     clock["now"] = ACTIVATED
@@ -353,16 +405,30 @@ def exercise():
     from g11.growth_p3.v1_1 import true_only_models_v2 as true, official_display_tickets_v1 as display
     from g11.wild_pack.v1 import runtime_orchestrator_v1 as wild
     from g11.canonical.test_official_pipeline import odds_html
+    from g11.relay import predeadline_critical_v1 as critical
+    from rescue_night_result_parser_v1 import official_input_compatibility
+    from predeadline_content_retry_v1 import bounded_content_retry
+    from critical_formal_lock_scope_v1 import formal_lock_scope
+    import predeadline_capture_window_v1 as capture_window
 
     with TemporaryDirectory(prefix="exhibition-today-consumer-") as temporary, ExitStack() as test_scope:
         state = Path(temporary)
         official, preview, current, daily, store, runner, clock, morning = prepare_state(state, frozen)
+        class FixtureClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = clock["now"]
+                return value.astimezone(tz) if tz is not None else value.replace(tzinfo=None)
+        # The native T10 admission additionally rejects future receipts. Supply
+        # the same explicit fixture clock rather than bypassing that guard.
+        test_scope.enter_context(patch.object(capture_window, "datetime", FixtureClock))
         if os.environ.get("G11_EXHIBITION_ALLOW_API_MATERIALIZATION_TEST") == "1":
             # Local-only fixture: all candidate bytes are independently checked
             # by the helper; only the absent authenticated Git checkout is mocked.
             test_scope.enter_context(patch.object(compatibility, "_candidate_head",
                 return_value=compatibility.CANDIDATE_SHA))
         old_predict = true.predict
+        frozen_odds_validator = runner._validated_odds_only_market
         native = (true.infer, true.ENGINE._runtime_record, true.RACER.enrich,
                   true.TACTICAL_HEAD.enrich, official.ABEKEN_V53.derive_v53_pre_race,
                   wild.pre_position.predict_live, display.finish)
@@ -373,59 +439,91 @@ def exercise():
         old_authority = file_bytes(state / "daily-runtime")
         old_locks = file_bytes(store.root / "snapshots/predeadline")
         checks = []
-        with compatibility.context(state, DAY, candidate, nowfunc=lambda: clock["now"]):
-            from g11.canonical import boatcast_preview_v1 as source, fun_original_display_v1 as fun
-            from g11.canonical import shared_original_display_v1 as shared
-            require(native == (true.infer, true.ENGINE._runtime_record, true.RACER.enrich,
-                    true.TACTICAL_HEAD.enrich, official.ABEKEN_V53.derive_v53_pre_race,
-                    wild.pre_position.predict_live, display.finish), "native model function identity changed")
-            checks.append("FROZEN_NATIVE_INFERENCE_IDENTITIES")
-            require(hasattr(official.CanonicalRunner.run_due_predeadline_predictions, "__wrapped__"),
-                    "daily authority wrapper was bypassed")
-            roster = preview.race_roster(morning, KEY)
-            put_odds(store, official, KEY, clock["now"], odds_html())
-            proof, calls = boatcast_packet(candidate, source, roster, store, clock)
-            require(len(calls) == 4, "incorrect standard exhibition request count")
-            result = runner.run_due_predeadline_predictions()
-            require(KEY in result["COMPLETED"], "future frozen native formal P3 did not lock")
-            v53 = store.load_verified_snapshot("predeadline", runner._abeken_v53_live_name(KEY))
-            require(v53["SNAPSHOT"]["PAYLOAD"]["BEFOREINFO_SNAPSHOT_SHA256"] == proof["SNAPSHOT_SHA256"],
-                    "future frozen V53 lock lost shared source")
-            checks.extend(["FUTURE_NATIVE_FORMAL_P3_LOCK", "FUTURE_NATIVE_V53_LOCK"])
-            frozen_feature_parity(store, source, true, old_predict, proof, roster)
-            checks.append("REAL_FROZEN_WEATHER_AND_FEATURE_PARITY")
-            wild_packet = collect_wild(store, proof, wild, clock)
-            require(wild_packet.is_file(), "future WILD collection lock missing")
-            checks.append("FUTURE_WILD_SHARED_INPUT_LOCK")
-            original_proof = fun_packet(candidate, fun, shared, display, store, roster, clock)
-            checks.append("FUN_ORIGINAL_NATIVE_DISPLAY_HANDOFF")
-            saved_p3_folder, saved_p3 = saved_fun_lock_replay_fixture(
-                store, original_proof, true, clock, test_scope)
-            checks.append("FUN_NATIVE_SAVED_P3_SELECTION_AND_NIGHT_PROOF")
-            stopped = deepcopy(store.ledger.state())
-            with patch.object(type(store.ledger), "state", return_value={**stopped, "STOPPED": True}), \
-                    patch.object(source, "_read", side_effect=AssertionError("STOP made an HTTP request")):
-                reused = source.due_observation(store, KEY, CUTOFF, roster, lambda: clock["now"])
-                require(reused is None or reused == proof, "STOP created or replaced an input")
-                require(store.ledger.state()["STOPPED"] is True, "STOP flag was cleared")
-            require(store.ledger.state() == stopped, "STOP policy ledger was changed")
-            changed = deepcopy(proof["SNAPSHOT"])
-            changed["SOURCE_RECEIPTS"][0]["HOST"] = "unreviewed.invalid"
-            try:
-                source.validate_snapshot(changed, KEY)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError("unknown exhibition source was accepted")
-            checks.append("GLOBAL_STOP_AND_UNKNOWN_SOURCE_REJECTION")
-            with patch.object(source, "_read", side_effect=AssertionError("expired race made an HTTP request")):
+        with official_input_compatibility(), bounded_content_retry(early_capture=True), \
+                compatibility.context(state, DAY, candidate, nowfunc=lambda: clock["now"]):
+            # Match LIVE: formal scope compiles the checkpoint binding after
+            # exhibition hooks are installed, while other input shims are active.
+            with formal_lock_scope(DAY):
+                from g11.canonical import boatcast_preview_v1 as source, fun_original_display_v1 as fun
+                from g11.canonical import shared_original_display_v1 as shared
+                require(native == (true.infer, true.ENGINE._runtime_record, true.RACER.enrich,
+                        true.TACTICAL_HEAD.enrich, official.ABEKEN_V53.derive_v53_pre_race,
+                        wild.pre_position.predict_live, display.finish), "native model function identity changed")
+                checks.append("FROZEN_NATIVE_INFERENCE_IDENTITIES")
+                require(hasattr(official.CanonicalRunner.run_due_predeadline_predictions, "__wrapped__"),
+                        "daily authority wrapper was bypassed")
+                roster = preview.race_roster(morning, KEY)
+                retained_odds_at = CUTOFF - timedelta(minutes=9)
+                put_odds(store, official, KEY, retained_odds_at, odds_html())
+                checked_morning = store.load_verified_snapshot("morning", "official-day-input")
+                checked_odds = store.load_verified_snapshot("predeadline", "odds3t-" + KEY)
                 try:
-                    expired = source.due_observation(store, PRIOR_KEY, CUTOFF.replace(minute=30),
-                        preview.race_roster(morning, PRIOR_KEY), lambda: clock["now"])
+                    frozen_odds_validator(checked_morning, checked_odds, KEY)
+                except official.PipelineError as error:
+                    require(str(error) == "ODDS_ONLY_CAPTURE_WINDOW", "wrong frozen T9 odds rejection")
+                else:
+                    raise AssertionError("frozen T7 odds validator unexpectedly accepted T9 receipt")
+                runner._validated_odds_only_market(checked_morning, checked_odds, KEY)
+                checks.append("RETAINED_T9_ODDS_ACCEPTED_ONLY_BY_REVIEWED_T10_WINDOW")
+                proof, calls = boatcast_packet(candidate, source, roster, store, clock)
+                require(len(calls) == 4, "incorrect standard exhibition request count")
+                result = runner.run_due_predeadline_predictions()
+                require(KEY in result["COMPLETED"], "future frozen native formal P3 did not lock")
+                invocation = official.FORMAL_ADAPTER.prepare_canonical_official_predeadline_invocation(
+                    checked_morning, proof, checked_odds, KEY)
+                expected_source_hashes = (checked_morning["SNAPSHOT"]["SOURCE_SHA256"]
+                    + proof["SNAPSHOT"]["SOURCE_SHA256"] + checked_odds["SNAPSHOT"]["SOURCE_SHA256"])
+                require(len(expected_source_hashes) == 29
+                        and len(checked_morning["SNAPSHOT"]["SOURCE_RECEIPTS"]) == 23
+                        and invocation["G11_SOURCE_SHA256"] == expected_source_hashes
+                        and invocation["PERMIT"]["PAYLOAD"]["G11_SOURCE_SHA256"] == expected_source_hashes,
+                        "native T9 invocation lost its 23 MORNING plus six predeadline source hashes")
+                checks.append("EXPANDED_23_SOURCE_MORNING_AND_29_SOURCE_T9_INVOCATION")
+                v53 = store.load_verified_snapshot("predeadline", runner._abeken_v53_live_name(KEY))
+                require(v53["SNAPSHOT"]["PAYLOAD"]["BEFOREINFO_SNAPSHOT_SHA256"] == proof["SNAPSHOT_SHA256"],
+                        "future frozen V53 lock lost shared source")
+                checks.extend(["FUTURE_NATIVE_FORMAL_P3_LOCK", "FUTURE_NATIVE_V53_LOCK"])
+                frozen_feature_parity(store, source, true, old_predict, proof, roster)
+                checks.append("REAL_FROZEN_WEATHER_AND_FEATURE_PARITY")
+                wild_packet = collect_wild(store, proof, wild, clock)
+                require(wild_packet.is_file(), "future WILD collection lock missing")
+                checks.append("FUTURE_WILD_SHARED_INPUT_LOCK")
+                original_proof = fun_packet(candidate, fun, shared, display, store, roster, clock)
+                checks.append("FUN_ORIGINAL_NATIVE_DISPLAY_HANDOFF")
+                saved_p3_folder, saved_p3 = saved_fun_lock_replay_fixture(
+                    store, original_proof, true, clock, test_scope)
+                checks.append("FUN_NATIVE_SAVED_P3_SELECTION_AND_NIGHT_PROOF")
+                stopped = deepcopy(store.ledger.state())
+                with patch.object(type(store.ledger), "state", return_value={**stopped, "STOPPED": True}), \
+                        patch.object(source, "_read", side_effect=AssertionError("STOP made an HTTP request")):
+                    reused = source.due_observation(store, KEY, CUTOFF, roster, lambda: clock["now"])
+                    require(reused is None or reused == proof, "STOP created or replaced an input")
+                    require(store.ledger.state()["STOPPED"] is True, "STOP flag was cleared")
+                require(store.ledger.state() == stopped, "STOP policy ledger was changed")
+                changed = deepcopy(proof["SNAPSHOT"])
+                changed["SOURCE_RECEIPTS"][0]["HOST"] = "unreviewed.invalid"
+                try:
+                    source.validate_snapshot(changed, KEY)
                 except ValueError:
-                    expired = None
-                require(expired is None, "expired race produced a new exhibition packet")
-            checks.append("EXPIRED_RACE_NO_NEW_REQUEST_OR_LOCK")
+                    pass
+                else:
+                    raise AssertionError("unknown exhibition source was accepted")
+                checks.append("GLOBAL_STOP_AND_UNKNOWN_SOURCE_REJECTION")
+                with patch.object(source, "_read", side_effect=AssertionError("expired race made an HTTP request")):
+                    try:
+                        expired = source.due_observation(store, PRIOR_KEY, CUTOFF.replace(minute=30),
+                            preview.race_roster(morning, PRIOR_KEY), lambda: clock["now"])
+                    except ValueError:
+                        expired = None
+                    require(expired is None, "expired race produced a new exhibition packet")
+                checks.append("EXPIRED_RACE_NO_NEW_REQUEST_OR_LOCK")
+                compiled_checkpoint = inspect.unwrap(critical.run).__globals__["_tree_sha"]
+                require(compiled_checkpoint is critical._tree_sha,
+                        "compiled critical entry retained a pre-adapter checkpoint binding")
+                checkpoint = compiled_checkpoint(store.root)
+                require(isinstance(checkpoint, str) and len(checkpoint) == 64,
+                        "real critical checkpoint did not complete inside LIVE adapter scopes")
+                checks.append("LIVE_SCOPED_CRITICAL_CHECKPOINT_WITH_NATIVE_GUARDS")
         require(original_wrapped is official.CanonicalRunner.run_due_predeadline_predictions,
                 "context did not restore frozen daily boundary")
         require(true.predict is old_predict, "context did not restore frozen source predictor")

@@ -406,7 +406,7 @@ def _run_same_day_rescue_night(day):
     return True
 
 def exhibition_input_scope(mode, day):
-    """Enter the reviewed, same-day input adapter before legacy admission shims."""
+    """Enter the reviewed input adapter after the retained input shims."""
     scope = ExitStack()
     if day != '2026-11-27' or mode not in ('critical', 'predeadline', 'night'):
         return scope
@@ -469,25 +469,29 @@ def main():
     from g11.relay import daily_runtime_authority_v1 as implementation
     apply(implementation, day)
     from rescue_night_result_parser_v1 import official_input_compatibility
-    with exhibition_input_scope(mode, day), official_input_compatibility():
+    with official_input_compatibility():
         if mode == "critical":
             from critical_saved_publication_v1 import align_empty_capture
             align_empty_capture(Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve(), day)
             from g11.relay import predeadline_critical_v1
             from predeadline_content_retry_v1 import bounded_content_retry
             from critical_formal_lock_scope_v1 import formal_lock_scope
-            with bounded_content_retry(early_capture=True), formal_lock_scope(day):
+            # Capture the already-installed parser/collector identities. Compile
+            # the formal scope afterward so its copied globals include the
+            # exhibition audit hook before the existing checkpoint tree hash.
+            with bounded_content_retry(early_capture=True), exhibition_input_scope(mode, day), formal_lock_scope(day):
                 predeadline_critical_v1.main()
         elif mode == "predeadline":
             guard_optional_mashiro_shadow()
             from g11.relay import predeadline_nowait_v1
             from predeadline_race_isolation_v1 import isolate_predeadline_inputs
             from predeadline_content_retry_v1 import bounded_content_retry
-            with isolate_predeadline_inputs(), bounded_content_retry():
+            with isolate_predeadline_inputs(), bounded_content_retry(), exhibition_input_scope(mode, day):
                 return predeadline_nowait_v1.main(sys.argv[1:])
         elif mode == "night":
             from g11.relay import v1
-            return v1.main(sys.argv[1:])
+            with exhibition_input_scope(mode, day):
+                return v1.main(sys.argv[1:])
         else:
             raise RuntimeError("PREDEADLINE_RECOVERY_MODE")
 
