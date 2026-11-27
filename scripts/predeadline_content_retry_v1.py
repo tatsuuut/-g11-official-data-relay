@@ -43,6 +43,114 @@ HANDOFF_SETUP_SECONDS = 145
 WARM_HANDOFF_FROM = date(2026, 11, 22)
 WARM_PUBLICATION_RESERVE_SECONDS = 145
 WARM_SUCCESSOR_SETUP_SECONDS = 145
+MAX_WARM_DUE_WAIT_SECONDS = 60
+
+
+def _warm_pending(runner, now, latest_due, *, satisfied=()):
+    """Inspect the existing verified plan, without creating or advancing tasks."""
+    from predeadline_capture_window_v1 import effective_due
+    from predeadline_input_health_v1 import verified_cancelled_venue_days
+    if (now.utcoffset() != timedelta(hours=9) or latest_due.date() != now.date()
+            or official_host_guard(runner.store, now)):
+        return []
+    morning = runner.store.load_verified_snapshot('morning', 'official-day-input')
+    plan = morning['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN']
+    _, eligible, _ = runner._formal_prediction_scope(morning, failure_prefix='DUE_PREDEADLINE_GATE')
+    cancelled = verified_cancelled_venue_days(runner.store, plan, now)
+    seen, pending = set(), []
+    for task in plan:
+        sid, key, kind = task['SOURCE_ID'], task['RACE_KEY'], task['KIND']
+        due = datetime.fromisoformat(task['DUE_AT_JST'])
+        end = datetime.fromisoformat(task['MUST_FINISH_BEFORE_JST'])
+        if (kind not in {'BEFOREINFO', 'ODDS3T'} or sid != kind.lower() + '-' + key
+                or sid in seen or key[:8] != now.strftime('%Y%m%d')
+                or any(at.utcoffset() != timedelta(hours=9) or at.date() != now.date()
+                       for at in (due, end)) or end - due != timedelta(minutes=7)):
+            raise ValueError('WARM_SOURCE_BINDING')
+        seen.add(sid)
+        if (sid in satisfied or key not in eligible or key[:-3] in cancelled or now >= end
+                or (runner.store.root / 'snapshots' / 'predeadline' / (sid + '.json')).exists()):
+            continue
+        due = effective_due(due, end)
+        if due <= latest_due:
+            pending.append((due, end, sid))
+    return pending
+
+
+def _clean_capture(result):
+    return not any(result.get(name) for name in
+                   ('DEFERRED', 'REJECTED', 'TASK_DEFERRED', 'RETRYABLE_FAILURES', 'UNAVAILABLE'))
+
+
+def _verified_alternates(result):
+    # Trust only the native collector's completed alternate readback. Mere
+    # alternate-file existence never suppresses primary acquisition here.
+    return {row['SOURCE_ID'] for row in result['SKIPPED']
+            if row.get('REASON') == 'VERIFIED_ALTERNATE_ALREADY_SAVED'}
+
+
+def arm_normal_warm(first, runner, max_requests, *, early_capture):
+    """Publish this partial capture first, then reuse only its unspent slots."""
+    now = runner.client.clock()
+    if (not early_capture or os.environ.get('G11_URGENT_WARM_HANDOFF') != 'true'
+            or os.environ.get('G11_WARM_CAPTURE_REMAINING') or now.date() < WARM_HANDOFF_FROM
+            or max_requests != 8 or not 0 < len(first['ACQUIRED']) < max_requests
+            or 'WARM_REMAINING' in first or not _clean_capture(first)):
+        return first
+    try:
+        # No wait before the first LOCK/publication. A task becoming due during
+        # that existing delivery can use this worker instead of another restore.
+        pending = _warm_pending(runner, now, now + timedelta(
+            seconds=WARM_PUBLICATION_RESERVE_SECONDS + MAX_WARM_DUE_WAIT_SECONDS),
+            satisfied=_verified_alternates(first))
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        _report('NORMAL_WARM_SELECTION_SKIPPED', error_type=type(exc).__name__)
+        return first
+    if not pending:
+        return first
+    first['WARM_REMAINING'] = max_requests - len(first['ACQUIRED'])
+    if output := os.environ.get('GITHUB_OUTPUT'):
+        with open(output, 'a') as handle:
+            handle.write('warm=true\n')
+    _report('NORMAL_PARTIAL_PUBLICATION_HANDOFF', acquired=len(first['ACQUIRED']),
+            remaining_request_slots=first['WARM_REMAINING'],
+            next_due_at_jst=min(pending)[0].isoformat())
+    return first
+
+
+def resume_at_warm_due(first, runner, capture, max_requests):
+    """Wait once only after the same run's first verified public readback."""
+    run_id = os.environ.get('GITHUB_RUN_ID')
+    if (not run_id or os.environ.get('G11_WARM_FIRST_PUBLIC_READBACK') != run_id
+            or os.environ.get('G11_WARM_CAPTURE_REMAINING') != str(max_requests)
+            or first['ACQUIRED'] or not _clean_capture(first)):
+        return first
+    now = runner.client.clock()
+    try:
+        satisfied = _verified_alternates(first)
+        pending = _warm_pending(runner, now, now + timedelta(seconds=MAX_WARM_DUE_WAIT_SECONDS),
+                                satisfied=satisfied)
+        future = [row for row in pending if now < row[0]]
+        if not future or any(row[0] <= now for row in pending):
+            return first
+        due = min(future)[0]
+        _report('WAIT_FOR_WARM_DUE', due_at_jst=due.isoformat(), wait_seconds=(due-now).total_seconds())
+        runner.sleeper((due-now).total_seconds())
+        wake = runner.client.clock()
+        if (wake < due or wake.date() != now.date()
+                or not _warm_pending(runner, wake, wake, satisfied=satisfied)):
+            _report('WARM_DUE_WAKEUP_SKIPPED')
+            return first
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        _report('WARM_DUE_SELECTION_SKIPPED', error_type=type(exc).__name__)
+        return first
+    # The first pass made no request. The reviewed authority boundary and
+    # collector recheck the unchanged ledger, scope, saved inputs and deadlines.
+    second = capture(runner, max_requests=max_requests, early_wait_seconds=0)
+    result = merge_attempts(first, second)
+    if 'WARM_REMAINING' in second:
+        result['WARM_REMAINING'] = second['WARM_REMAINING']
+    return result
 
 
 def urgent_pair_handoff(store, task, deadline, now, following, eligible, cancelled_days,
@@ -120,8 +228,36 @@ def resume_warm():
     day = first['OPERATIONAL_DATE_JST']
     if (gate.get('CRITICAL_CHECKPOINT_STATUS') != 'PASS' or gate.get('LAST_CRITICAL_RUN_ID') != run_id
             or gate.get('OPERATIONAL_DATE') != day or type(slots) is not int or not 1 <= slots <= 7
-            or slots + len(source['ACQUIRED']) != 8 or not (out / 'hot-delta-readback.json').stat().st_size):
+            or slots + len(source['ACQUIRED']) != 8
+            or len(set(source['ACQUIRED'])) != len(source['ACQUIRED'])
+            or not (out / 'hot-delta-readback.json').stat().st_size):
         raise ValueError('WARM_FIRST_RECEIPT_OR_BUDGET')
+    readback = (out / 'hot-delta-readback.json').read_bytes()
+    public = json.loads(readback)
+    binding = public.get('daily_runtime', {})
+    runtime_sha = gate.get('RUNTIME_SOURCE_SHA')
+    if (public.get('operational_date_jst') != day or public.get('stage') != 'PREDEADLINE'
+            or public.get('status') != 'PASS' or str(public.get('source', {}).get('run_id')) != run_id
+            or binding.get('schema') != 'G11_DAILY_RUNTIME_AUTHORITY_V1'
+            or binding.get('operational_date_jst') != day or binding.get('phase') != 'PREDEADLINE'
+            or binding.get('immutable') is not True
+            or binding.get('authority_sha256') != gate['AUTHORITY_SHA256']
+            or (runtime_sha and (binding.get('runtime_source_sha') != runtime_sha
+                                or public.get('source', {}).get('github_sha') != runtime_sha))):
+        raise ValueError('WARM_FIRST_PUBLIC_READBACK')
+    accepted = (out / 'hot-delta-accepted').read_text().strip()
+    if not re.fullmatch('[0-9a-f]{64}', accepted):
+        raise ValueError('WARM_FIRST_PUBLIC_READBACK')
+    receipt = json.loads((root / '.relay-state' / 'daily-runtime' / day / 'delivery'
+                          / 'PREDEADLINE' / (accepted + '.json')).read_bytes())
+    if (receipt.get('schema') != 'G11_DAILY_SITE_DELIVERY_RECEIPT_V1'
+            or receipt.get('operational_date_jst') != day or receipt.get('phase') != 'PREDEADLINE'
+            or receipt.get('authority_sha256') != gate['AUTHORITY_SHA256']
+            or (runtime_sha and receipt.get('runtime_source_sha') != runtime_sha)
+            or receipt.get('site_payload_sha256') != accepted
+            or receipt.get('site_get_sha256') != hashlib.sha256(readback).hexdigest()
+            or receipt.get('http_success') is not True or receipt.get('site_get_readback') != 'PASS'):
+        raise ValueError('WARM_FIRST_PUBLIC_READBACK')
     shutil.copyfile(out / 'result.json', out / 'first-critical-result.json')
     warm = out / 'warm-result.json'
     handoff_enabled = (date.fromisoformat(day) >= WARM_HANDOFF_FROM
@@ -130,6 +266,7 @@ def resume_warm():
         'critical', '--state-root', str(root / '.relay-state'), '--operational-date', day,
         '--run-id', run_id, '--result', str(warm)], cwd=root / '.g11-private', check=True,
         env={**os.environ, 'G11_WARM_CAPTURE_REMAINING': str(slots),
+             'G11_WARM_FIRST_PUBLIC_READBACK': run_id,
              'G11_URGENT_WARM_HANDOFF': str(handoff_enabled).lower(),
              'G11_PRIVATE_REPO_TOKEN': ''})
     second = json.loads(warm.read_bytes())
@@ -138,7 +275,9 @@ def resume_warm():
     remaining = second['ACQUISITION'].get('WARM_REMAINING', 0)
     if (after.get('CRITICAL_CHECKPOINT_STATUS') != 'PASS' or after.get('LAST_CRITICAL_RUN_ID') != run_id
             or after.get('OPERATIONAL_DATE') != day or after.get('AUTHORITY_SHA256') != gate['AUTHORITY_SHA256']
-            or len(acquired) > slots or type(remaining) is not int or remaining < 0
+            or len(acquired) > slots or len(set(acquired)) != len(acquired)
+            or set(acquired).intersection(source['ACQUIRED'])
+            or type(remaining) is not int or remaining < 0
             or (remaining and (not handoff_enabled
                 or not 0 < remaining < slots or remaining + len(acquired) != slots))):
         raise ValueError('WARM_CHECKPOINT_OR_BUDGET')
@@ -456,6 +595,8 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, ea
     # The existing nowait caller must opt in. Other callers retain their policy.
     if early_wait_seconds != 0:
         return first
+    if early_capture and os.environ.get('G11_WARM_CAPTURE_REMAINING'):
+        first = resume_at_warm_due(first, runner, capture, max_requests)
     if isolate and first['REJECTED'] and runner.client.clock().date() >= PACED_CAPTURE_FROM:
         state = runner.store.ledger.state()
         for item in first['REJECTED']:
@@ -467,7 +608,7 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, ea
     try:
         if first['ACQUIRED']:
             _report('PUBLICATION_READY', acquired=len(first['ACQUIRED']))
-            return first
+            return arm_normal_warm(first, runner, max_requests, early_capture=early_capture)
         morning = runner.store.load_verified_snapshot('morning', 'official-day-input')
         plan = morning['SNAPSHOT']['PAYLOAD']['PREDEADLINE_PLAN']
         now = runner.client.clock()
@@ -478,7 +619,7 @@ def collect_with_retry(original, runner, *, max_requests, early_wait_seconds, ea
     if early_capture and first['DEFERRED'] and now.date().isoformat() >= '2026-11-18':
         resumed = resume_at_host_release(first, plan, runner, capture, max_requests, now)
         if resumed is not None:
-            return resumed
+            return arm_normal_warm(resumed, runner, max_requests, early_capture=early_capture)
     if not selected:
         _report(status)
         return first

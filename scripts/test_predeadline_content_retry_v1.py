@@ -228,6 +228,303 @@ class RetryTests(unittest.TestCase):
                 self.plan.append(row)
                 self.responses[row['SOURCE_ID']] = ['complete']
 
+    def normal_partial_capture(self):
+        self.setup_paced_day(degraded=True)
+        self.now = datetime.fromisoformat('2026-11-27T16:23:45+09:00')
+        self.prior_start = self.now - timedelta(seconds=30)
+        self.plan, self.responses = [], {}
+        self.runner._formal_prediction_scope = lambda *_a, **_k: (
+            {}, {task['RACE_KEY'] for task in self.plan}, [])
+        for key, minute in [('20261127-24-03', 30), ('20261127-20-04', 35),
+                            ('20261127-07-04', 35), ('20261127-01-04', 35)]:
+            end = self.now.replace(minute=minute, second=0)
+            for kind in ('BEFOREINFO', 'ODDS3T'):
+                row = self.task(kind, key)
+                row.update(DUE_AT_JST=(end-timedelta(minutes=7)).isoformat(),
+                           MUST_FINISH_BEFORE_JST=end.isoformat())
+                self.plan.append(row)
+                self.responses[row['SOURCE_ID']] = ['complete']
+
+    def seed_public_receipt(self, first):
+        out = self.root / '.relay-output'
+        out.mkdir(exist_ok=True)
+        day = first['OPERATIONAL_DATE_JST']
+        runtime = first['CRITICAL'].get('RUNTIME_SOURCE_SHA', 'd'*40)
+        raw = json.dumps({'operational_date_jst':day, 'stage':'PREDEADLINE', 'status':'PASS',
+            'source':{'run_id':int(first['CRITICAL']['LAST_CRITICAL_RUN_ID']), 'github_sha':runtime},
+            'daily_runtime':{'schema':'G11_DAILY_RUNTIME_AUTHORITY_V1',
+                'operational_date_jst':day, 'phase':'PREDEADLINE', 'immutable':True,
+                'authority_sha256':first['CRITICAL']['AUTHORITY_SHA256'], 'runtime_source_sha':runtime}}).encode()
+        accepted = 'b'*64
+        (out / 'hot-delta-readback.json').write_bytes(raw)
+        (out / 'hot-delta-accepted').write_text(accepted + '\n')
+        receipt = {'schema':'G11_DAILY_SITE_DELIVERY_RECEIPT_V1',
+            'operational_date_jst':day, 'phase':'PREDEADLINE',
+            'authority_sha256':first['CRITICAL']['AUTHORITY_SHA256'],
+            'runtime_source_sha':runtime,
+            'site_payload_sha256':accepted, 'site_get_sha256':hashlib.sha256(raw).hexdigest(),
+            'http_success':True, 'site_get_readback':'PASS'}
+        path = self.root / '.relay-state' / 'daily-runtime' / day / 'delivery' / 'PREDEADLINE' / (accepted+'.json')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(receipt))
+        return path
+
+    def test_normal_partial_capture_reuses_same_worker_only_after_public_readback(self):
+        self.normal_partial_capture()
+        expected = [task['SOURCE_ID'] for task in self.plan]
+        output = self.root / 'github-output'
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true', 'GITHUB_OUTPUT':str(output)}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(first['ACQUIRED'], expected[:2])
+        self.assertEqual(first['WARM_REMAINING'], 6)
+        self.assertEqual(output.read_text(), 'warm=true\n')
+        self.assertEqual(self.now.isoformat(), '2026-11-27T16:24:15+09:00')
+        original = {sid:(self.root/'snapshots/predeadline'/f'{sid}.json').read_bytes()
+                    for sid in expected[:2]}
+        # The first native LOCK, verified saved checkpoint and public readback
+        # complete before the same worker can enter this remaining-slots pass.
+        self.sleep(30)
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                'G11_WARM_CAPTURE_REMAINING':'6', 'GITHUB_RUN_ID':'41',
+                'G11_WARM_FIRST_PUBLIC_READBACK':'41'}):
+            second = retry.collect_with_retry(self.original, self.runner, max_requests=6,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(second['ACQUIRED'], expected[2:])
+        self.assertNotIn('WARM_REMAINING', second)
+        self.assertEqual(self.sleeps, [30, 30, 15, 30, 30, 30, 30, 30])
+        self.assertEqual([sid for sid, _ in self.attempts], expected)
+        self.assertEqual(len(self.attempts), 8)
+        self.assertTrue(all(at >= datetime.fromisoformat('2026-11-27T16:25:00+09:00')
+                            for _, at in self.attempts[2:]))
+        self.assertTrue(all((end-start).total_seconds() >= 30
+                            for (_, start), (_, end) in zip(self.attempts, self.attempts[1:])))
+        self.assertEqual(original, {sid:(self.root/'snapshots/predeadline'/f'{sid}.json').read_bytes()
+                                    for sid in expected[:2]})
+        self.assertEqual(self.plan[2]['DUE_AT_JST'], '2026-11-27T16:28:00+09:00')
+
+    def test_normal_partial_warm_retains_actual_frozen_authority_boundary(self):
+        self.normal_partial_capture()
+        self.install_actual_boundary()
+        (self.root/'manifest.json').write_text('{"OPERATIONAL_DATE_JST":"2026-11-27"}')
+        calls = []
+        daily = types.SimpleNamespace(
+            verify_runtime=lambda *a, **k: calls.append('runtime'),
+            verify_locks=lambda state, day, phase, **k: calls.append(phase))
+        with patch.dict('sys.modules', {'g11.relay':types.SimpleNamespace(daily_runtime_authority_v1=daily)}):
+            with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+                first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                    early_wait_seconds=0, early_capture=True)
+            self.sleep(30)
+            with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                    'G11_WARM_CAPTURE_REMAINING':str(first['WARM_REMAINING']), 'GITHUB_RUN_ID':'41',
+                    'G11_WARM_FIRST_PUBLIC_READBACK':'41'}):
+                second = retry.collect_with_retry(self.original, self.runner, max_requests=6,
+                    early_wait_seconds=0, early_capture=True)
+        self.assertEqual(len(first['ACQUIRED'])+len(second['ACQUIRED']), 8)
+        self.assertEqual(calls, ['runtime', 'MORNING', 'PREDEADLINE']*3)
+        self.assertEqual(self.original, self.Runner.run_due_predeadline)
+
+    def test_normal_warm_contexts_restore_after_future_due_sleeper_raises(self):
+        import predeadline_capture_window_v1 as window
+        from test_predeadline_capture_window_v1 import VerifiedMarketTests
+        self.normal_partial_capture()
+        # Reuse the test's actual frozen odds/formal-plan function extraction;
+        # verified_odds_window still checks their real pinned source hashes.
+        market = VerifiedMarketTests()
+        market.setUp()
+        module = types.ModuleType('g11.canonical.official_pipeline')
+        module.CanonicalRunner = self.Runner
+        module.FORMAL_ADAPTER = market.official.FORMAL_ADAPTER
+        self.Runner._validated_odds_only_market = market.Runner._validated_odds_only_market
+        original_market = self.Runner._validated_odds_only_market
+        original_plan = module.FORMAL_ADAPTER._bind_predeadline_plan
+        opener = Mock()
+        self.runner.client.opener = opener
+        def sleep_failure(_seconds):
+            raise RuntimeError('warm due sleep fixture')
+        with patch.dict('sys.modules', {'g11.canonical.official_pipeline':module}), \
+                patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true', 'GITHUB_RUN_ID':'41'}):
+            with self.assertRaisesRegex(RuntimeError, 'warm due sleep fixture'):
+                with window.verified_odds_window(module) as admitted, retry.bounded_content_retry(early_capture=True):
+                    self.assertTrue(admitted)
+                    first = self.runner.run_due_predeadline(max_requests=8, early_wait_seconds=0)
+                    self.assertEqual(first['WARM_REMAINING'], 6)
+                    self.now = self.now.replace(minute=24, second=45)
+                    self.runner.sleeper = sleep_failure
+                    with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                            'G11_WARM_CAPTURE_REMAINING':'6', 'G11_WARM_FIRST_PUBLIC_READBACK':'41'}):
+                        self.runner.run_due_predeadline(max_requests=8, early_wait_seconds=0)
+        self.assertIs(self.Runner.run_due_predeadline, self.original)
+        self.assertIs(self.Runner._validated_odds_only_market, original_market)
+        self.assertIs(module.FORMAL_ADAPTER._bind_predeadline_plan, original_plan)
+        self.assertIs(self.runner.client.opener, opener)
+        self.assertFalse(hasattr(self.Runner, '_g11_ten_minute_odds_window'))
+        self.assertEqual(len(self.attempts), 2)
+
+    def test_normal_warm_keeps_native_failure_cooldown_and_never_replays_first_sources(self):
+        self.normal_partial_capture()
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.now = self.now.replace(minute=25, second=0)
+        failed = self.plan[2]['SOURCE_ID']
+        self.responses[failed] = ['reject']
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                'G11_WARM_CAPTURE_REMAINING':'6', 'GITHUB_RUN_ID':'41',
+                'G11_WARM_FIRST_PUBLIC_READBACK':'41'}):
+            second = retry.collect_with_retry(self.original, self.runner, max_requests=6,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(len(second['ACQUIRED']), 5)
+        self.assertEqual([row['SOURCE_ID'] for row in second['REJECTED']], [failed])
+        self.assertEqual(self.counts[failed], 1)
+        self.assertTrue(all(self.counts[sid] == 1 for sid in first['ACQUIRED']))
+        self.assertEqual(self.state['CONTENT_INVALID_COUNTS'][failed], 1)
+        self.assertEqual(datetime.fromisoformat(second['REJECTED'][0]['RETRY_AT_JST']),
+                         self.state['SOURCE_PAUSE_UNTIL'][failed]+timedelta(seconds=60))
+        self.assertTrue(all((end-start).total_seconds() >= 30
+                            for (_, start), (_, end) in zip(self.attempts, self.attempts[1:])))
+        self.assertNotIn('WARM_REMAINING', second)
+
+    def test_normal_warm_never_bypasses_native_daily_request_cap(self):
+        self.normal_partial_capture()
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        before = list(self.writes)
+        self.now = self.now.replace(minute=25, second=0)
+        self.responses[self.plan[2]['SOURCE_ID']] = [PipelineError('DAILY_REQUEST_CAP')]
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                'G11_WARM_CAPTURE_REMAINING':str(first['WARM_REMAINING']), 'GITHUB_RUN_ID':'41',
+                'G11_WARM_FIRST_PUBLIC_READBACK':'41'}):
+            with self.assertRaisesRegex(PipelineError, 'DAILY_REQUEST_CAP'):
+                retry.collect_with_retry(self.original, self.runner, max_requests=6,
+                    early_wait_seconds=0, early_capture=True)
+        self.assertEqual(self.writes, before)
+        self.assertEqual(len(self.attempts), 3)
+
+    def test_verified_alternate_pair_does_not_hide_next_warm_due_or_get_downloaded_again(self):
+        if hashlib.sha256(inspect.getsource(self.original).encode()).hexdigest() != retry.ALTERNATE_COLLECTOR_SHA:
+            self.skipTest('retained collector predates shared alternate reuse')
+        self.normal_partial_capture()
+        self.now = self.now.replace(minute=24, second=45)
+        self.prior_start = self.now - timedelta(seconds=30)
+        key = self.plan[0]['RACE_KEY']
+        for prefix in ('published-exhibition-', 'venue-market-'):
+            (self.root/'snapshots/predeadline'/f'{prefix}{key}.json').write_text('retained alternate')
+        calls = []
+        def recheck(store, race, *_args):
+            self.assertEqual(race, key)
+            calls.append(race)
+        with patch.dict(self.original.__globals__, {
+                'PUBLISHED_PREVIEW':types.SimpleNamespace(race_roster=lambda *_: object(), read_observation=recheck),
+                'VENUE_MARKET':types.SimpleNamespace(recheck=recheck)}), \
+                patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                    'G11_WARM_CAPTURE_REMAINING':'6', 'GITHUB_RUN_ID':'41',
+                    'G11_WARM_FIRST_PUBLIC_READBACK':'41'}):
+            result = retry.collect_with_retry(self.original, self.runner, max_requests=6,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(result['ACQUIRED'], [task['SOURCE_ID'] for task in self.plan[2:]])
+        self.assertEqual(self.sleeps[0], 15)
+        self.assertEqual(len(self.attempts), 6)
+        self.assertFalse(any(sid.endswith(key) for sid, _ in self.attempts))
+        self.assertEqual(calls, [key]*4)  # Both native passes verify the saved alternate pair.
+
+    def test_normal_partial_capture_does_not_arm_failed_or_closed_budget(self):
+        for failed, budget in [(True, 8), (False, 2)]:
+            with self.subTest(failed=failed, budget=budget):
+                self.normal_partial_capture()
+                self.attempts, self.counts = [], {}
+                # Fresh saved input paths for each independent first pass.
+                for path in (self.root/'snapshots/predeadline').glob('*.json'):
+                    path.unlink()
+                if failed:
+                    self.responses[self.plan[0]['SOURCE_ID']] = [PipelineError('TIMEOUT')]
+                with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+                    first = retry.collect_with_retry(self.original, self.runner, max_requests=budget,
+                        early_wait_seconds=0, early_capture=True)
+                self.assertNotIn('WARM_REMAINING', first)
+                self.assertLessEqual(len(self.attempts), 2)
+
+    def test_normal_full_eight_capture_slots_do_not_open_another_pass(self):
+        self.normal_partial_capture()
+        self.now = self.now.replace(minute=25, second=0)
+        self.prior_start = self.now - timedelta(seconds=30)
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+            result = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(len(result['ACQUIRED']), 8)
+        self.assertNotIn('WARM_REMAINING', result)
+        self.assertEqual(len(self.attempts), 8)
+
+    def test_normal_partial_capture_needs_enabled_same_day_eligible_upcoming_task(self):
+        for mode in ('disabled', 'distant', 'excluded', 'cancelled', 'saved'):
+            with self.subTest(mode=mode):
+                self.normal_partial_capture()
+                self.attempts, self.counts = [], {}
+                for path in (self.root/'snapshots/predeadline').glob('*.json'):
+                    path.unlink()
+                if mode == 'distant':
+                    for task in self.plan[2:]:
+                        end = self.now.replace(minute=45, second=0)
+                        task.update(DUE_AT_JST=(end-timedelta(minutes=7)).isoformat(),
+                                    MUST_FINISH_BEFORE_JST=end.isoformat())
+                if mode == 'excluded':
+                    self.runner._formal_prediction_scope = lambda *_a, **_k: ({}, {self.plan[0]['RACE_KEY']}, [])
+                if mode == 'saved':
+                    for task in self.plan[2:]:
+                        (self.root/'snapshots/predeadline'/f'{task["SOURCE_ID"]}.json').write_text('{}')
+                cancelled = {task['RACE_KEY'][:-3]:'b'*64 for task in self.plan[2:]} if mode == 'cancelled' else {}
+                with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false' if mode == 'disabled' else 'true'}), \
+                        patch('predeadline_input_health_v1.verified_cancelled_venue_days', return_value=cancelled):
+                    first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                        early_wait_seconds=0, early_capture=True)
+                self.assertNotIn('WARM_REMAINING', first)
+
+    def test_warm_due_wait_requires_public_readback_and_respects_sixty_second_limit(self):
+        for marker, delay in [('', 15), ('other-run', 15), ('41', 61)]:
+            with self.subTest(marker=marker, delay=delay):
+                self.normal_partial_capture()
+                self.plan = self.plan[2:]
+                due = self.now + timedelta(seconds=delay)
+                for task in self.plan:
+                    task.update(DUE_AT_JST=(due+timedelta(minutes=3)).isoformat(),
+                                MUST_FINISH_BEFORE_JST=(due+timedelta(minutes=10)).isoformat())
+                self.attempts, self.sleeps = [], []
+                with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                        'G11_WARM_CAPTURE_REMAINING':'6', 'GITHUB_RUN_ID':'41',
+                        'G11_WARM_FIRST_PUBLIC_READBACK':marker}):
+                    result = retry.collect_with_retry(self.original, self.runner, max_requests=6,
+                        early_wait_seconds=0, early_capture=True)
+                self.assertFalse(result['ACQUIRED'])
+                self.assertFalse(self.attempts)
+                self.assertFalse(self.sleeps)
+
+    def test_warm_due_wait_rechecks_host_pause_and_late_wakeup(self):
+        for changed in ('host-paused', 'stopped', 'late'):
+            with self.subTest(changed=changed):
+                self.normal_partial_capture()
+                self.plan = self.plan[2:]
+                self.attempts, self.sleeps = [], []
+                self.now = self.now.replace(minute=24, second=45)
+                def wake(seconds):
+                    self.sleep(seconds)
+                    if changed == 'host-paused':
+                        self.state['PAUSE_UNTIL']['www.boatrace.jp'] = self.now + timedelta(minutes=5)
+                    elif changed == 'stopped':
+                        self.state['STOPPED'] = True
+                    else:
+                        self.now += timedelta(minutes=11)
+                self.runner.sleeper = wake
+                with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                        'G11_WARM_CAPTURE_REMAINING':'6', 'GITHUB_RUN_ID':'41',
+                        'G11_WARM_FIRST_PUBLIC_READBACK':'41'}):
+                    result = retry.collect_with_retry(self.original, self.runner, max_requests=6,
+                        early_wait_seconds=0, early_capture=True)
+                self.assertFalse(result['ACQUIRED'])
+                self.assertEqual(self.sleeps, [15])
+                self.assertFalse(self.attempts)
+
     def test_urgent_saved_pair_reaches_publication_before_six_remaining_gets(self):
         self.november20_congestion(next_minute=6)
         expected = [r['SOURCE_ID'] for r in self.plan]
@@ -300,7 +597,7 @@ class RetryTests(unittest.TestCase):
             'CRITICAL_CHECKPOINT_STATUS':'PASS','LAST_CRITICAL_RUN_ID':'41','AUTHORITY_SHA256':'a'*64},
             'ACQUISITION':{'ACQUIRED':['a','b'], 'WARM_REMAINING':6}}
         (out / 'result.json').write_text(json.dumps(first))
-        (out / 'hot-delta-readback.json').write_text('{}')
+        self.seed_public_receipt(first)
         def complete(_command, *, env, **kwargs):
             self.assertEqual((env['G11_WARM_CAPTURE_REMAINING'], env['G11_URGENT_WARM_HANDOFF']), ('6','false'))
             second = dict(first, ACQUISITION={'ACQUIRED':['c','d']})
@@ -314,6 +611,53 @@ class RetryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'FIRST_RECEIPT_OR_BUDGET'):
                 retry.resume_warm()
             self.assertEqual(call.call_count, 1)
+
+    def test_warm_start_rejects_wrong_day_authority_or_unverified_public_readback(self):
+        out = self.root / '.relay-output'
+        out.mkdir()
+        first = {'OPERATIONAL_DATE_JST':'2026-11-27', 'CRITICAL':{'OPERATIONAL_DATE':'2026-11-27',
+            'CRITICAL_CHECKPOINT_STATUS':'PASS','LAST_CRITICAL_RUN_ID':'41','AUTHORITY_SHA256':'a'*64,
+            'RUNTIME_SOURCE_SHA':'d'*40},
+            'ACQUISITION':{'ACQUIRED':['a','b'], 'WARM_REMAINING':6}}
+        (out / 'result.json').write_text(json.dumps(first))
+        for field, value in [('operational_date_jst','2026-11-26'), ('authority_sha256','c'*64),
+                             ('runtime_source_sha','c'*40),
+                             ('site_get_sha256','c'*64), ('site_payload_sha256','c'*64),
+                             ('site_get_readback','PENDING'), ('http_success',False)]:
+            with self.subTest(field=field):
+                path = self.seed_public_receipt(first)
+                receipt = json.loads(path.read_bytes())
+                receipt[field] = value
+                path.write_text(json.dumps(receipt))
+                with patch.dict(os.environ, {'GITHUB_WORKSPACE':str(self.root), 'GITHUB_RUN_ID':'41'}), \
+                        patch('subprocess.run') as call:
+                    with self.assertRaisesRegex(ValueError, 'WARM_FIRST_PUBLIC_READBACK'):
+                        retry.resume_warm()
+                call.assert_not_called()
+                self.assertFalse((out/'first-critical-result.json').exists())
+                self.assertEqual(json.loads((out/'result.json').read_bytes()), first)
+
+        for section, field, value in [(None,'operational_date_jst','2026-11-26'),
+                (None,'stage','MORNING'), (None,'status','PENDING'),
+                ('source','run_id',40), ('source','github_sha','c'*40),
+                ('daily_runtime','authority_sha256','c'*64),
+                ('daily_runtime','runtime_source_sha','c'*40)]:
+            with self.subTest(section=section, field=field):
+                path = self.seed_public_receipt(first)
+                public = json.loads((out/'hot-delta-readback.json').read_bytes())
+                (public if section is None else public[section])[field] = value
+                raw = json.dumps(public).encode()
+                (out/'hot-delta-readback.json').write_bytes(raw)
+                # Even a matching old receipt/raw pair cannot authorize a
+                # different run, day, source or publication phase.
+                receipt = json.loads(path.read_bytes())
+                receipt['site_get_sha256'] = hashlib.sha256(raw).hexdigest()
+                path.write_text(json.dumps(receipt))
+                with patch.dict(os.environ, {'GITHUB_WORKSPACE':str(self.root), 'GITHUB_RUN_ID':'41'}), \
+                        patch('subprocess.run') as call:
+                    with self.assertRaisesRegex(ValueError, 'WARM_FIRST_PUBLIC_READBACK'):
+                        retry.resume_warm()
+                call.assert_not_called()
 
     def warm_congestion_replay(self, *, following_deadline=None):
         fixture = copy.deepcopy(WARM_HANDOFF_TIMING)
@@ -454,7 +798,7 @@ class RetryTests(unittest.TestCase):
             'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_CRITICAL_RUN_ID': '41', 'AUTHORITY_SHA256': 'a'*64},
             'ACQUISITION': {'ACQUIRED': ['a'], 'WARM_REMAINING': 7}}
         (out / 'result.json').write_text(json.dumps(first))
-        (out / 'hot-delta-readback.json').write_text('{}')
+        self.seed_public_receipt(first)
         def complete(_command, *, env, **kwargs):
             self.assertEqual((env['G11_WARM_CAPTURE_REMAINING'], env['G11_URGENT_WARM_HANDOFF']), ('7', 'true'))
             second = dict(first, ACQUISITION={'ACQUIRED': ['b', 'c', 'd', 'e'], 'WARM_REMAINING': 3})
@@ -473,8 +817,9 @@ class RetryTests(unittest.TestCase):
             'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_CRITICAL_RUN_ID': '41', 'AUTHORITY_SHA256': 'a'*64},
             'ACQUISITION': {'ACQUIRED': ['a'], 'WARM_REMAINING': 7}}
         (out / 'result.json').write_text(json.dumps(first))
-        (out / 'hot-delta-readback.json').write_text('{}')
-        for acquired, remaining in [(['b', 'c'], 6), ([], 7), (['b'], True), (['b'], -1)]:
+        self.seed_public_receipt(first)
+        for acquired, remaining in [(['b', 'c'], 6), ([], 7), (['b'], True), (['b'], -1),
+                                    (['a'], 0), (['b', 'b'], 0)]:
             with self.subTest(acquired=acquired, remaining=remaining):
                 def complete(_command, **kwargs):
                     second = dict(first, ACQUISITION={'ACQUIRED': acquired, 'WARM_REMAINING': remaining})
@@ -492,7 +837,7 @@ class RetryTests(unittest.TestCase):
             'CRITICAL_CHECKPOINT_STATUS': 'PASS', 'LAST_CRITICAL_RUN_ID': '41', 'AUTHORITY_SHA256': 'a'*64},
             'ACQUISITION': {'ACQUIRED': ['a'], 'WARM_REMAINING': 7}}
         (out / 'result.json').write_text(json.dumps(first))
-        (out / 'hot-delta-readback.json').write_text('{}')
+        self.seed_public_receipt(first)
         def complete(_command, *, env, **kwargs):
             self.assertEqual(env['G11_URGENT_WARM_HANDOFF'], 'false')
             second = dict(first, ACQUISITION={'ACQUIRED': ['b', 'c', 'd', 'e', 'f', 'g']})
