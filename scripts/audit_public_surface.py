@@ -9,6 +9,8 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/independent_original_display_v1.py",
+    "scripts/test_independent_original_display_v1.py",
     "scripts/independent_fallback_v1.py",
     "scripts/test_independent_fallback_v1.py",
     "scripts/test_independent_fallback_integration_v1.py",

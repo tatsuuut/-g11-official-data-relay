@@ -50,7 +50,8 @@ ERROR_TYPES = frozenset(('ValueError', 'KeyError', 'TypeError', 'OSError',
     'CurrentGrowthP3RuntimeError', 'FormalP3InvocationError',
     'FormalInputAdmissionError', 'FormalPredictionEngineError', 'TrueOnlyModelError',
     'TrueAILiveCandidateError'))
-PROVIDERS = {'race.boatcast.jp': 'BOATCAST', 'boaters-boatrace.com': 'PUBLISHED_DAILY_JSON',
+PROVIDERS = {'race.boatcast.jp': 'BOATCAST', 'boatraceopenapi.github.io': 'PUBLISHED_DAILY_JSON',
+    'boaters-boatrace.com': 'PUBLISHED_DAILY_JSON',
     'www.boaters-boatrace.com': 'PUBLISHED_DAILY_JSON',
     'www.omurakyotei.jp': 'OMURA_OFFICIAL', 'www.boatrace.jp': 'NATIONAL_OFFICIAL'}
 
@@ -136,8 +137,9 @@ def providers(value, day):
             row['reason'] = safe_code(item['reason'])
         # Successful preview outputs have a verified snapshot digest instead
         # of an explicit status. Keep only that presence fact, not the digest.
-        row['snapshot_present'] = (isinstance(item.get('snapshot_sha256'), str)
-                                  and re.fullmatch(r'[a-f0-9]{64}', item['snapshot_sha256']) is not None)
+        digest = item.get('snapshot_sha256', item.get('sha256'))
+        row['snapshot_present'] = (isinstance(digest, str)
+                                  and re.fullmatch(r'[a-f0-9]{64}', digest) is not None)
         output.append(row)
     return output
 

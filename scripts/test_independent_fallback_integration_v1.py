@@ -38,6 +38,7 @@ def exercise():
     os.chdir(frozen)
     import exhibition_input_compatibility_v1 as exhibition
     import independent_fallback_v1 as independent
+    import independent_original_display_v1 as independent_original
     import test_exhibition_today_frozen_consumers_v1 as fixture
     from g11.canonical import live_source_failover_v1 as failover
     from g11.canonical.test_official_pipeline import odds_html
@@ -131,7 +132,7 @@ def exercise():
                     'unadapted frozen fallback unexpectedly bypassed national STOP')
             with official_input_compatibility(), bounded_content_retry(early_capture=True), \
                     exhibition.context(state, fixture.DAY, candidate, nowfunc=lambda: clock['now']), \
-                    independent.context(fixture.DAY):
+                    independent.context(fixture.DAY), independent_original.context(fixture.DAY):
                 from g11.canonical import boatcast_preview_v1 as third, shared_original_display_v1 as shared
                 with formal_lock_scope(fixture.DAY):
                     card = json.dumps(published_card(roster), ensure_ascii=False).replace(
