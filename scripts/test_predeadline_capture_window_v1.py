@@ -350,6 +350,41 @@ class FormalPlanTests(unittest.TestCase):
             self.assertTrue(self.official.CanonicalRunner._g11_ten_minute_odds_window)
         self.assertEqual(before,(self.bridge,self.context,self.sources))
 
+    def test_exhibition_packet_keeps_each_resource_inside_its_seven_minute_window(self):
+        import inspect
+        import sys
+        source_sha=hashlib.sha256(inspect.getsource(self.invocation._bind_predeadline_plan).encode()).hexdigest()
+        if source_sha != window.BOATCAST_FORMAL_PLAN_SHA:
+            self.skipTest('historical formal plan has no BOATCAST packet')
+        task=self.bridge['PREDEADLINE_PLAN'][0]
+        operative_url='https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=20261114&jcd=20&rno=6'
+        task['URL']=operative_url
+        for label in self.context:
+            self.context[label]=(DEADLINE-timedelta(minutes=6)).isoformat()
+        receipts=[{'HOST':'race.boatcast.jp','CAPTURED_AT_JST':task['DUE_AT_JST'],
+                   'SOURCE_ID':f'saved-source-{kind}','URL':f'https://race.boatcast.jp/{kind}'}
+                  for kind in ('tkz','stt','sui','str3')]
+        self.sources['BEFOREINFO']['SNAPSHOT']={
+            'NAME':'published-exhibition-'+KEY,'SOURCE_RECEIPTS':receipts,
+            'PAYLOAD':{'STATUS':'INDEPENDENT_BOATCAST_PREVIEW','DEADLINE_JST':DEADLINE.isoformat()}}
+        publisher=types.ModuleType('g11.canonical.published_preview_v1')
+        publisher.source_matches=lambda *_:False
+        provider=types.ModuleType('g11.canonical.boatcast_preview_v1')
+        provider.BEFORE='INDEPENDENT_BOATCAST_PREVIEW'
+        provider.validate_snapshot=lambda *_:True
+        provider.source_matches=lambda *_:True
+        canonical=types.ModuleType('g11.canonical')
+        canonical.published_preview_v1=publisher;canonical.boatcast_preview_v1=provider
+        g11=types.ModuleType('g11');g11.canonical=canonical
+        with patch.dict(sys.modules,{'g11':g11,'g11.canonical':canonical,
+                'g11.canonical.published_preview_v1':publisher,
+                'g11.canonical.boatcast_preview_v1':provider}),window.verified_odds_window(self.official) as admitted:
+            self.assertTrue(admitted)
+            self.bind()
+            receipts[0]['CAPTURED_AT_JST']=(DEADLINE-timedelta(minutes=8)).isoformat()
+            with self.assertRaisesRegex(self.invocation.FormalP3InvocationError,'P07_PREDEADLINE_FRESHNESS_BINDING:BEFOREINFO'):
+                self.bind()
+
     def test_each_real_source_accepts_t10_t7_and_last_second_only(self):
         with window.verified_odds_window(self.official):
             for name in self.context:
@@ -386,7 +421,7 @@ class FormalPlanTests(unittest.TestCase):
         market=self.official.CanonicalRunner._validated_odds_only_market
         formal=self.invocation._bind_predeadline_plan
         with patch.multiple(window, FORMAL_PLAN_SHA='0'*64, STADIUM_FORMAL_PLAN_SHA='0'*64,
-                ALTERNATE_FORMAL_PLAN_SHA='0'*64):
+                ALTERNATE_FORMAL_PLAN_SHA='0'*64, BOATCAST_FORMAL_PLAN_SHA='0'*64):
             with window.verified_odds_window(self.official) as admitted:
                 self.assertFalse(admitted)
                 self.assertIs(market,self.official.CanonicalRunner._validated_odds_only_market)
