@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/p3_motor_comment_display_v1.py",
+    "scripts/p3_comment_transport.py",
+    "scripts/test_p3_motor_comment_display_v1.py",
     'scripts/exhibition_input_compatibility_v1.py',
     'scripts/test_exhibition_input_compatibility_v1.py',
     'scripts/test_exhibition_today_frozen_consumers_v1.py',

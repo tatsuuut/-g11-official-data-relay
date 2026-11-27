@@ -1640,7 +1640,7 @@ jobs:
           jq -e 'if .SNAPSHOT_CLASS=="TODAY_ONLY_RESCUE_PREDEADLINE" then all(.races[];(.today_rescue|type)=="object") else true end' "${FEED}" >/dev/null
           echo "G11_TRANSPORT_THREE_ENGINE=$(jq -c '{capability:.capabilities.three_engine_comparison,summary:(.three_engine_comparison|type),first:(.races[0] | {key,three_engine_classification,three_engine_score}),missing:([.races[] | select((.three_engine_score|type)!="object" or .three_engine_classification==null)]|length)}' "${FEED}")"
           if [ "${RELAY_PHASE}" = "morning" ]; then
-            python3 scripts/hot_delta_transport_v1.py --morning-base "${FEED}"
+            python3 scripts/p3_comment_transport.py --morning-base "${FEED}"
           fi
           feed_sha="$(sha256sum "${FEED}" | cut -d' ' -f1)"
           printf 'verified_feed_bytes=%s\n' "$(wc -c < "${FEED}")"
@@ -1659,7 +1659,7 @@ jobs:
             exit 0
           fi
           if [ "${RELAY_PHASE}" != "morning" ] && [ -s .relay-output/stored-feed.json ]; then
-            G11_SYNC_OIDC="${token}" python3 scripts/hot_delta_transport_v1.py "${FEED}" "${G11_APP_ORIGIN}"
+            G11_SYNC_OIDC="${token}" python3 scripts/p3_comment_transport.py "${FEED}" "${G11_APP_ORIGIN}"
             exit 0
           fi
           http_status="$(curl --silent --show-error \

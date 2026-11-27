@@ -18,7 +18,7 @@ import time
 import sys
 
 from daily_runtime_bootstrap_v1 import retained_module
-import hot_delta_transport_v1 as hot
+import p3_comment_transport as hot
 
 ORIGIN = "https://g11-race-lab.higatatsunori2.chatgpt.site"
 MAX_ATTEMPTS = 3
