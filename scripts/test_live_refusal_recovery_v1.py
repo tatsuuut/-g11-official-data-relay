@@ -145,7 +145,7 @@ class TransportTests(unittest.TestCase):
         for stage in ('OIDC_TOKEN', 'CLAIM_POST'):
             with self.subTest(stage=stage), patch.dict('os.environ', env), \
                     patch.object(recovery, 'urlopen') as oidc, \
-                    patch.object(recovery, 'build_opener') as site:
+                    patch.object(recovery.subprocess, 'run') as site:
                 response = oidc.return_value.__enter__.return_value
                 response.read.return_value = b'{"value":"sensitive-oidc-value"}'
                 error = HTTPError('https://hidden.invalid/path?secret=1', 403,
@@ -153,7 +153,8 @@ class TransportTests(unittest.TestCase):
                 if stage == 'OIDC_TOKEN':
                     oidc.side_effect = error
                 else:
-                    site.return_value.open.side_effect = error
+                    site.return_value = SimpleNamespace(returncode=0,
+                        stdout=b'{"error":"sensitive-body"}\n403')
                 value, output = self.failure_log(self.provider(recovery.post_claim))
                 self.assertEqual(value['stage'], stage)
                 self.assertEqual(value['http_status'], 403)
@@ -186,6 +187,64 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(value['reason'], 'INTERNAL_ERROR')
         self.assertNotIn('http_status', value)
         self.assertNotIn('sensitive-', output.getvalue())
+
+    def test_claim_curl_uses_one_bounded_verified_post_and_stdin_credentials(self):
+        token = 'sensitive-token-with-"quote'
+        body = {'source_id': SOURCE, 'message': 'quoted "value"'}
+        def run(command, **kwargs):
+            self.assertEqual(command[:2], ['curl', '--disable'])
+            self.assertEqual(command[command.index('--url') + 1],
+                             recovery.ORIGIN + '/api/g11-input-recovery')
+            self.assertEqual(command[command.index('--max-time') + 1], '8')
+            self.assertEqual(command[command.index('--max-filesize') + 1], '4096')
+            self.assertEqual(command[command.index('--max-redirs') + 1], '0')
+            self.assertEqual(command[command.index('--proto') + 1], '=https')
+            self.assertEqual(command[-2:], ['--config', '-'])
+            self.assertTrue(all(flag not in command for flag in
+                ('--insecure', '-k', '--location', '-L', '--retry')))
+            self.assertNotIn(token, ' '.join(command))
+            values = [json.loads(line.split('=', 1)[1].strip())
+                      for line in kwargs['input'].decode().splitlines()]
+            self.assertEqual(values[0], 'Authorization: Bearer ' + token)
+            self.assertEqual(json.loads(values[2]), body)
+            self.assertEqual(kwargs['timeout'], 9)
+            self.assertIs(kwargs['stderr'], recovery.subprocess.DEVNULL)
+            return SimpleNamespace(returncode=0, stdout=b'{"accepted":true}\n200')
+        with patch.object(recovery.subprocess, 'run', side_effect=run) as process:
+            self.assertEqual(recovery.post_claim_curl(body, token), {'accepted': True})
+            process.assert_called_once()
+
+    def test_claim_curl_rejections_never_redirect_or_retry_and_spent_stays_spent(self):
+        for status, body, spent in ((302, b'ignored', False),
+                (409, b'{"error":"RECOVERY_CLAIM_SPENT"}', True),
+                (409, b'{"error":"other"}', False)):
+            with self.subTest(status=status, body=body), patch.object(recovery.subprocess, 'run',
+                    return_value=SimpleNamespace(returncode=0,
+                        stdout=body+b'\n'+str(status).encode())) as process:
+                with self.assertRaises(recovery.ClaimUnavailable) as caught:
+                    recovery.post_claim_curl({}, 'token')
+                self.assertEqual(caught.exception.spent, spent)
+                self.assertEqual(caught.exception.http_status, status)
+                process.assert_called_once()
+
+    def test_claim_curl_oversize_bad_json_tls_and_timeout_are_fail_closed(self):
+        cases = [(0, b'x'*4097+b'\n200', 'RESPONSE_TOO_LARGE'),
+                 (63, b'', 'RESPONSE_TOO_LARGE'), (60, b'', 'TRANSPORT_ERROR'),
+                 (0, b'bad\n200', 'INVALID_JSON'), (0, b'{}', 'INVALID_VALUE')]
+        for code, stdout, reason in cases:
+            with self.subTest(code=code, reason=reason), patch.object(recovery.subprocess, 'run',
+                    return_value=SimpleNamespace(returncode=code, stdout=stdout)) as process:
+                with self.assertRaises(recovery.ClaimUnavailable) as caught:
+                    recovery.post_claim_curl({}, 'token')
+                self.assertEqual(caught.exception.reason, reason)
+                self.assertFalse(caught.exception.spent)
+                process.assert_called_once()
+        with patch.object(recovery.subprocess, 'run',
+                side_effect=recovery.subprocess.TimeoutExpired('curl', 9)) as process:
+            with self.assertRaises(recovery.ClaimUnavailable) as caught:
+                recovery.post_claim_curl({}, 'token')
+            self.assertEqual(caught.exception.reason, 'TRANSPORT_ERROR')
+            process.assert_called_once()
 
     def test_lost_ack_spends_claim_and_restored_worker_cannot_get_another(self):
         def lost(body):

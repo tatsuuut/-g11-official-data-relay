@@ -932,6 +932,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p test_critical_formal_lock_scope_v1.py -v
           python3 -m unittest discover -s scripts -p test_predeadline_input_health_v1.py -v
+          python3 -m unittest discover -s scripts -p test_predeadline_capture_diagnostics_v1.py -v
           python3 -m unittest discover -s scripts -p test_live_refusal_recovery_v1.py -v
           python3 -m unittest discover -s scripts -p test_postprocess_delivery_v1.py -v
           python3 -m unittest discover -s scripts -p test_predeadline_refusal_evidence_v1.py -v
