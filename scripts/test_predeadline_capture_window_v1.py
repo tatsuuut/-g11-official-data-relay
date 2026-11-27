@@ -352,30 +352,6 @@ class FormalPlanTests(unittest.TestCase):
 
     def test_reviewed_inner_replacement_retains_t10_guard_and_uses_new_decoder(self):
         from exhibition_input_compatibility_v1 import _keep_wrappers
-        replacement=actual_formal_binding()
-        checked=[]
-        native_require=replacement._require
-        def observed_require(condition,reason):
-            checked.append(reason)
-            return native_require(condition,reason)
-        replacement._require=observed_require
-        original=self.invocation._bind_predeadline_plan
-        with window.verified_odds_window(self.official):
-            wrapped=self.invocation._bind_predeadline_plan
-            self.bind()  # Populate the cache for the original frozen decoder.
-            transplanted=_keep_wrappers(wrapped,replacement._bind_predeadline_plan)
-            self.assertIs(transplanted.__wrapped__,replacement._bind_predeadline_plan)
-            self.assertIs(wrapped.__wrapped__,original)
-            self.invocation._bind_predeadline_plan=transplanted
-            self.assertEqual(self.bridge['PREDEADLINE_PLAN'],self.bind()['TASKS'])
-            self.assertTrue(checked)
-            self.context['ODDS_CAPTURED_AT_JST']=(NOW-timedelta(seconds=1)).isoformat()
-            with self.assertRaisesRegex(self.invocation.FormalP3InvocationError,
-                    'P07_PREDEADLINE_FRESHNESS_BINDING:ODDS3T'):
-                self.bind()
-
-    def test_reviewed_inner_replacement_retains_t10_guard_and_uses_new_decoder(self):
-        from exhibition_input_compatibility_v1 import _keep_wrappers
         replacement_module=actual_formal_binding()
         replacement=replacement_module._bind_predeadline_plan
         checked=[]
