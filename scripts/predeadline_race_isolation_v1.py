@@ -19,10 +19,14 @@ import subprocess
 
 COLLECT_SHA = 'a1d5c2166a4e305825d593f6f48ffa76717bc5998226d5522eb0bde38ff6e42b'
 BET_HANDOFF_SHA = 'ed14b607cb6b590be3a03eff2d08ddc153bc204df6d8ef6c32feffe731adedd6'
+# This exact collector can consume a shared, raw-verified exhibition snapshot.
+# It never requests a source; existing frozen collectors remain admitted below.
+SHARED_EXHIBITION_COLLECT_SHA = 'f9e04b429b46285f1042e86927bbbbaad314e2554b99b4722cb53af0e3b701de'
 # Preserve today's frozen functions alongside the reviewed withdrawal guards.
 COLLECT_SHAS = frozenset({
     COLLECT_SHA,
     '030e03f3a70cbaa5101c1c123f33708e75d4b28fb9d4d5408518393238ebe1fb',
+    SHARED_EXHIBITION_COLLECT_SHA,
 })
 BET_HANDOFF_SHAS = frozenset({
     BET_HANDOFF_SHA,

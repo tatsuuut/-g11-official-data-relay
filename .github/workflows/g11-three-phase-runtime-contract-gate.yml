@@ -25,6 +25,100 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  exhibition-input-candidate:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/exhibition-third-source-20261127'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    env:
+      EXHIBITION_PRIVATE_SOURCE_SHA: 0c722e61f73eb6631038971a869c7647233c8d20
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout public exhibition contracts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Audit public surface before reading private source
+        run: python3 scripts/audit_public_surface.py
+      - name: Checkout immutable exhibition source with historical proof
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ secrets.PRIVATE_SOURCE_REPO }}
+          ref: ${{ env.EXHIBITION_PRIVATE_SOURCE_SHA }}
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-exhibition-candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install offline contract dependency
+        run: python3 -m pip install --disable-pip-version-check --no-input 'lxml==6.1.1'
+      - name: Verify exact candidate and historical source scope
+        working-directory: .g11-exhibition-candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXHIBITION_PRIVATE_SOURCE_SHA}"
+          PYTHONPATH=. python3 tools/verify_p3_original_input_runtime_patch_v1.py
+      - name: Verify immutable raw exhibition transport and unchanged predictors offline
+        working-directory: .g11-exhibition-candidate
+        run: >-
+          python3 -m unittest -q
+          g11.canonical.test_boatcast_preview_v1
+          g11.canonical.test_exhibition_third_routing_v1
+          g11.canonical.test_boatcast_preview_admission_v1
+          g11.canonical.test_p3_boatcast_preview_transport_v1
+          tests.test_exhibition_third_source_authority_v1
+          tests.test_exhibition_third_source_scope_v1
+          g11.canonical.test_fun_original_display_v1
+          g11.canonical.test_published_preview_v1
+          g11.canonical.test_p3_published_preview_admission_v1
+          g11.canonical.test_live_source_failover_v1
+          g11.canonical.test_shared_original_display_v1
+          g11.canonical.test_shared_original_display_research_v1
+          g11.canonical.test_stadium_original_display_v1
+          g11.growth_p3.v1_1.test_official_display_tickets_v1
+          g11.growth_p3.v1_1.test_published_preview_true_input_v1
+          tests.test_p3_original_display_forward_v1
+          g11.wild_pack.v1.test_runtime_orchestrator_v1
+          g11.wild_pack.v1.test_alternate_bet_odds_v1
+          g11.wild_pack.v1.test_bet_oos_collection_v1
+          g11.relay.test_predeadline_nowait_v1
+          g11.relay.test_verified_venue_live_v1
+      - name: Verify formal admission and invocation evidence
+        working-directory: .g11-exhibition-candidate
+        run: |
+          set -euo pipefail
+          python3 p3/formal_input_admission/v1/audit/formal_input_admission_static_auditor_v1.py \
+            --verify-evidence p3/formal_input_admission/v1/evidence/FORMAL_INPUT_ADMISSION_STATIC_AUDIT_EVIDENCE_V1.json \
+            --verify-readback p3/formal_input_admission/v1/evidence/FORMAL_INPUT_ADMISSION_STATIC_AUDIT_READBACK_VERIFICATION_V1.json
+          python3 p3/formal_invocation_adapter/v1/audit/formal_p3_invocation_adapter_static_auditor_v1.py \
+            --verify-evidence p3/formal_invocation_adapter/v1/evidence/FORMAL_P3_INVOCATION_ADAPTER_STATIC_AUDIT_EVIDENCE_V1.json \
+            --verify-readback p3/formal_invocation_adapter/v1/evidence/FORMAL_P3_INVOCATION_ADAPTER_STATIC_AUDIT_READBACK_VERIFICATION_V1.json
+      - name: Verify next-MORNING authority without promoting or rewriting existing days
+        working-directory: .g11-exhibition-candidate
+        run: >-
+          python3 -m unittest -q
+          g11.growth_p3.v1_1.test_true_ai_variable_points_v1
+          g11.growth_p3.v1_1.test_true_ai_live_isolation_v1
+          g11.relay.test_daily_runtime_authority_v1
+          g11.relay.test_v1
+          g11.relay.test_night_transport_finance_v1
+          g11.relay.test_final_bet_accounting_v1
+          g11.canonical.test_public_app_feed_abeken_score_authority
+          g11.relay.test_v53_final_authority_v1
+      - name: Verify public isolation against the immutable exhibition candidate
+        env:
+          G11_ISOLATION_SOURCE_DIR: .g11-exhibition-candidate
+          PYTHONPATH: scripts
+        run: python3 -m unittest test_predeadline_race_isolation_v1 -q
+      - name: Record bounded exhibition validation
+        run: |
+          echo 'EXHIBITION_INPUT_CANDIDATE=OFFLINE_CONTRACT_PASS'
+          echo 'LIVE_SOURCE_POLLING=0'
+          echo 'PRODUCTION_WRITES=0'
+          echo 'CURRENT_DAILY_AUTHORITY_CHANGED=false'
   predeadline-saved-input-health-nov17:
     if: github.event_name == 'pull_request' && github.head_ref == 'codex/predeadline-operation-health-20261117'
     runs-on: ubuntu-24.04
