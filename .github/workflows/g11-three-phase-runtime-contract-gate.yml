@@ -896,7 +896,18 @@ jobs:
       - name: Verify complete encrypted checkpoints and LIVE publication priority
         env:
           G11_REQUIRE_ENCRYPTION_TESTS: "1"
-        run: python3 -m unittest discover -s scripts -p test_predeadline_latency_v1.py -v
+        run: >-
+          python3 -m unittest discover -s scripts -p test_predeadline_latency_v1.py -v
+
+      - name: Verify complete compact publication and cancelled-run recovery
+        env:
+          G11_REQUIRE_ENCRYPTION_TESTS: "1"
+          PYTHONPATH: scripts
+        run: >-
+          python3 -m unittest -v
+          test_compact_publication_checkpoint_v1
+          test_compact_runtime_recovery_v1
+          test_compact_cancel_recovery_v1
 
       - name: Verify November 8 short LIVE cycle and saved-only retries
         run: python3 -m unittest discover -s scripts -p test_predeadline_fast_lane_v1.py -v

@@ -9,6 +9,12 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/compact_publication_checkpoint_v1.py",
+    "scripts/test_compact_publication_checkpoint_v1.py",
+    "scripts/compact_runtime_recovery_v1.py",
+    "scripts/test_compact_runtime_recovery_v1.py",
+    "scripts/test_compact_cancel_recovery_v1.py",
+    "docs/predeadline-compact-publication-20261127.md",
     "scripts/p3_motor_comment_display_v1.py",
     "scripts/p3_comment_transport.py",
     "scripts/test_p3_motor_comment_display_v1.py",

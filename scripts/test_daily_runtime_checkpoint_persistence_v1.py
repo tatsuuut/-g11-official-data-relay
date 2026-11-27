@@ -88,6 +88,8 @@ class ExactReadbackRetryTests(unittest.TestCase):
         def expression(value):
             value = value.removeprefix('${{').removesuffix('}}').strip()
             value = value.replace('inputs.wild4-day', repr(''))
+            value = value.replace('inputs.warm-day', repr(''))
+            value = value.replace('inputs.allow-compact', repr('false'))
             # This fixture supplies an already encrypted checkpoint, retaining
             # the composite action's default (no new encryption requested).
             value = value.replace('inputs.encrypt-full', repr('false'))

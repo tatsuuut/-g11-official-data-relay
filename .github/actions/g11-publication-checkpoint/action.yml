@@ -23,9 +23,15 @@ inputs:
   prewarm:
     description: Optional sent/attempted preparation dispatch; do not post the same compact handoff twice.
     default: ''
+  allow-compact:
+    description: Accept a fully verified base and remote delta before the later complete backup.
+    default: 'false'
 outputs:
   ready:
-    description: True only after an exact cache hit and byte comparison.
+    description: True only after complete remote compact proof or full exact byte readback.
+    value: ${{ steps.compact-verified.outputs.ready || steps.verified.outputs.ready }}
+  full-ready:
+    description: True only after complete full checkpoint exact byte readback.
     value: ${{ steps.verified.outputs.ready }}
   wild4-sent:
     description: True only when the exact-checkpoint WILD4 dispatch was accepted.
@@ -86,8 +92,19 @@ runs:
           -f predeadline_checkpoint_key="${CHECKPOINT_KEY}" -f predeadline_delta_key="${DELTA_KEY}"
         echo 'sent=true' >> "${GITHUB_OUTPUT}"
         echo 'WILD4_COMPACT_HANDOFF=DISPATCH_ACCEPTED_BEFORE_FULL_TRANSFER'
+    - name: Verify complete compact publication reconstruction
+      id: compact-verified
+      if: inputs.allow-compact == 'true' && steps.compact-readback.outputs.cache-hit == 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        G11_PRIVATE_REPO_TOKEN: ${{ inputs.encryption-secret }}
+      run: >-
+        python3 -S scripts/compact_publication_checkpoint_v1.py verify
+        --checkpoint-key '${{ inputs.cache-key }}'
+        --readback-hit '${{ steps.compact-readback.outputs.cache-hit }}'
     - name: Encrypt the complete state before full backup and canonical publication
-      if: inputs.encrypt-full == 'true'
+      if: inputs.encrypt-full == 'true' && steps.compact-verified.outputs.ready != 'true'
       shell: bash
       env:
         G11_PRIVATE_REPO_TOKEN: ${{ inputs.encryption-secret }}
@@ -99,10 +116,11 @@ runs:
         exec 3<&-
         test -s .relay-cache/state.tgz.gpg
     - name: Record encrypted publication checkpoint digest
+      if: steps.compact-verified.outputs.ready != 'true'
       shell: bash
       run: sha256sum .relay-cache/state.tgz.gpg > .relay-output/publication-state.sha256
     - name: Prepare current feed during complete checkpoint transfer
-      if: (inputs.encrypt-full == 'true' && inputs.wild4-day != '') || inputs.warm-day != ''
+      if: steps.compact-verified.outputs.ready != 'true' && ((inputs.encrypt-full == 'true' && inputs.wild4-day != '') || inputs.warm-day != '')
       shell: bash
       continue-on-error: true
       env:
@@ -121,13 +139,14 @@ runs:
           python3 -S scripts/critical_saved_publication_v1.py --day "${PREPARE_DAY}" --prepare-feed \
           </dev/null >.relay-output/critical-prepared.log 2>&1 &
     - name: Save complete encrypted state before publication
+      if: steps.compact-verified.outputs.ready != 'true'
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
         path: .relay-cache/state.tgz.gpg
         key: ${{ inputs.cache-key }}
     - name: Check exact saved checkpoint visibility without downloading
       id: wild4-visible
-      if: inputs.wild4-day != '' && steps.wild4-compact.outputs.attempted != 'true'
+      if: steps.compact-verified.outputs.ready != 'true' && inputs.wild4-day != '' && steps.wild4-compact.outputs.attempted != 'true'
       continue-on-error: true
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
@@ -165,6 +184,7 @@ runs:
         echo "WILD4_EARLY_HANDOFF=DISPATCH_ACCEPTED_${DISPATCH_STAGE}"
     - name: Read back complete encrypted publication checkpoint
       id: readback
+      if: steps.compact-verified.outputs.ready != 'true'
       continue-on-error: true
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
@@ -172,11 +192,11 @@ runs:
         key: ${{ inputs.cache-key }}
         fail-on-cache-miss: true
     - name: Wait for exact checkpoint visibility
-      if: steps.readback.outputs.cache-hit != 'true'
+      if: steps.compact-verified.outputs.ready != 'true' && steps.readback.outputs.cache-hit != 'true'
       shell: bash
       run: sleep 3
     - name: Retry exact encrypted checkpoint readback
-      if: steps.readback.outputs.cache-hit != 'true'
+      if: steps.compact-verified.outputs.ready != 'true' && steps.readback.outputs.cache-hit != 'true'
       id: readback-retry
       continue-on-error: true
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -185,11 +205,11 @@ runs:
         key: ${{ inputs.cache-key }}
         fail-on-cache-miss: true
     - name: Wait for final exact checkpoint readback
-      if: steps.readback.outputs.cache-hit != 'true' && steps.readback-retry.outputs.cache-hit != 'true'
+      if: steps.compact-verified.outputs.ready != 'true' && steps.readback.outputs.cache-hit != 'true' && steps.readback-retry.outputs.cache-hit != 'true'
       shell: bash
       run: sleep 7
     - name: Final exact encrypted checkpoint readback
-      if: steps.readback.outputs.cache-hit != 'true' && steps.readback-retry.outputs.cache-hit != 'true'
+      if: steps.compact-verified.outputs.ready != 'true' && steps.readback.outputs.cache-hit != 'true' && steps.readback-retry.outputs.cache-hit != 'true'
       id: readback-final
       continue-on-error: true
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -199,6 +219,7 @@ runs:
         fail-on-cache-miss: true
     - name: Verify encrypted publication checkpoint bytes
       id: verified
+      if: steps.compact-verified.outputs.ready != 'true'
       shell: bash
       env:
         CACHE_HIT: ${{ steps.readback.outputs.cache-hit == 'true' || steps.readback-retry.outputs.cache-hit == 'true' || steps.readback-final.outputs.cache-hit == 'true' }}

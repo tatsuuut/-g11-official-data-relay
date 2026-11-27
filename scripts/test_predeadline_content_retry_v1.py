@@ -245,6 +245,31 @@ class RetryTests(unittest.TestCase):
                 self.plan.append(row)
                 self.responses[row['SOURCE_ID']] = ['complete']
 
+    def saved_unavailable_tasks(self, *, future=False):
+        # The Nov27 job diagnostics repeated these four already-closed races
+        # before each new capture. Availability is still verified by the native
+        # collector; public diagnostics conceal the original reason and SHA.
+        rows = [('20261127-17-08', '13:20'), ('20261127-17-09', '13:53'),
+                ('20261127-17-12', '15:28'), ('20261127-13-12', '16:05')]
+        if future:
+            rows.append(('20261127-24-05', '16:30'))
+        terminal, added = {}, []
+        for key, clock in rows:
+            end = datetime.fromisoformat('2026-11-27T' + clock + ':00+09:00')
+            terminal[key] = {'SNAPSHOT_SHA256':hashlib.sha256(key.encode()).hexdigest()}
+            for kind in ('BEFOREINFO', 'ODDS3T'):
+                task = self.task(kind, key)
+                task.update(DUE_AT_JST=(end-timedelta(minutes=7)).isoformat(),
+                            MUST_FINISH_BEFORE_JST=end.isoformat())
+                added.append(task)
+        self.plan[:0] = added
+        helper = self.original.__globals__['PREDEADLINE_AVAILABILITY']
+        helper.load_verified = lambda _store, key: terminal.get(key)
+        helper.unavailable_item = lambda task, proof: {
+            'SOURCE_ID':task['SOURCE_ID'], 'RACE_KEY':task['RACE_KEY'],
+            'REASON':helper.REASON, 'AVAILABILITY_SNAPSHOT_SHA256':proof['SNAPSHOT_SHA256']}
+        return terminal
+
     def seed_public_receipt(self, first):
         out = self.root / '.relay-output'
         out.mkdir(exist_ok=True)
@@ -302,6 +327,98 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(original, {sid:(self.root/'snapshots/predeadline'/f'{sid}.json').read_bytes()
                                     for sid in expected[:2]})
         self.assertEqual(self.plan[2]['DUE_AT_JST'], '2026-11-27T16:28:00+09:00')
+
+    def test_closed_plan_bound_unavailable_history_does_not_disable_normal_warm(self):
+        self.normal_partial_capture()
+        # Replay the observed first e044 run's timing and race order, without
+        # its response bodies or models (run45962493090/job140384080591).
+        self.now = datetime.fromisoformat('2026-11-27T17:05:14+09:00')
+        self.prior_start = self.now - timedelta(seconds=30)
+        self.plan, self.responses = [], {}
+        for key, cutoff in [('20261127-01-05', '17:11'), ('20261127-15-05', '17:16'),
+                            ('20261127-24-05', '17:22')]:
+            end = datetime.fromisoformat('2026-11-27T' + cutoff + ':00+09:00')
+            for kind in ('BEFOREINFO', 'ODDS3T'):
+                task = self.task(kind, key)
+                task.update(DUE_AT_JST=(end-timedelta(minutes=7)).isoformat(),
+                            MUST_FINISH_BEFORE_JST=end.isoformat())
+                self.plan.append(task)
+                self.responses[task['SOURCE_ID']] = ['complete']
+        self.saved_unavailable_tasks()
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false'}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(len(first['UNAVAILABLE']), 8)
+        self.assertEqual(len(first['ACQUIRED']), 2)
+        self.assertEqual(self.now.isoformat(), '2026-11-27T17:05:44+09:00')
+        # Closed tasks need no guessed failure classification. Keep their
+        # diagnostics intact even if their original cause has no public label.
+        for row in first['UNAVAILABLE']:
+            row['REASON'] = 'UNCLASSIFIED'
+            row.pop('AVAILABILITY_SNAPSHOT_SHA256')
+        before = copy.deepcopy(first['UNAVAILABLE'])
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+            armed = retry.arm_normal_warm(first, self.runner, 8, early_capture=True)
+        self.assertEqual(armed['WARM_REMAINING'], 6)
+        self.assertEqual(armed['UNAVAILABLE'], before)
+        self.assertEqual(len(self.attempts), 2)
+
+    def test_verified_live_withdrawal_does_not_hide_next_due_from_warm_wait(self):
+        self.normal_partial_capture()
+        self.saved_unavailable_tasks(future=True)
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(len(first['UNAVAILABLE']), 10)
+        self.assertEqual(first['WARM_REMAINING'], 6)
+        saved = copy.deepcopy(first['UNAVAILABLE'])
+        self.sleep(30)
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false',
+                'G11_WARM_CAPTURE_REMAINING':'6', 'GITHUB_RUN_ID':'41',
+                'G11_WARM_FIRST_PUBLIC_READBACK':'41'}):
+            second = retry.collect_with_retry(self.original, self.runner, max_requests=6,
+                early_wait_seconds=0, early_capture=True)
+        self.assertEqual(len(second['ACQUIRED']), 6)
+        self.assertEqual(second['UNAVAILABLE'], saved)
+        self.assertEqual(self.sleeps[2], 15)
+        self.assertEqual(len(self.attempts), 8)
+        self.assertFalse(any(sid in {row['SOURCE_ID'] for row in saved} for sid, _ in self.attempts))
+
+    def test_live_unknown_unavailable_or_wrong_plan_binding_still_blocks_warm(self):
+        self.normal_partial_capture()
+        self.saved_unavailable_tasks(future=True)
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false'}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        for mode in ('unknown-live', 'missing-proof', 'wrong-race', 'wrong-source', 'previous-day'):
+            with self.subTest(mode=mode):
+                damaged = copy.deepcopy(first)
+                row = damaged['UNAVAILABLE'][-1]
+                if mode == 'unknown-live': row['REASON'] = 'SOURCE_TECHNICAL_RETRY_EXHAUSTED'
+                if mode == 'missing-proof': row.pop('AVAILABILITY_SNAPSHOT_SHA256')
+                if mode == 'wrong-race': row['RACE_KEY'] = '20261127-24-04'
+                if mode == 'wrong-source': row['SOURCE_ID'] = 'odds3t-20261127-24-04'
+                if mode == 'previous-day': row['RACE_KEY'] = '20261126-24-05'
+                with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+                    armed = retry.arm_normal_warm(damaged, self.runner, 8, early_capture=True)
+                self.assertNotIn('WARM_REMAINING', armed)
+        self.assertEqual(len(self.attempts), 2)
+
+    def test_closed_unavailable_does_not_bypass_live_failure_or_host_stop(self):
+        self.normal_partial_capture()
+        self.saved_unavailable_tasks()
+        with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'false'}):
+            first = retry.collect_with_retry(self.original, self.runner, max_requests=8,
+                early_wait_seconds=0, early_capture=True)
+        for field in ('REJECTED', 'RETRYABLE_FAILURES', 'TASK_DEFERRED', 'DEFERRED', 'HOST_STOP'):
+            with self.subTest(field=field):
+                blocked = copy.deepcopy(first)
+                self.state['STOPPED'] = field == 'HOST_STOP'
+                if field != 'HOST_STOP': blocked[field] = [{'REASON':'HTTP_403'}]
+                with patch.dict(os.environ, {'G11_URGENT_WARM_HANDOFF':'true'}):
+                    armed = retry.arm_normal_warm(blocked, self.runner, 8, early_capture=True)
+                self.assertNotIn('WARM_REMAINING', armed)
+        self.assertEqual(len(self.attempts), 2)
 
     def test_normal_partial_warm_retains_actual_frozen_authority_boundary(self):
         self.normal_partial_capture()
