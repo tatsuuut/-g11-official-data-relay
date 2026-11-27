@@ -99,7 +99,42 @@ class TransportTests(unittest.TestCase):
             NOW + timedelta(seconds=49)).isoformat()
         value, _ = self.failure_log(self.provider())
         self.assertEqual(value['stage'], 'SOURCE_VALIDATION')
-        self.assertEqual(value['reason'], 'RECOVERY_DEADLINE_OR_URL')
+        self.assertEqual(value['reason'], 'RECOVERY_DEADLINE_TOO_CLOSE')
+        self.assertEqual(self.requests, [])
+
+    def test_near_cutoff_source_does_not_block_one_later_valid_claim(self):
+        provider = self.provider()
+        self.plan['PREDEADLINE_PLAN'][0]['MUST_FINISH_BEFORE_JST'] = (
+            NOW + timedelta(seconds=49)).isoformat()
+        with self.assertRaises(Deferred) as caught:
+            self.call(provider)
+        self.assertEqual(caught.exception.reason, 'LIVE_RECOVERY_DEADLINE_TOO_CLOSE')
+        self.assertIsNone(provider.blocked_until)
+        self.assertIsNone(provider.pending)
+        self.assertEqual(self.requests, [])
+        later_source = SOURCE[:-2] + '04'
+        later_url = URL[:-1] + '4'
+        later_task = dict(self.plan['PREDEADLINE_PLAN'][0], SOURCE_ID=later_source,
+            RACE_KEY='20261123-01-04', URL=later_url,
+            MUST_FINISH_BEFORE_JST=(NOW + timedelta(minutes=5)).isoformat())
+        self.plan['PREDEADLINE_PLAN'].append(later_task)
+        self.payload.update(SOURCE_ID=later_source,
+            REQUEST_ID='request-' + '2' * 32,
+            URL_SHA256=hashlib.sha256(later_url.encode()).hexdigest())
+        grant = self.call(provider)
+        self.assertEqual(grant['source_id'], later_source)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(provider.pending['url'], later_url)
+
+    def test_expired_source_has_no_claim_and_preserves_recovery_allowance(self):
+        provider = self.provider()
+        self.plan['PREDEADLINE_PLAN'][0]['MUST_FINISH_BEFORE_JST'] = (
+            NOW - timedelta(seconds=1)).isoformat()
+        with self.assertRaises(Deferred) as caught:
+            self.call(provider)
+        self.assertEqual(caught.exception.reason, 'LIVE_RECOVERY_DEADLINE_TOO_CLOSE')
+        self.assertIsNone(provider.blocked_until)
+        self.assertIsNone(provider.pending)
         self.assertEqual(self.requests, [])
 
     def test_oidc_and_site_http_failures_have_distinct_safe_categories(self):

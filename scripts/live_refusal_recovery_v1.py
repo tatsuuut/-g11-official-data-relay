@@ -40,7 +40,8 @@ def diagnostic(stage, reason, http_status=None):
     reasons = {'ORIGIN_MISMATCH', 'CONFIG_MISSING', 'HTTP_REJECTED', 'RESPONSE_TOO_LARGE',
         'INVALID_JSON', 'INVALID_TOKEN', 'TRANSPORT_ERROR', 'CLAIM_UNAVAILABLE', 'CLAIM_SPENT',
         'MISSING_FIELD', 'INVALID_VALUE', 'LOCAL_IO_ERROR', 'INTERNAL_ERROR',
-        'RECOVERY_TIMEZONE', 'RECOVERY_SOURCE_BINDING', 'RECOVERY_DEADLINE_OR_URL',
+        'RECOVERY_TIMEZONE', 'RECOVERY_SOURCE_BINDING', 'RECOVERY_PLAN_BINDING', 'RECOVERY_DEADLINE_OR_URL',
+        'RECOVERY_DEADLINE_TOO_CLOSE',
         'RECOVERY_TRIGGER_BINDING', 'RECOVERY_AUTHORITY_BINDING', 'RECOVERY_GRANT_BINDING',
         'RECOVERY_GRANT_EXPIRED'}
     value = {'stage': stage if stage in stages else 'SOURCE_VALIDATION',
@@ -168,8 +169,14 @@ class ClaimProvider:
                         + r'-(?:0[1-9]|1[0-9]|2[0-4])-(?:0[1-9]|1[0-2])', source)
                     or payload['HOST'] != 'www.boatrace.jp'
                     or payload['URL_SHA256'] != hashlib.sha256(task['URL'].encode()).hexdigest()
-                    or cutoff.date().isoformat() != day or (cutoff - now).total_seconds() < 50):
+                    or cutoff.date().isoformat() != day):
                 raise ValueError('RECOVERY_DEADLINE_OR_URL')
+            if (cutoff - now).total_seconds() < 50:
+                # No claim or official request has begun. This race's short
+                # remaining window must not consume the process-wide recovery
+                # allowance needed by another still-open race.
+                diagnostic('SOURCE_VALIDATION', 'RECOVERY_DEADLINE_TOO_CLOSE')
+                raise self.official.AcquisitionDeferred(cutoff, 'LIVE_RECOVERY_DEADLINE_TOO_CLOSE')
             events = ledger.events()
             triggers = [event for event in events if event['TYPE'] == 'OUTCOME_RECORDED'
                         and event['AT_JST'] == recovery['ARMED_AT_JST']
