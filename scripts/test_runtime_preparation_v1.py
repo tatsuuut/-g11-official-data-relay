@@ -333,5 +333,184 @@ class CurrentInferenceBoundaryTests(unittest.TestCase):
                 self.assertEqual(expected, hashlib.sha256(block.encode()).hexdigest())
 
 
+import daily_runtime_bootstrap_v1 as guard
+from unittest.mock import MagicMock
+
+MORNING_GUARD_DAY='2026-11-28'
+MORNING_GUARD_BIND={'schema':'G11_DAILY_RUNTIME_AUTHORITY_V1','operational_date_jst':MORNING_GUARD_DAY,'phase':'MORNING',
+      'authority_sha256':'a'*64,'runtime_source_sha':'b'*40,'immutable':True,
+      'p3':{'version':'fixture'},'abeken_v53':{},'wild':{},'true_ai':{}}
+
+class MorningAuthorityGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.state=Path(self.tmp.name)
+        self.site=Mock(return_value={'status':'PASS','operational_date_jst':MORNING_GUARD_DAY,'stage':'MORNING','daily_runtime':dict(MORNING_GUARD_BIND),'source':{'github_sha':'b'*40},'races':[{'key':'fixture'}],'counts':{'races':1}})
+        self.impl=Mock(); self.impl.load.return_value={'fixture':'local'}
+        self.impl.feed_binding.return_value=dict(MORNING_GUARD_BIND)
+        self.impl.json_file.return_value={'OPERATIONAL_DATE_JST':MORNING_GUARD_DAY,'MORNING_COMPLETE':True}
+        self.load=Mock(return_value=self.impl)
+    def run_guard(self,day=MORNING_GUARD_DAY,phase='morning'):
+        return guard.guard_accepted_morning(self.state,day,phase,read_site=self.site,load_retained=self.load)
+    def authority(self,projection=True):
+        p=self.state/'daily-runtime'/MORNING_GUARD_DAY/'authority.json';p.parent.mkdir(parents=True);p.write_text('{}')
+        if projection:
+            p=self.state/'store/snapshots/morning/workbook-projection.json';p.parent.mkdir(parents=True);p.write_text('{}')
+    def test_first_morning_404(self):
+        self.site.return_value=None
+        self.assertEqual(self.run_guard()['status'],'NO_ACCEPTED_DAY_FEED');self.load.assert_not_called()
+    def test_incident_rejects_previous_day_restore(self):
+        with self.assertRaisesRegex(RuntimeError,'CHECKPOINT_MISSING_NO_REGENERATION'):self.run_guard()
+        self.load.assert_not_called()
+    def test_matching_retained_state(self):
+        self.authority();self.assertEqual(self.run_guard()['status'],'ACCEPTED_MORNING_CHECKPOINT_VERIFIED')
+        self.assertEqual(self.impl.verify_locks.call_count,2)
+    def test_different_authority(self):
+        self.authority();self.impl.feed_binding.return_value={**MORNING_GUARD_BIND,'authority_sha256':'c'*64}
+        with self.assertRaisesRegex(RuntimeError,'AUTHORITY_CONFLICT'):self.run_guard()
+    def test_incomplete_morning(self):
+        self.authority(False)
+        with self.assertRaisesRegex(RuntimeError,'LOCKS_MISSING'):self.run_guard()
+    def test_metadata_wrong_date(self):
+        self.authority();self.impl.json_file.return_value={'OPERATIONAL_DATE_JST':'2026-11-27','MORNING_COMPLETE':True}
+        with self.assertRaisesRegex(RuntimeError,'LOCKS_MISSING'):self.run_guard()
+    def test_incomplete_metadata(self):
+        self.authority();self.impl.json_file.return_value={'OPERATIONAL_DATE_JST':MORNING_GUARD_DAY,'MORNING_COMPLETE':False}
+        with self.assertRaisesRegex(RuntimeError,'LOCKS_MISSING'):self.run_guard()
+    def test_later_phase_no_regression(self):
+        self.site.return_value['stage']='PREDEADLINE';self.site.return_value['daily_runtime']['phase']='PREDEADLINE'
+        with self.assertRaisesRegex(RuntimeError,'ALREADY_ADVANCED'):self.run_guard()
+    def test_unknown_authority(self):
+        del self.site.return_value['daily_runtime']
+        with self.assertRaisesRegex(RuntimeError,'AUTHORITY_UNKNOWN'):self.run_guard()
+    def test_source_binding(self):
+        self.site.return_value['source']['github_sha']='c'*40
+        with self.assertRaisesRegex(RuntimeError,'SITE_FEED_BINDING'):self.run_guard()
+    def test_count_binding(self):
+        self.site.return_value['counts']['races']=2
+        with self.assertRaisesRegex(RuntimeError,'SITE_FEED_BINDING'):self.run_guard()
+    def test_other_day_feed(self):
+        self.site.return_value['operational_date_jst']='2026-11-27'
+        with self.assertRaisesRegex(RuntimeError,'DAY_IDENTITY'):self.run_guard()
+    def test_transport_error(self):
+        self.site.side_effect=RuntimeError('MORNING_SITE_READBACK_HTTP_500')
+        with self.assertRaisesRegex(RuntimeError,'HTTP_500'):self.run_guard()
+        self.load.assert_not_called()
+    def test_outside_scope_untouched(self):
+        for day,phase in [(MORNING_GUARD_DAY,'night'),(MORNING_GUARD_DAY,'predeadline'),('2026-11-27','morning')]:
+            self.assertEqual(self.run_guard(day,phase)['status'],'OUTSIDE_MORNING_GUARD_SCOPE')
+        self.site.assert_not_called()
+    def test_lock_verification_failure_propagates(self):
+        self.authority();self.impl.verify_locks.side_effect=RuntimeError('DAILY_MORNING_LOCK_MISMATCH')
+        with self.assertRaisesRegex(RuntimeError,'DAILY_MORNING_LOCK_MISMATCH'):self.run_guard()
+    def test_readonly_files(self):
+        self.authority();before={str(p):p.read_bytes() for p in self.state.rglob('*') if p.is_file()}
+        self.run_guard();self.assertEqual(before,{str(p):p.read_bytes() for p in self.state.rglob('*') if p.is_file()})
+
+
+class MorningAuthorityReadbackTests(unittest.TestCase):
+    def setUp(self):
+        import sys, types
+        from unittest.mock import patch
+        self.origin='https://example.invalid'
+        self.url=self.origin+'/api/g11-feed?date='+MORNING_GUARD_DAY
+        self.reply=Mock(); self.reply.status=200; self.reply.geturl.return_value=self.url
+        self.raw=b'{"status":"PASS"}'
+        self.reply.read.return_value=self.raw
+        self.reply.headers={'x-g11-feed-sha256':hashlib.sha256(self.raw).hexdigest()}
+        self.opener=MagicMock(); self.opener.open.return_value.__enter__.return_value=self.reply
+        dispatcher=types.ModuleType('predeadline_dispatch_v1'); dispatcher.NoRedirect=Mock
+        delivery=types.ModuleType('daily_runtime_delivery_v1');delivery.ORIGIN=self.origin
+        self.enterContext(patch.dict(sys.modules,{'predeadline_dispatch_v1':dispatcher,'daily_runtime_delivery_v1':delivery}))
+        self.enterContext(patch.dict(os.environ,{'G11_APP_ORIGIN':self.origin}))
+        self.enterContext(patch('urllib.request.build_opener',return_value=self.opener))
+    def test_success(self): self.assertEqual(guard.read_accepted_day(MORNING_GUARD_DAY),{'status':'PASS'})
+    def test_hash_mismatch(self):
+        self.reply.headers={}
+        with self.assertRaisesRegex(RuntimeError,'READBACK_INVALID'):guard.read_accepted_day(MORNING_GUARD_DAY)
+    def test_redirect_rejected(self):
+        from urllib.error import HTTPError
+        self.opener.open.side_effect=HTTPError(self.url,302,'redirect',{},None)
+        with self.assertRaisesRegex(RuntimeError,'HTTP_302'):guard.read_accepted_day(MORNING_GUARD_DAY)
+    def test_404_absence(self):
+        from urllib.error import HTTPError
+        self.opener.open.side_effect=HTTPError(self.url,404,'missing',{},None)
+        self.assertIsNone(guard.read_accepted_day(MORNING_GUARD_DAY))
+    def test_500_not_absence(self):
+        from urllib.error import HTTPError
+        self.opener.open.side_effect=HTTPError(self.url,500,'fail',{},None)
+        with self.assertRaisesRegex(RuntimeError,'HTTP_500'):guard.read_accepted_day(MORNING_GUARD_DAY)
+    def test_wrong_origin(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ,{'G11_APP_ORIGIN':'https://wrong.invalid'}):
+            with self.assertRaisesRegex(RuntimeError,'ORIGIN_MISMATCH'):guard.read_accepted_day(MORNING_GUARD_DAY)
+        self.opener.open.assert_not_called()
+
+
+class MorningGuardWorkflowPersistenceTests(unittest.TestCase):
+    """Evaluate the deployed persistence conditions after a rejected morning.
+
+    These are the two always-run entry points that can re-encrypt and save an
+    authority even when an earlier guard failed. Normal phases must keep their
+    existing failure-checkpoint behavior.
+    """
+    workflow = (Path(__file__).resolve().parents[1] /
+                '.github/workflows/g11-free-runner.yml').read_text()
+
+    def condition(self, name):
+        block = self.workflow.split('      - name: ' + name + '\n', 1)[1]
+        block = block.split('\n      - ', 1)[0]
+        value = block.split('        if: ', 1)[1]
+        if value.startswith('>-\n'):
+            value = value[3:].split('\n        id:', 1)[0]
+        else:
+            value = value.split('\n', 1)[0]
+        return ' '.join(value.split())
+
+    def allowed(self, name, outcome, phase='morning', day=MORNING_GUARD_DAY):
+        values = {
+            'steps.morning-guard.outcome': outcome,
+            'steps.due.outputs.phase': phase,
+            'steps.due.outputs.operational_date': day,
+            'env.G11_NIGHT_TRANSPORT_ONLY': 'false',
+            'steps.research-night.outputs.waiting': 'false',
+            'steps.publish.outcome': 'success',
+        }
+        condition = re.sub(r'(?:steps|env)\.[A-Za-z0-9_.-]+',
+                           lambda match: repr(values.get(match[0], '')),
+                           self.condition(name))
+        condition = condition.replace('&&', ' and ').replace('||', ' or ')
+        condition = condition.replace('!cancelled()', 'not cancelled()')
+        return bool(eval(condition, {'__builtins__': {}},
+                         {'always': lambda: True, 'cancelled': lambda: False}))
+
+    def test_rejected_guard_cannot_save_restored_conflicting_authority(self):
+        for name in ('Encrypt changed state before persistence', 'Persist delivery receipts'):
+            for outcome in ('failure', 'cancelled', 'skipped', ''):
+                with self.subTest(name=name, outcome=outcome):
+                    self.assertFalse(self.allowed(name, outcome))
+
+    def test_accepted_guard_and_nonmorning_failure_checkpoints_remain_enabled(self):
+        for name in ('Encrypt changed state before persistence', 'Persist delivery receipts'):
+            for outcome, phase in [('success', 'morning'), ('skipped', 'predeadline'),
+                                   ('skipped', 'night')]:
+                with self.subTest(name=name, outcome=outcome, phase=phase):
+                    self.assertTrue(self.allowed(name, outcome, phase))
+            for outcome in ('skipped', ''):
+                with self.subTest(name=name, outcome=outcome, day='2026-11-27'):
+                    self.assertTrue(self.allowed(name, outcome, day='2026-11-27'))
+
+    def test_guard_runs_after_restore_and_before_source_model_or_freeze(self):
+        names = ['Decrypt and validate restored state',
+                 'Protect accepted MORNING authority before any new freeze',
+                 'Restore frozen daily source',
+                 'Hydrate append-only research history and stage the model',
+                 'Freeze daily authority']
+        positions = [self.workflow.index('      - name: ' + name + '\n') for name in names]
+        self.assertEqual(positions, sorted(positions))
+        guard_block = self.workflow.split('      - name: ' + names[1] + '\n', 1)[1].split('\n      - ', 1)[0]
+        self.assertIn('        id: morning-guard\n', guard_block)
+
+
 if __name__ == '__main__':
     unittest.main()

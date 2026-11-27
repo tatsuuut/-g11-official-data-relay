@@ -188,7 +188,7 @@ jobs:
       - name: Prepare optional standard gzip acceleration
         run: python3 -S scripts/encrypt_runtime_state_v1.py --prepare-gzip
       - name: Select newest same-day persisted checkpoint
-        if: steps.scheduled.outputs.phase=='predeadline'||steps.scheduled.outputs.phase=='night'
+        if: steps.scheduled.outputs.phase=='predeadline'||steps.scheduled.outputs.phase=='night'||(steps.scheduled.outputs.phase=='morning'&&steps.scheduled.outputs.operational_date>='2026-11-28')
         id: checkpoint-choice
         env:
           GH_TOKEN: ${{github.token}}
@@ -268,6 +268,10 @@ jobs:
       - name: Select verified morning recovery
         id: due
         run: python3 scripts/daily_runtime_bootstrap_v1.py route --state-root .relay-state --operational-date "${{steps.scheduled.outputs.operational_date}}" --phase "${{steps.scheduled.outputs.phase}}"
+      - name: Protect accepted MORNING authority before any new freeze
+        id: morning-guard
+        if: steps.due.outputs.phase=='morning'&&steps.due.outputs.operational_date>='2026-11-28'
+        run: python3 scripts/daily_runtime_bootstrap_v1.py guard-morning --state-root .relay-state --operational-date '${{steps.due.outputs.operational_date}}' --phase '${{steps.due.outputs.phase}}'
       - name: Restore frozen daily source
         id: authority
         run: |
@@ -987,7 +991,7 @@ jobs:
           timeout 90 python3 scripts/saved_deme_recovery_v1.py --day '${{steps.due.outputs.operational_date}}' \
             --state-root .relay-state --source-root .g11-deme-research --feed .relay-output/feed.json
       - name: Encrypt changed state before persistence
-        if: always()&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.due.outputs.phase!='dry-run'&&steps.research-night.outputs.waiting!='true'
+        if: always()&&(steps.due.outputs.phase!='morning'||steps.due.outputs.operational_date<'2026-11-28'||steps.morning-guard.outcome=='success')&&env.G11_NIGHT_TRANSPORT_ONLY!='true'&&steps.due.outputs.phase!='dry-run'&&steps.research-night.outputs.waiting!='true'
         id: encrypt-state
         env:
           G11_PRIVATE_REPO_TOKEN: ${{secrets.G11_PRIVATE_REPO_TOKEN}}
@@ -1872,7 +1876,7 @@ jobs:
           fi
       - name: Persist delivery receipts
         if: >-
-          always() && !cancelled() && steps.due.outputs.phase != 'dry-run' && steps.research-night.outputs.waiting!='true' &&
+          always() && !cancelled() && (steps.due.outputs.phase != 'morning' || steps.due.outputs.operational_date < '2026-11-28' || steps.morning-guard.outcome == 'success') && steps.due.outputs.phase != 'dry-run' && steps.research-night.outputs.waiting!='true' &&
           (steps.due.outputs.phase != 'predeadline' || steps.publish.outcome == 'success' || steps.deme-live.outcome == 'success' || (steps.warm.outcome == 'success' && (steps.critical-retry.outcome == 'success' || steps.warm-publish.outcome == 'success')))
         id: delivery-state
         env:
