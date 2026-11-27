@@ -188,7 +188,7 @@ jobs:
       - name: Prepare optional standard gzip acceleration
         run: python3 -S scripts/encrypt_runtime_state_v1.py --prepare-gzip
       - name: Select newest same-day persisted checkpoint
-        if: steps.scheduled.outputs.phase=='predeadline'||steps.scheduled.outputs.phase=='night'
+        if: steps.scheduled.outputs.phase=='predeadline'||steps.scheduled.outputs.phase=='night'||(steps.scheduled.outputs.phase=='morning'&&steps.scheduled.outputs.operational_date>='2026-11-28')
         id: checkpoint-choice
         env:
           GH_TOKEN: ${{github.token}}
@@ -268,6 +268,9 @@ jobs:
       - name: Select verified morning recovery
         id: due
         run: python3 scripts/daily_runtime_bootstrap_v1.py route --state-root .relay-state --operational-date "${{steps.scheduled.outputs.operational_date}}" --phase "${{steps.scheduled.outputs.phase}}"
+      - name: Protect accepted MORNING authority before any new freeze
+        if: steps.due.outputs.phase=='morning'&&steps.due.outputs.operational_date>='2026-11-28'
+        run: python3 scripts/daily_runtime_bootstrap_v1.py guard-morning --state-root .relay-state --operational-date '${{steps.due.outputs.operational_date}}' --phase '${{steps.due.outputs.phase}}'
       - name: Restore frozen daily source
         id: authority
         run: |

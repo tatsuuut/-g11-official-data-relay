@@ -187,9 +187,94 @@ def recovery_route(state, day, phase, now=None):
     return {**result,"phase":"same-day-rescue","recovery_route":"MISSING_MORNING_AFTER_NORMAL_WINDOW"}
 
 
+def read_accepted_day(day):
+    """Use only the existing date-specific Site GET; 404 is the absent-day contract."""
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import urlencode
+    from urllib.request import Request, build_opener
+    from predeadline_dispatch_v1 import NoRedirect
+    from daily_runtime_delivery_v1 import ORIGIN
+
+    if os.environ.get("G11_APP_ORIGIN", "").rstrip("/") != ORIGIN:
+        raise RuntimeError("MORNING_SITE_ORIGIN_MISMATCH")
+    if date.fromisoformat(day).isoformat() != day:
+        raise RuntimeError("MORNING_SITE_DAY_FORMAT")
+    url = ORIGIN + "/api/g11-feed?" + urlencode({"date": day})
+    req = Request(url, headers={"Accept": "application/json", "Accept-Encoding": "identity"})
+    try:
+        with build_opener(NoRedirect()).open(req, timeout=30) as response:
+            raw = response.read(32 * 1024 * 1024 + 1)
+            if (response.status != 200 or response.geturl() != url
+                    or len(raw) > 32 * 1024 * 1024
+                    or hashlib.sha256(raw).hexdigest() != response.headers.get("x-g11-feed-sha256")):
+                raise RuntimeError("MORNING_SITE_READBACK_INVALID")
+    except HTTPError as exc:
+        status = exc.code
+        exact = exc.geturl() == url
+        exc.close()
+        if status == 404 and exact:
+            return None
+        raise RuntimeError("MORNING_SITE_READBACK_HTTP_" + str(status)) from None
+    except (URLError, OSError, TimeoutError):
+        raise RuntimeError("MORNING_SITE_READBACK_UNAVAILABLE") from None
+    try:
+        return json.loads(raw)
+    except (UnicodeError, ValueError):
+        raise RuntimeError("MORNING_SITE_READBACK_JSON") from None
+
+
+def guard_accepted_morning(state, day, phase, *, read_site=None, load_retained=None):
+    """Do not start a second daily authority after Site accepted the first."""
+    if phase != "morning" or day < "2026-11-28":
+        return {"status": "OUTSIDE_MORNING_GUARD_SCOPE"}
+    if read_site is None:
+        read_site = read_accepted_day
+    if load_retained is None:
+        load_retained = retained_module
+    accepted = read_site(day)
+    if accepted is None:
+        return {"status": "NO_ACCEPTED_DAY_FEED"}
+    if (type(accepted) is not dict or accepted.get("operational_date_jst") != day
+            or accepted.get("status") != "PASS"
+            or accepted.get("stage") not in ("MORNING", "PREDEADLINE", "NIGHT")):
+        raise RuntimeError("MORNING_SITE_DAY_IDENTITY")
+    binding = accepted.get("daily_runtime")
+    if (type(binding) is not dict
+            or binding.get("schema") != "G11_DAILY_RUNTIME_AUTHORITY_V1"
+            or binding.get("operational_date_jst") != day
+            or binding.get("phase") != accepted["stage"]
+            or binding.get("immutable") is not True
+            or re.fullmatch(r"[a-f0-9]{64}", str(binding.get("authority_sha256", ""))) is None
+            or re.fullmatch(r"[a-f0-9]{40}", str(binding.get("runtime_source_sha", ""))) is None):
+        raise RuntimeError("MORNING_ACCEPTED_AUTHORITY_UNKNOWN")
+    source = accepted.get("source")
+    rows = accepted.get("races")
+    counts = accepted.get("counts")
+    if (type(source) is not dict or source.get("github_sha") != binding["runtime_source_sha"]
+            or type(rows) is not list or not rows or type(counts) is not dict
+            or counts.get("races") != len(rows)):
+        raise RuntimeError("MORNING_SITE_FEED_BINDING")
+    if accepted["stage"] != "MORNING":
+        raise RuntimeError("MORNING_ALREADY_ADVANCED_NO_REGENERATION")
+    authority_path = state / "daily-runtime" / day / "authority.json"
+    if not authority_path.is_file() or authority_path.is_symlink():
+        raise RuntimeError("MORNING_ACCEPTED_CHECKPOINT_MISSING_NO_REGENERATION")
+    implementation = load_retained(state, day)
+    local = implementation.load(state, day)
+    if implementation.feed_binding(local, "MORNING") != binding:
+        raise RuntimeError("MORNING_ACCEPTED_AUTHORITY_CONFLICT_NO_REGENERATION")
+    metadata = implementation.json_file(state / "relay-state.json")
+    if (metadata.get("OPERATIONAL_DATE_JST") != day or metadata.get("MORNING_COMPLETE") is not True
+            or not (state / "store/snapshots/morning/workbook-projection.json").is_file()):
+        raise RuntimeError("MORNING_ACCEPTED_LOCKS_MISSING_NO_REGENERATION")
+    implementation.verify_locks(state, day, "MORNING", exact=True)
+    implementation.verify_locks(state, day, "PREDEADLINE", exact=True)
+    return {"status": "ACCEPTED_MORNING_CHECKPOINT_VERIFIED"}
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("prepare", "freeze", "checkpoint-export", "candidate-dry-run", "route"))
+    parser.add_argument("action", choices=("prepare", "freeze", "checkpoint-export", "candidate-dry-run", "route", "guard-morning"))
     parser.add_argument("--state-root", required=True, type=Path)
     parser.add_argument("--operational-date", required=True)
     parser.add_argument("--phase", default="morning")
@@ -199,6 +284,8 @@ def main():
     args = parser.parse_args()
     if args.action == "route":
         value = recovery_route(args.state_root, args.operational_date, args.phase)
+    elif args.action == "guard-morning":
+        value = guard_accepted_morning(args.state_root, args.operational_date, args.phase)
     elif args.action == "prepare":
         value = prepare(args.state_root, args.operational_date, args.phase, args.source_root)
     elif args.action == "freeze":
