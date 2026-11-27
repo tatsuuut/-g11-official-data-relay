@@ -59,6 +59,108 @@ class ScopeTests(unittest.TestCase):
                 self.missing(value)
 
 
+class RegisteredMarketHandoffTests(unittest.TestCase):
+    def setUp(self):
+        from types import SimpleNamespace
+        temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.day = '2026-11-27'; self.key = '20261127-01-05'
+        self.name = 'venue-market-' + self.key
+        path = self.root / 'snapshots/predeadline' / (self.name + '.json')
+        path.parent.mkdir(parents=True); path.write_text('verified fixture')
+        self.limit = datetime.fromisoformat(self.day+'T20:30:00+09:00')
+        self.now = self.limit - timedelta(minutes=8)
+        self.raw = b'exact registered alternate market bytes'
+        self.receipt = {'HOST':'race.boatcast.jp', 'STATUS':'HTTP_200_BYTE_EXACT_READBACK',
+            'SOURCE_ID':'registered-'+self.key, 'SHA256':hashlib.sha256(self.raw).hexdigest(),
+            'CAPTURED_AT_JST':(self.limit-timedelta(minutes=9)).isoformat()}
+        self.packet = {'STAGE':'PREDEADLINE','NAME':self.name,'SOURCE_RECEIPTS':[self.receipt],
+            'PAYLOAD':{'KIND':'ODDS3T','RACE_KEY':self.key,
+                'CAPTURED_AT_JST':self.receipt['CAPTURED_AT_JST'],'PARSED':{'ODDS_ROWS':[1]*120}}}
+        self.plan = [{'KIND':'ODDS3T','RACE_KEY':self.key,
+            'DUE_AT_JST':(self.limit-timedelta(minutes=7)).isoformat(),
+            'MUST_FINISH_BEFORE_JST':self.limit.isoformat()}]
+        self.morning = {'OPERATIONAL_DATE_JST':self.day}
+        def load(stage,name):
+            if stage=='morning': return {'SNAPSHOT':{'PAYLOAD':self.morning}}
+            self.assertEqual(name,self.name)
+            return {'SNAPSHOT':deepcopy(self.packet)}
+        self.ledger = {'STOPPED':True}
+        self.store = SimpleNamespace(root=self.root,load_verified_snapshot=load,
+            ledger=SimpleNamespace(state=lambda:dict(self.ledger)))
+        def matches(receipt,key):
+            return receipt['HOST'] in ('race.boatcast.jp','www.omurakyotei.jp') and receipt['SOURCE_ID']=='registered-'+key
+        self.calls=[]
+        def recheck(store,key,limit,roster):
+            self.calls.append((key,limit,roster))
+            if hashlib.sha256(self.raw).hexdigest()!=self.packet['SOURCE_RECEIPTS'][0]['SHA256']:
+                raise ValueError('RAW_READBACK')
+            return load('predeadline',self.name)
+        self.market=SimpleNamespace(source_matches=matches,recheck=recheck)
+        self.preview=SimpleNamespace(race_roster=lambda morning,key:['verified morning roster'])
+
+    def run_handoff(self,prior=(),now=None):
+        import types
+        canonical=types.ModuleType('g11.canonical')
+        canonical.venue_market_v1=self.market
+        canonical.published_preview_v1=self.preview
+        with patch.dict('sys.modules',{'g11.canonical':canonical}):
+            return scope.timely_stadium_sources(self.store,self.day,self.plan,set(prior),now or self.now)
+
+    def test_new_registered_boatcast_market_counts_while_national_stop_remains(self):
+        self.assertEqual(self.run_handoff(),[self.name])
+        self.assertEqual(self.calls,[(self.key,self.limit,['verified morning roster'])])
+        self.assertEqual(self.ledger,{'STOPPED':True})
+        self.assertEqual(self.run_handoff([self.name]),[])
+        self.assertEqual(self.run_handoff(now=self.limit),[])
+
+    def test_current_omura_registered_source_is_retained(self):
+        self.packet['SOURCE_RECEIPTS'][0]['HOST']='www.omurakyotei.jp'
+        self.assertEqual(self.run_handoff(),[self.name])
+
+    def test_real_registered_boatcast_parser_and_recheck_match_native_snapshot_format(self):
+        try:
+            from g11.canonical import boatcast_market_v1 as market, published_preview_v1 as preview
+            from g11.canonical.test_boatcast_market_v1 import MemoryStore, ROSTER, board
+        except ImportError:
+            self.skipTest('actual frozen input modules are supplied by contract CI')
+        class Store(MemoryStore):
+            def commit_response(self, *args, **kwargs):
+                value = super().commit_response(*args, **kwargs)
+                value['STATUS'] = 'HTTP_200_BYTE_EXACT_READBACK'
+                return value
+            def commit_snapshot(self, stage, name, payload, receipts):
+                super().commit_snapshot(stage, name, payload, receipts)
+                self.snapshots[stage, name]['SNAPSHOT'].update(STAGE=stage.upper(), NAME=name)
+            def load_verified_snapshot(self, stage, name):
+                if stage == 'morning':
+                    return {'SNAPSHOT': {'PAYLOAD': {'OPERATIONAL_DATE_JST': '2026-11-27'}}}
+                return super().load_verified_snapshot(stage, name)
+        store = Store(self.root/'native-format')
+        now = self.limit-timedelta(minutes=3)
+        with patch.object(market, 'read', return_value=(board(), now, now-timedelta(seconds=25))):
+            market.capture(store, self.key, self.limit, ROSTER, lambda: now)
+        with patch.object(preview, 'race_roster', return_value=ROSTER):
+            self.assertEqual(scope.timely_stadium_sources(store,self.day,self.plan,set(),now),[self.name])
+            sid=next(iter(store.responses))
+            raw, receipt=store.responses[sid]
+            store.responses[sid]=(raw.replace(b'6.9',b'7.9',1),receipt)
+            self.assertEqual(scope.timely_stadium_sources(store,self.day,self.plan,set(),now),[])
+
+    def test_wrong_host_raw_bytes_roster_day_or_race_cannot_signal_handoff(self):
+        original=deepcopy(self.packet)
+        for changed in ('host','raw','day','race'):
+            self.packet=deepcopy(original); self.morning={'OPERATIONAL_DATE_JST':self.day}
+            if changed=='host': self.packet['SOURCE_RECEIPTS'][0]['HOST']='www.boatrace.jp'
+            if changed=='raw': self.packet['SOURCE_RECEIPTS'][0]['SHA256']='0'*64
+            if changed=='day': self.morning['OPERATIONAL_DATE_JST']='2026-11-26'
+            if changed=='race': self.packet['PAYLOAD']['RACE_KEY']='20261127-01-06'
+            with self.subTest(changed=changed): self.assertEqual(self.run_handoff(),[])
+
+    def test_historical_inventory_does_not_expand(self):
+        self.assertEqual(scope.stadium_inventory(self.root,'2026-11-26'),set())
+
+
 class FrozenCriticalIntegrationTests(unittest.TestCase):
     def modules(self):
         try:

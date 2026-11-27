@@ -49,11 +49,60 @@ def missing_formal_locks(projection, store, snapshot_name, expected_fields):
 
 def stadium_inventory(store, day):
     return {p.stem for p in (store / 'snapshots/predeadline').glob(
-        'venue-market-' + day.replace('-', '') + '-24-??.json')}
+        'venue-market-' + day.replace('-', '') + ('-??-??.json' if day >= '2026-11-27' else '-24-??.json'))}
+
+
+def timely_shared_market_sources(artifact, day, plan, prior, now):
+    """Reopen registered alternate markets; never promote a filename alone."""
+    from datetime import datetime, timedelta
+    from g11.canonical import venue_market_v1 as market, published_preview_v1 as preview
+    from predeadline_capture_window_v1 import effective_due
+    output = []
+    for name in sorted(stadium_inventory(artifact.root, day) - prior):
+        key = name.removeprefix('venue-market-')
+        tasks = [task for task in plan if task.get('KIND') == 'ODDS3T' and task.get('RACE_KEY') == key]
+        if len(tasks) != 1:
+            continue
+        try:
+            task = tasks[0]
+            limit = datetime.fromisoformat(task['MUST_FINISH_BEFORE_JST'])
+            due = datetime.fromisoformat(task['DUE_AT_JST'])
+            if (not re.fullmatch(day.replace('-', '') + r'-(?:0[1-9]|1\d|2[0-4])-(?:0[1-9]|1[0-2])', key)
+                    or any(at.utcoffset() != timedelta(hours=9) or at.date().isoformat() != day
+                           for at in (due, limit, now))
+                    or limit - due != timedelta(minutes=7) or now >= limit):
+                continue
+            packet = artifact.load_verified_snapshot('predeadline', name)['SNAPSHOT']
+            receipt, = packet['SOURCE_RECEIPTS']
+            if not market.source_matches(receipt, key):
+                continue
+            morning = artifact.load_verified_snapshot('morning', 'official-day-input')['SNAPSHOT']['PAYLOAD']
+            if morning.get('OPERATIONAL_DATE_JST') != day:
+                continue
+            verified = market.recheck(artifact, key, limit, preview.race_roster(morning, key))
+            checked = verified['SNAPSHOT']
+            proof, = checked['SOURCE_RECEIPTS']
+            payload = checked['PAYLOAD']
+            captured = datetime.fromisoformat(proof['CAPTURED_AT_JST'])
+            if (checked == packet and checked.get('STAGE') == 'PREDEADLINE' and checked.get('NAME') == name
+                    and payload.get('KIND') == 'ODDS3T' and payload.get('RACE_KEY') == key
+                    and proof.get('STATUS') == 'HTTP_200_BYTE_EXACT_READBACK'
+                    and payload.get('CAPTURED_AT_JST') == proof['CAPTURED_AT_JST']
+                    and market.source_matches(proof, key)
+                    and effective_due(due, limit) <= captured <= now and captured < limit
+                    and len(payload['PARSED']['ODDS_ROWS']) == 120):
+                output.append(name)
+        except (KeyError, TypeError, ValueError, OSError) as exc:
+            print('VENUE_MARKET_HANDOFF_WAIT', key, str(exc)[:160], flush=True)
+    if output:
+        print('VENUE_MARKET_HANDOFF_VERIFIED', *output, flush=True)
+    return output
 
 
 def timely_stadium_sources(artifact, day, plan, prior, now):
     """Signal new, byte-verified first-party odds to the existing handoff."""
+    if day >= '2026-11-27':
+        return timely_shared_market_sources(artifact, day, plan, prior, now)
     from datetime import datetime
     due = {t['RACE_KEY']: datetime.fromisoformat(t['MUST_FINISH_BEFORE_JST'])
            for t in plan if t['KIND'] == 'ODDS3T'}
