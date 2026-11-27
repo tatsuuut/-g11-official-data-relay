@@ -32,7 +32,7 @@ jobs:
       contents: read
     timeout-minutes: 20
     env:
-      EXHIBITION_PRIVATE_SOURCE_SHA: 3c22a5a7ff2ffec0450380f2cbad02c939eb85ca
+      EXHIBITION_PRIVATE_SOURCE_SHA: 0c722e61f73eb6631038971a869c7647233c8d20
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - name: Checkout public exhibition contracts
