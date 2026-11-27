@@ -25,6 +25,7 @@ import compact_publication_checkpoint_v1 as publication
 import compact_runtime_recovery_v1 as recovery
 import encrypt_runtime_state_v1 as checkpoint
 from extract_runtime_state_v1 import extract_complete_state
+from test_compact_publication_checkpoint_v1 import local_agent_socket_denied
 
 
 DAY = '2026-11-27'
@@ -76,9 +77,16 @@ class CancelRecoveryTests(unittest.TestCase):
         cls.base_cipher = cls.fixture / 'base.tgz.gpg'
         cls.addClassCleanup(subprocess.run,
             ['gpgconf', '--homedir', str(cls.home), '--kill', 'gpg-agent'],
-            capture_output=True, check=False)
-        probe = subprocess.run(['gpg-agent', '--homedir', str(cls.home), '--daemon', '/bin/true'],
             capture_output=True, check=False, timeout=10)
+        if local_agent_socket_denied(cls.home):
+            raise unittest.SkipTest('local sandbox prohibits GPG agent sockets; mandatory in CI')
+        # Exercise foreground GPG; a captured background daemon may retain the
+        # pipe even after its launcher exits and stall the test harness.
+        probe = subprocess.run(['gpg', '--homedir', str(cls.home), '--batch', '--yes',
+            '--pinentry-mode', 'loopback', '--passphrase-fd', '0', '--symmetric',
+            '--cipher-algo', 'AES256', '--output', str(cls.fixture/'probe.gpg'),
+            str(cls.base/'relay-state.json')], input=SECRET,
+            capture_output=True, check=False, timeout=30)
         if probe.returncode:
             blocked_socket = b"can't create socket: Operation not permitted" in probe.stderr
             if blocked_socket and os.environ.get('G11_REQUIRE_ENCRYPTION_TESTS') != '1':

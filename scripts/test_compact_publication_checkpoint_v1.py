@@ -27,6 +27,23 @@ def step(name, source=ACTION):
     return source.split('- name: ' + name + '\n', 1)[1].split('- name:', 1)[0]
 
 
+def local_agent_socket_denied(home):
+    """Recognize only the executor's explicit socket prohibition, never CI."""
+    if os.environ.get('G11_REQUIRE_ENCRYPTION_TESTS') == '1':
+        return False
+    import errno
+    import socket
+    path = Path(home)/'capability-probe.sock'
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+            probe.bind(str(path))
+    except OSError as error:
+        return error.errno in (errno.EPERM, errno.EACCES)
+    finally:
+        path.unlink(missing_ok=True)
+    return False
+
+
 class CompletePublicationProofTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
@@ -44,7 +61,7 @@ class CompletePublicationProofTests(unittest.TestCase):
         (self.root / 'gnupg').mkdir(mode=0o700)
         if shutil.which('gpgconf'):
             self.addCleanup(lambda: subprocess.run(['gpgconf', '--homedir', str(self.root / 'gnupg'),
-                '--kill', 'gpg-agent'], capture_output=True, check=False))
+                '--kill', 'gpg-agent'], capture_output=True, check=False, timeout=10))
         self.out = self.root / '.relay-output'
         self.out.mkdir()
         (self.root / '.relay-cache').mkdir()
@@ -202,8 +219,15 @@ class CompletePublicationProofTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which('gpg') or os.environ.get('G11_REQUIRE_ENCRYPTION_TESTS') == '1',
                          'GPG is required')
     def test_real_authenticated_delta_roundtrip_opens_the_same_complete_gate(self):
-        probe = subprocess.run(['gpg-agent', '--homedir', os.environ['GNUPGHOME'],
-            '--daemon', '/bin/true'], capture_output=True, text=True, check=False)
+        if local_agent_socket_denied(os.environ['GNUPGHOME']):
+            self.skipTest('This executor prohibits local agent sockets; CI requires the real roundtrip')
+        # Probe the real foreground operation. Capturing a daemon's inherited
+        # stderr can keep communicate() open after its launcher has exited.
+        probe = subprocess.run(['gpg', '--homedir', os.environ['GNUPGHOME'],
+            '--batch', '--yes', '--pinentry-mode', 'loopback', '--passphrase-fd', '0',
+            '--symmetric', '--cipher-algo', 'AES256', '--output', str(self.out/'probe.gpg'),
+            str(self.archive)], input='synthetic\n', capture_output=True, text=True,
+            check=False, timeout=30)
         if (probe.returncode and 'Operation not permitted' in probe.stderr
                 and os.environ.get('G11_REQUIRE_ENCRYPTION_TESTS') != '1'):
             self.skipTest('This executor prohibits the local GPG agent socket; CI requires the real roundtrip')
