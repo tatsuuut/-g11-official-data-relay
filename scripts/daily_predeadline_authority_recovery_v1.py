@@ -476,17 +476,19 @@ def main():
             from g11.relay import predeadline_critical_v1
             from predeadline_content_retry_v1 import bounded_content_retry
             from critical_formal_lock_scope_v1 import formal_lock_scope
+            from independent_fallback_v1 import context as independent_fallback_scope
             # Capture the already-installed parser/collector identities. Compile
             # the formal scope afterward so its copied globals include the
             # exhibition audit hook before the existing checkpoint tree hash.
-            with bounded_content_retry(early_capture=True), exhibition_input_scope(mode, day), formal_lock_scope(day):
+            with bounded_content_retry(early_capture=True), exhibition_input_scope(mode, day), independent_fallback_scope(day), formal_lock_scope(day):
                 predeadline_critical_v1.main()
         elif mode == "predeadline":
             guard_optional_mashiro_shadow()
             from g11.relay import predeadline_nowait_v1
             from predeadline_race_isolation_v1 import isolate_predeadline_inputs
             from predeadline_content_retry_v1 import bounded_content_retry
-            with isolate_predeadline_inputs(), bounded_content_retry(), exhibition_input_scope(mode, day):
+            from independent_fallback_v1 import context as independent_fallback_scope
+            with isolate_predeadline_inputs(), bounded_content_retry(), exhibition_input_scope(mode, day), independent_fallback_scope(day):
                 return predeadline_nowait_v1.main(sys.argv[1:])
         elif mode == "night":
             from g11.relay import v1

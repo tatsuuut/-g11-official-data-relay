@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   exhibition-today-frozen-input:
-    if: github.event_name == 'pull_request' && github.head_ref == 'codex/exhibition-today-input-20261127'
+    if: github.event_name == 'pull_request' && (github.head_ref == 'codex/exhibition-today-input-20261127' || github.head_ref == 'codex/independent-fallback-stop-20261127')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -90,6 +90,8 @@ jobs:
           g11.canonical.test_published_preview_v1
           g11.canonical.test_p3_published_preview_admission_v1
           g11.canonical.test_live_source_failover_v1
+          g11.canonical.test_venue_market_v1
+          g11.canonical.test_boatcast_market_v1
           g11.canonical.test_shared_original_display_v1
           g11.canonical.test_shared_original_display_research_v1
           g11.canonical.test_stadium_original_display_v1
@@ -131,6 +133,8 @@ jobs:
           test_exhibition_input_compatibility_v1
           test_p3_motor_comment_display_v1
           test_exhibition_today_frozen_consumers_v1
+          test_independent_fallback_v1
+          test_independent_fallback_integration_v1
       - name: Verify current-source morning and early-acquisition compatibility
         env:
           PYTHONPATH: .g11-exhibition-candidate:scripts

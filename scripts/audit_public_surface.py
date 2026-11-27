@@ -9,6 +9,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    "scripts/independent_fallback_v1.py",
+    "scripts/test_independent_fallback_v1.py",
+    "scripts/test_independent_fallback_integration_v1.py",
+    "docs/independent-fallback-recovery-20261127.md",
     "scripts/compact_publication_checkpoint_v1.py",
     "scripts/test_compact_publication_checkpoint_v1.py",
     "scripts/compact_runtime_recovery_v1.py",
