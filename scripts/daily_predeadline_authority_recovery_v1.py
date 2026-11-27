@@ -7,12 +7,14 @@ every real LOCK against its prior SHA and the morning deadline plan.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import gzip
 import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 DAY = "2026-10-04"
@@ -403,6 +405,39 @@ def _run_same_day_rescue_night(day):
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return True
 
+def exhibition_input_scope(mode, day):
+    """Enter the reviewed, same-day input adapter before legacy admission shims."""
+    scope = ExitStack()
+    if day != '2026-11-27' or mode not in ('critical', 'predeadline', 'night'):
+        return scope
+    if '--state-root' not in sys.argv:
+        return scope
+    if mode == 'night':
+        from isolated_research_runner_v1 import saved_exhibition_input_scope
+        state = Path(sys.argv[sys.argv.index('--state-root') + 1]).resolve()
+        return saved_exhibition_input_scope(state, day)
+    import os
+    candidate = Path(os.environ.get('G11_EXHIBITION_INPUT_SOURCE',
+        str(Path(__file__).resolve().parents[1] / '.g11-exhibition-input'))).resolve()
+    try:
+        from exhibition_input_compatibility_v1 import context
+        state = Path(sys.argv[sys.argv.index('--state-root') + 1]).resolve()
+        activation = scope.enter_context(context(state, day, candidate))
+        if isinstance(activation, dict):
+            print('G11_EXHIBITION_INPUT_COMPAT=APPLIED ' + json.dumps({
+                'operational_date_jst': day,
+                **{key: activation.get(key) for key in (
+                    'activated_at_jst', 'adapter_sha256', 'candidate_source_sha', 'frozen_source_sha')},
+            }, sort_keys=True), flush=True)
+    except (ImportError, OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        # Optional transport cannot stop the unchanged primary collector.
+        # No body exception is swallowed here; only adapter entry is bounded.
+        reason = str(exc)
+        code = reason[:160] if reason.startswith(('EXHIBITION_INPUT_COMPAT:', 'EXHIBITION_SCOPE:')) else type(exc).__name__
+        print('G11_EXHIBITION_INPUT_COMPAT=DISABLED:' + code, flush=True)
+    return scope
+
+
 def main():
     mode = sys.argv[1]
     if mode == "night-baseline":
@@ -434,7 +469,7 @@ def main():
     from g11.relay import daily_runtime_authority_v1 as implementation
     apply(implementation, day)
     from rescue_night_result_parser_v1 import official_input_compatibility
-    with official_input_compatibility():
+    with exhibition_input_scope(mode, day), official_input_compatibility():
         if mode == "critical":
             from critical_saved_publication_v1 import align_empty_capture
             align_empty_capture(Path(sys.argv[sys.argv.index("--state-root") + 1]).resolve(), day)

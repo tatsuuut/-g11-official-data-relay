@@ -74,6 +74,61 @@ jobs:
       - name: Restore the same frozen source for read-only research
         if: steps.window.outputs.active=='true'
         run: python3 scripts/daily_runtime_bootstrap_v1.py prepare --state-root .research-state --operational-date '${{steps.input.outputs.day}}' --phase predeadline --source-root .g11-private
+      - name: Checkout activated exhibition input reader for saved-only research
+        if: steps.window.outputs.active=='true'&&steps.input.outputs.day=='2026-11-27'
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tatsuuut/boat-brain-lab
+          ref: 614905a4001d6f4392ece21f49a30b3b4991581c
+          token: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          path: .g11-exhibition-input
+          persist-credentials: false
+          fetch-depth: 1
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/g11-predeadline-critical-path-ci.yml
+            docs/EXHIBITION_THIRD_SOURCE_20261127.md
+            docs/P3_ORIGINAL_INPUT_RUNTIME_PROTOCOL_20261114.json
+            g11/canonical/boatcast_preview_v1.py
+            g11/canonical/fixtures/boatcast_preview_20261127_18_03_metadata.json
+            g11/canonical/fixtures/boatcast_preview_20261127_18_03_str3.txt
+            g11/canonical/fixtures/boatcast_preview_20261127_18_03_stt.txt
+            g11/canonical/fixtures/boatcast_preview_20261127_18_03_sui.txt
+            g11/canonical/fixtures/boatcast_preview_20261127_18_03_tkz.txt
+            g11/canonical/fixtures/fun_original_20261126_20_12.html
+            g11/canonical/fixtures/fun_original_20261126_20_12.json
+            g11/canonical/fun_original_display_v1.py
+            g11/canonical/official_pipeline.py
+            g11/canonical/published_preview_v1.py
+            g11/canonical/shared_original_display_v1.py
+            g11/canonical/test_boatcast_preview_admission_v1.py
+            g11/canonical/test_boatcast_preview_v1.py
+            g11/canonical/test_exhibition_third_routing_v1.py
+            g11/canonical/test_fun_original_display_v1.py
+            g11/canonical/test_p3_boatcast_preview_transport_v1.py
+            g11/canonical/test_shared_original_display_v1.py
+            g11/growth_p3/v1_1/current_runtime_v1.py
+            g11/growth_p3/v1_1/test_official_display_tickets_v1.py
+            g11/growth_p3/v1_1/true_only_models_v2.py
+            g11/relay/test_verified_venue_live_v1.py
+            g11/relay/verified_venue_live_v1.py
+            g11/wild_pack/v1/runtime_orchestrator_v1.py
+            g11/wild_pack/v1/test_runtime_orchestrator_v1.py
+            p3/formal_input_admission/v1/audit/formal_input_admission_static_auditor_v1.py
+            p3/formal_input_admission/v1/design/FORMAL_INPUT_ADMISSION_GATE_DESIGN_V1.json
+            p3/formal_input_admission/v1/evidence/FORMAL_INPUT_ADMISSION_STATIC_AUDIT_EVIDENCE_V1.json
+            p3/formal_input_admission/v1/evidence/FORMAL_INPUT_ADMISSION_STATIC_AUDIT_READBACK_VERIFICATION_V1.json
+            p3/formal_input_admission/v1/src/formal_input_admission_gate_v1.py
+            p3/formal_invocation_adapter/v1/audit/formal_p3_invocation_adapter_static_auditor_v1.py
+            p3/formal_invocation_adapter/v1/design/FORMAL_P3_INVOCATION_ADAPTER_DESIGN_V1.json
+            p3/formal_invocation_adapter/v1/evidence/FORMAL_P3_INVOCATION_ADAPTER_STATIC_AUDIT_EVIDENCE_V1.json
+            p3/formal_invocation_adapter/v1/evidence/FORMAL_P3_INVOCATION_ADAPTER_STATIC_AUDIT_READBACK_VERIFICATION_V1.json
+            p3/formal_invocation_adapter/v1/src/formal_p3_invocation_adapter_v1.py
+            tests/test_exhibition_third_source_authority_v1.py
+            tests/test_exhibition_third_source_scope_v1.py
+            tools/verify_exhibition_third_source_scope_v1.py
+            tools/verify_p3_original_input_runtime_patch_v1.py
       - name: Checkout the pinned official-display comparison
         id: display-source
         if: steps.window.outputs.active=='true'

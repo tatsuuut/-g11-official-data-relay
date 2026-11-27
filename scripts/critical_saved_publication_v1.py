@@ -358,7 +358,8 @@ def project_saved(state, day, run_id, source, output, *, authority_module=None,
     # Reopen saved receipts under the same reviewed admission window used to
     # capture them. Unknown source versions keep their original fail-closed
     # gates; source bytes, MORNING plans, LOCKs and cutoffs remain unchanged.
-    with official_input_compatibility(), receipt_window, isolate_optional_display(relay):
+    from isolated_research_runner_v1 import saved_exhibition_input_scope
+    with saved_exhibition_input_scope(state, day), official_input_compatibility(), receipt_window, isolate_optional_display(relay):
         morning = relay._morning_projection(store)
         publication = publisher.load_locked_publication(store, morning, now)
         require(publication.get('READ_ONLY') is True, 'EARLY_PUBLICATION_READ_ONLY_REQUIRED')

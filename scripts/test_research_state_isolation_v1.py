@@ -331,4 +331,29 @@ class GenericPublicationReadinessTests(unittest.TestCase):
             self.assertIn('RESEARCH_CHECKPOINT_VERIFIED',step)
 
 
+class SavedExhibitionInputScopeTests(unittest.TestCase):
+    def test_saved_worker_cannot_create_first_activation_and_uses_read_only_mode(self):
+        from contextlib import contextmanager
+        import sys
+        import types
+        calls=[]
+        @contextmanager
+        def context(state,day,candidate,*,read_only):
+            calls.append((state,day,candidate,read_only))
+            yield
+        module=types.ModuleType('exhibition_input_compatibility_v1');module.context=context
+        with tempfile.TemporaryDirectory() as temporary,patch.dict(sys.modules,{'exhibition_input_compatibility_v1':module}):
+            state=Path(temporary)/'state';candidate=Path(temporary)/'candidate'
+            marker=state/'store/g11/exhibition-input-compat/2026-11-27/activation.json'
+            with patch.dict(os.environ,{'G11_EXHIBITION_INPUT_SOURCE':str(candidate)}):
+                with runner.saved_exhibition_input_scope(state,'2026-11-27'):
+                    self.assertEqual([],calls)
+                self.assertFalse(marker.exists())
+                marker.parent.mkdir(parents=True);marker.write_text('saved canonical activation')
+                original=marker.read_bytes()
+                with runner.saved_exhibition_input_scope(state,'2026-11-27'):
+                    self.assertEqual([(state,'2026-11-27',candidate.resolve(),True)],calls)
+                self.assertEqual(original,marker.read_bytes())
+
+
 if __name__=='__main__':unittest.main()
