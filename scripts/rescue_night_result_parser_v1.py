@@ -78,6 +78,7 @@ def morning_metadata_bridge(gate):
 
 def invocation_receipt_bridge(verify_permit, admitted):
     """Preserve expanded saved-MORNING provenance for exact reviewed sources."""
+    from functools import wraps
     import hashlib
     import inspect
     from morning_race_isolation_v1 import replace_pinned
@@ -90,13 +91,29 @@ def invocation_receipt_bridge(verify_permit, admitted):
     digest = hashlib.sha256(inspect.getsource(verify_permit).encode()).hexdigest()
     if digest not in variants:
         return verify_permit
-    ceiling, extras = variants[digest]
-    return replace_pinned(verify_permit, digest, [
-        ('2 <= len(source_hashes) <= 20', '2 <= len(source_hashes) <= _admitted_limit(payload, 0)'),
-        (f'4 <= len(source_hashes) <= {ceiling}',
-         f'4 <= len(source_hashes) <= _admitted_limit(payload, {extras})'),
-    ], {'_admitted_limit': lambda payload, extra: admitted_digest_limit(
-            payload, admitted, extra, variable_extra=(ceiling == 26 and extra == 6))})
+    def compile_bridge(function):
+        source_digest = hashlib.sha256(inspect.getsource(function).encode()).hexdigest()
+        if source_digest not in variants:
+            raise ValueError('INVOCATION_RECEIPT_BRIDGE_SOURCE_CHANGED')
+        ceiling, extras = variants[source_digest]
+        return replace_pinned(function, source_digest, [
+            ('2 <= len(source_hashes) <= 20', '2 <= len(source_hashes) <= _admitted_limit(payload, 0)'),
+            (f'4 <= len(source_hashes) <= {ceiling}',
+             f'4 <= len(source_hashes) <= _admitted_limit(payload, {extras})'),
+        ], {'_admitted_limit': lambda payload, extra: admitted_digest_limit(
+                payload, admitted, extra, variable_extra=(ceiling == 26 and extra == 6))})
+
+    compiled = {}
+    @wraps(verify_permit)
+    def receipt_bound(*args, **kwargs):
+        # Keep the actual wrapped function in one closure cell. The reviewed
+        # input overlay can replace that cell while retaining this admission
+        # bridge and its verified-MORNING cache. Compile after all sibling
+        # admission shims have been installed so their bindings remain current.
+        if verify_permit not in compiled:
+            compiled[verify_permit] = compile_bridge(verify_permit)
+        return compiled[verify_permit](*args, **kwargs)
+    return receipt_bound
 
 
 from contextlib import contextmanager

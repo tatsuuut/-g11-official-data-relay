@@ -7,6 +7,7 @@ ST remains unsupported where the unchanged engine requires a numeric value.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from functools import wraps
 import hashlib
 import inspect
 import json
@@ -55,6 +56,17 @@ def _compile(function, expected, transform, additions=None):
     exec(compile(textwrap.dedent(transform(source)), function.__code__.co_filename,
                  'exec'), namespace)
     return namespace[function.__name__]
+
+
+def _collector_wrapper(function, additions):
+    """Keep per-race isolation around a reviewed input decoder transplant."""
+    compiled = {function: _compile(function, COLLECT_SHAS, _collect_source, additions)}
+    @wraps(function)
+    def collect(*args, **kwargs):
+        if function not in compiled:
+            compiled[function] = _compile(function, COLLECT_SHAS, _collect_source, additions)
+        return compiled[function](*args, **kwargs)
+    return collect
 
 
 def _report(target, attempted, written, failures):
@@ -142,13 +154,14 @@ def isolate_predeadline_inputs():
         return
     originals = (wild._collect_pre_race_packets, wild.run_predeadline, display.capture_due)
     try:
-        collector = _compile(originals[0], COLLECT_SHAS, _collect_source, {
+        collector = _collector_wrapper(originals[0], {
             '_isolated_input_errors': (wild.pre_position.PreRacePositionError,
                 wild.WildRuntimeOrchestratorError, official.PipelineError),
             '_isolation_report': _report,
         })
         handoff = _compile(originals[1], BET_HANDOFF_SHAS, _handoff_source,
-                           {'_collect_pre_race_packets': collector})
+                           {'_collect_pre_race_packets': lambda *args, **kwargs:
+                               wild._collect_pre_race_packets(*args, **kwargs)})
         capture = _compile(originals[2], DISPLAY_SHAS, _display_source)
     except RuntimeError as exc:
         # Unknown future sources retain their own semantics; never claim a patch

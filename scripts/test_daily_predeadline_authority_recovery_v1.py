@@ -95,6 +95,77 @@ class ExhibitionEntryScopeTests(unittest.TestCase):
         self.assertEqual(('exit',),self.calls[-1])
 
 
+class ExhibitionEntryOrderTests(unittest.TestCase):
+    def invoke(self, mode, *, body_error=False):
+        from contextlib import contextmanager, ExitStack
+        from unittest.mock import patch
+        events=[]
+        @contextmanager
+        def scope(name):
+            events.append(name+':enter')
+            try:
+                yield
+            finally:
+                events.append(name+':exit')
+        def body(*_args):
+            events.append(mode+':body')
+            if body_error:
+                raise RuntimeError('fixture body failure')
+        package=types.ModuleType('g11');package.__path__=[]
+        relay=types.ModuleType('g11.relay');relay.__path__=[]
+        package.relay=relay
+        relay.daily_runtime_authority_v1=types.SimpleNamespace()
+        relay.predeadline_critical_v1=types.SimpleNamespace(main=body)
+        relay.predeadline_nowait_v1=types.SimpleNamespace(main=body)
+        relay.v1=types.SimpleNamespace(main=body)
+        modules={
+            'g11':package,'g11.relay':relay,
+            'rescue_night_result_parser_v1':types.SimpleNamespace(
+                official_input_compatibility=lambda:scope('official')),
+            'predeadline_content_retry_v1':types.SimpleNamespace(
+                bounded_content_retry=lambda **_kwargs:scope('bounded')),
+            'critical_formal_lock_scope_v1':types.SimpleNamespace(
+                formal_lock_scope=lambda _day:scope('formal')),
+            'critical_saved_publication_v1':types.SimpleNamespace(
+                align_empty_capture=lambda *_args:None),
+            'predeadline_race_isolation_v1':types.SimpleNamespace(
+                isolate_predeadline_inputs=lambda:scope('isolation')),
+        }
+        argv=['daily.py',mode,'--operational-date','2026-11-27','--state-root','/synthetic-state']
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules,modules))
+            stack.enter_context(patch.object(sys,'argv',argv))
+            stack.enter_context(patch.object(sys,'path',list(sys.path)))
+            stack.enter_context(patch.object(recovery,'apply'))
+            stack.enter_context(patch.object(recovery,'is_delayed_day',return_value=False))
+            stack.enter_context(patch.object(recovery,'_run_same_day_rescue_predeadline',return_value=False))
+            stack.enter_context(patch.object(recovery,'_run_same_day_rescue_night',return_value=False))
+            stack.enter_context(patch.object(recovery,'guard_optional_mashiro_shadow'))
+            stack.enter_context(patch.object(recovery,'exhibition_input_scope',
+                side_effect=lambda _mode,_day:scope('exhibition')))
+            if body_error:
+                with self.assertRaisesRegex(RuntimeError,'fixture body failure'):
+                    recovery.main()
+            else:
+                recovery.main()
+        return events
+
+    def test_critical_enters_existing_input_shims_before_exhibition_and_compiles_formal_last(self):
+        expected=['official:enter','bounded:enter','exhibition:enter','formal:enter',
+                  'critical:body','formal:exit','exhibition:exit','bounded:exit','official:exit']
+        self.assertEqual(expected,self.invoke('critical'))
+        self.assertEqual(expected,self.invoke('critical',body_error=True))
+
+    def test_predeadline_enters_existing_isolation_and_retry_before_exhibition(self):
+        self.assertEqual(['official:enter','isolation:enter','bounded:enter','exhibition:enter',
+            'predeadline:body','exhibition:exit','bounded:exit','isolation:exit','official:exit'],
+            self.invoke('predeadline'))
+
+    def test_night_enters_read_only_decoder_after_existing_input_shims(self):
+        self.assertEqual(['official:enter','exhibition:enter','night:body',
+            'exhibition:exit','official:exit'],self.invoke('night'))
+
+
 class SelectedSourceBootstrapTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("G11_PRIVATE_INTEGRATION_TESTS") == "true",
                          "Full-source model integration belongs to contract CI")

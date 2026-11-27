@@ -170,6 +170,64 @@ class IsolationTest(unittest.TestCase):
             '030e03f3a70cbaa5101c1c123f33708e75d4b28fb9d4d5408518393238ebe1fb',
             adapter.SHARED_EXHIBITION_COLLECT_SHA} <= adapter.COLLECT_SHAS)
 
+    def test_reviewed_collector_transplant_keeps_per_race_isolation_and_new_globals(self):
+        from exhibition_input_compatibility_v1 import _keep_wrappers
+        additions={'_isolated_input_errors':(InputError,GateError),
+                   '_isolation_report':lambda *args:self.reports.append(args)}
+        wrapped=adapter._collector_wrapper(self.original,additions)
+        wrapped(self.root,BASE.date())  # Populate the frozen-function cache.
+        self.packet(GOOD).unlink()
+        used=[]
+        namespace=dict(self.original.__globals__)
+        def new_predict(*args):
+            used.append(args[1])
+            return self.predict(*args)
+        namespace['pre_position']=types.SimpleNamespace(predict_live=new_predict)
+        replacement=types.FunctionType(self.original.__code__,namespace,self.original.__name__)
+        transplanted=_keep_wrappers(wrapped,replacement)
+        self.assertIs(transplanted.__wrapped__,replacement)
+        self.assertIs(wrapped.__wrapped__,self.original)
+        self.assertTrue(transplanted(self.root,BASE.date()))
+        self.assertEqual([BAD,GOOD],used)
+        self.assertFalse(self.packet(BAD).exists())
+        self.assertTrue(self.packet(GOOD).exists())
+        self.assertEqual(self.reports[-1][3],[{'RACE_KEY':BAD,'REASON':'RUNTIME_START_TIMING'}])
+
+    def test_precompiled_handoff_resolves_current_same_module_collector(self):
+        self.official.PipelineError=GateError
+        wild=types.ModuleType('g11.wild_pack.v1.runtime_orchestrator_v1')
+        wild._collect_pre_race_packets=self.original
+        wild.run_predeadline=self.ns['run_predeadline']
+        wild.pre_position=types.SimpleNamespace(PreRacePositionError=InputError)
+        wild.WildRuntimeOrchestratorError=GateError
+        display=types.ModuleType('g11.canonical.original_display_shadow')
+        display.capture_due=lambda *_:None
+        canonical=types.ModuleType('g11.canonical')
+        canonical.official_pipeline=self.official
+        canonical.original_display_shadow=display
+        version=types.ModuleType('g11.wild_pack.v1');version.runtime_orchestrator_v1=wild
+        pack=types.ModuleType('g11.wild_pack');pack.v1=version
+        g11=types.ModuleType('g11');g11.canonical=canonical;g11.wild_pack=pack
+        compile_original=adapter._compile
+        def compile_fixture(function,expected,transform,additions=None):
+            if transform is adapter._handoff_source:
+                return additions['_collect_pre_race_packets']
+            if transform is adapter._display_source:
+                return function
+            return compile_original(function,expected,transform,additions)
+        modules={'g11':g11,'g11.canonical':canonical,'g11.wild_pack':pack,
+                 'g11.wild_pack.v1':version,'g11.wild_pack.v1.runtime_orchestrator_v1':wild,
+                 'g11.canonical.original_display_shadow':display}
+        with patch.dict(sys.modules,modules),patch.object(adapter,'_compile',side_effect=compile_fixture):
+            with adapter.isolate_predeadline_inputs():
+                handoff=wild.run_predeadline
+                wild._collect_pre_race_packets=lambda *args,**kwargs:('new decoder',args,kwargs)
+                self.assertEqual(('new decoder',('saved',),{'strict':True}),
+                                 handoff('saved',strict=True))
+                self.assertIs(handoff,wild.run_predeadline)
+        self.assertIs(wild._collect_pre_race_packets,self.original)
+        self.assertIs(wild.run_predeadline,self.ns['run_predeadline'])
+
     def shared_preview(self, key, *, failure=None):
         """Provide retained-input doubles only; this path has no HTTP callable."""
         source = self.root/'snapshots/predeadline'/('beforeinfo-' + key + '.json')
