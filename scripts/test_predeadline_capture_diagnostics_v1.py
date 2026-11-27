@@ -92,6 +92,17 @@ class DiagnosticTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 diagnostic.summarize(result(), day)
 
+    def test_actual_preview_producer_digest_and_daily_host_are_classified(self):
+        value = result()
+        value['ACQUISITION']['INDEPENDENT_PREVIEWS'][RACE] = {
+            'source': 'boatraceopenapi.github.io', 'sha256': 'b' * 64}
+        row = diagnostic.summarize(value, DAY)['independent_previews'][0]
+        self.assertEqual(row['provider'], 'PUBLISHED_DAILY_JSON')
+        self.assertTrue(row['snapshot_present'])
+        self.assertNotIn('b' * 64, json.dumps(row))
+        value['ACQUISITION']['INDEPENDENT_PREVIEWS'][RACE]['sha256'] = 'invalid'
+        self.assertFalse(diagnostic.summarize(value, DAY)['independent_previews'][0]['snapshot_present'])
+
     def test_invalid_or_foreign_race_ids_are_not_emitted(self):
         value = result()
         value['PREDICTION']['WAITING'] += [{'RACE_KEY': key, 'MISSING': ['BEFOREINFO']} for key in

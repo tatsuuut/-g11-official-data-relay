@@ -126,6 +126,8 @@ class ExhibitionEntryOrderTests(unittest.TestCase):
                 bounded_content_retry=lambda **_kwargs:scope('bounded')),
             'independent_fallback_v1':types.SimpleNamespace(
                 context=lambda _day:scope('independent')),
+            'independent_original_display_v1':types.SimpleNamespace(
+                context=lambda _day:scope('original')),
             'critical_formal_lock_scope_v1':types.SimpleNamespace(
                 formal_lock_scope=lambda _day:scope('formal')),
             'critical_saved_publication_v1':types.SimpleNamespace(
@@ -153,14 +155,14 @@ class ExhibitionEntryOrderTests(unittest.TestCase):
         return events
 
     def test_critical_enters_existing_input_shims_before_exhibition_and_compiles_formal_last(self):
-        expected=['official:enter','bounded:enter','exhibition:enter','independent:enter','formal:enter',
-                  'critical:body','formal:exit','independent:exit','exhibition:exit','bounded:exit','official:exit']
+        expected=['official:enter','bounded:enter','exhibition:enter','independent:enter','original:enter','formal:enter',
+                  'critical:body','formal:exit','original:exit','independent:exit','exhibition:exit','bounded:exit','official:exit']
         self.assertEqual(expected,self.invoke('critical'))
         self.assertEqual(expected,self.invoke('critical',body_error=True))
 
     def test_predeadline_enters_existing_isolation_and_retry_before_exhibition(self):
-        self.assertEqual(['official:enter','isolation:enter','bounded:enter','exhibition:enter','independent:enter',
-            'predeadline:body','independent:exit','exhibition:exit','bounded:exit','isolation:exit','official:exit'],
+        self.assertEqual(['official:enter','isolation:enter','bounded:enter','exhibition:enter','independent:enter','original:enter',
+            'predeadline:body','original:exit','independent:exit','exhibition:exit','bounded:exit','isolation:exit','official:exit'],
             self.invoke('predeadline'))
 
     def test_night_enters_read_only_decoder_after_existing_input_shims(self):
