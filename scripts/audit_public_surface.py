@@ -27,6 +27,8 @@ ALLOWED_FILES = {
     '.github/workflows/g11-tactical-manshu-audit.yml',
     'scripts/predeadline_input_health_v1.py',
     'scripts/test_predeadline_input_health_v1.py',
+    'scripts/predeadline_capture_diagnostics_v1.py',
+    'scripts/test_predeadline_capture_diagnostics_v1.py',
     'docs/predeadline-input-health-20261117.md',
     'scripts/mashiro_p3_bridge_v1.py',
     '.github/workflows/g11-mashiro-p3-bridge-audit.yml',
@@ -1081,7 +1083,7 @@ def main() -> int:
         # The named seed2 owner command and fingerprint add exactly 669 bytes;
         # model, LOCK, promotion and learning implementations remain frozen.
         # The exact same-day exhibition source checkout adds transport only.
-        cap = (135_820 if name == ".github/workflows/g11-free-runner.yml" else
+        cap = (136_023 if name == ".github/workflows/g11-free-runner.yml" else
                151_029 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")

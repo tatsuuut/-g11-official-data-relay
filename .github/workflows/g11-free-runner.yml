@@ -420,6 +420,9 @@ jobs:
             --operational-date "${{steps.due.outputs.operational_date}}" \
             --run-id "${GITHUB_RUN_ID}" \
             --result "${GITHUB_WORKSPACE}/.relay-output/result.json"
+          python3 -S ../scripts/predeadline_capture_diagnostics_v1.py \
+            --result "${GITHUB_WORKSPACE}/.relay-output/result.json" \
+            --day "${{steps.due.outputs.operational_date}}"
       - name: Encrypt critical state before optional work
         if: steps.due.outputs.phase=='predeadline'&&steps.critical.outcome=='success'&&steps.critical.outputs.rescue!='true'
         id: critical-encrypt

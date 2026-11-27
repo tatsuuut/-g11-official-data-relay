@@ -12,10 +12,11 @@ import json
 import os
 import re
 import signal
+import subprocess
 import threading
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.request import Request, urlopen
 
 POLICY = 'G11_LIVE_REFUSAL_RECOVERY_V1'
 CLAIM_SCHEMA = 'G11_LIVE_REFUSAL_RECOVERY_CLAIM_V1'
@@ -52,9 +53,41 @@ def diagnostic(stage, reason, http_status=None):
     print('G11_LIVE_REFUSAL_RECOVERY_DIAGNOSTIC=' + json.dumps(value, sort_keys=True), flush=True)
 
 
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+def post_claim_curl(body, token):
+    """Use the existing publisher transport; the bearer stays in stdin only."""
+    config = ('header = ' + json.dumps('Authorization: Bearer ' + token) + '\n'
+              'header = "Content-Type: application/json"\n'
+              'data = ' + json.dumps(json.dumps(body, separators=(',', ':'))) + '\n')
+    command = ['curl', '--disable', '--silent', '--show-error', '--proto', '=https',
+        '--max-time', '8', '--connect-timeout', '5', '--max-redirs', '0',
+        '--max-filesize', '4096', '--request', 'POST', '--url',
+        ORIGIN + '/api/g11-input-recovery', '--write-out', '\n%{http_code}', '--config', '-']
+    try:
+        result = subprocess.run(command, input=config.encode(), stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=9, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        raise ClaimUnavailable(stage='CLAIM_POST', reason='TRANSPORT_ERROR') from None
+    if result.returncode:
+        raise ClaimUnavailable(stage='CLAIM_POST',
+            reason='RESPONSE_TOO_LARGE' if result.returncode == 63 else 'TRANSPORT_ERROR')
+    raw, separator, status = result.stdout.rpartition(b'\n')
+    if not separator or not re.fullmatch(rb'[1-5][0-9]{2}', status):
+        raise ClaimUnavailable(stage='CLAIM_POST', reason='INVALID_VALUE')
+    if len(raw) > 4096:
+        raise ClaimUnavailable(stage='CLAIM_POST', reason='RESPONSE_TOO_LARGE')
+    http_status = int(status)
+    if http_status != 200:
+        try:
+            value = json.loads(raw)
+        except ValueError:
+            value = {}
+        spent = http_status == 409 and isinstance(value, dict) and value.get('error') == 'RECOVERY_CLAIM_SPENT'
+        raise ClaimUnavailable(spent, stage='CLAIM_POST',
+            reason='CLAIM_SPENT' if spent else 'HTTP_REJECTED', http_status=http_status)
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise ClaimUnavailable(stage='CLAIM_POST', reason='INVALID_JSON') from None
 
 
 def post_claim(body):
@@ -81,33 +114,10 @@ def post_claim(body):
     except (ValueError, UnicodeDecodeError):
         raise ClaimUnavailable(stage='OIDC_TOKEN', reason='INVALID_JSON') from None
     token = value.get('value') if isinstance(value, dict) else None
-    if not isinstance(token, str) or not 1 <= len(token) <= 16000:
+    if (not isinstance(token, str) or not 1 <= len(token) <= 16000
+            or any(ord(char) < 32 or ord(char) == 127 for char in token)):
         raise ClaimUnavailable(stage='OIDC_TOKEN', reason='INVALID_TOKEN')
-    request = Request(ORIGIN + '/api/g11-input-recovery', method='POST',
-        data=json.dumps(body, separators=(',', ':')).encode(), headers={
-            'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
-    try:
-        with build_opener(NoRedirect()).open(request, timeout=8) as response:
-            if response.status != 200:
-                raise ClaimUnavailable(stage='CLAIM_POST', reason='HTTP_REJECTED', http_status=response.status)
-            raw = response.read(4097)
-    except HTTPError as exc:
-        # An identical request is never replayed as an allowed grant.
-        try:
-            value = json.loads(exc.read(4096))
-        except (ValueError, OSError):
-            value = {}
-        spent = isinstance(value, dict) and exc.code == 409 and value.get('error') == 'RECOVERY_CLAIM_SPENT'
-        raise ClaimUnavailable(spent, stage='CLAIM_POST',
-            reason='CLAIM_SPENT' if spent else 'HTTP_REJECTED', http_status=exc.code) from None
-    except (OSError, TimeoutError):
-        raise ClaimUnavailable(stage='CLAIM_POST', reason='TRANSPORT_ERROR') from None
-    if len(raw) > 4096:
-        raise ClaimUnavailable(stage='CLAIM_POST', reason='RESPONSE_TOO_LARGE')
-    try:
-        return json.loads(raw)
-    except (ValueError, UnicodeDecodeError):
-        raise ClaimUnavailable(stage='CLAIM_POST', reason='INVALID_JSON') from None
+    return post_claim_curl(body, token)
 
 
 def load_authority(root, day):
