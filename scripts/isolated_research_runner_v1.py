@@ -171,6 +171,25 @@ def authority_binding(state, day, source):
                        'runtime_source_sha':binding['runtime_source_sha']}
 
 
+def saved_exhibition_input_scope(state, day):
+    """Reuse activated input decoding under the saved worker's network guard."""
+    from contextlib import ExitStack
+    scope = ExitStack()
+    marker = state/'store/g11/exhibition-input-compat'/day/'activation.json'
+    if day != '2026-11-27' or not marker.is_file():
+        return scope
+    try:
+        from exhibition_input_compatibility_v1 import context
+        candidate = Path(os.environ.get('G11_EXHIBITION_INPUT_SOURCE',
+            str(Path(__file__).resolve().parents[1]/'.g11-exhibition-input'))).resolve()
+        scope.enter_context(context(state, day, candidate, read_only=True))
+    except (ImportError, OSError, RuntimeError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+        reason = str(exc)
+        code = reason[:160] if reason.startswith(('EXHIBITION_INPUT_COMPAT:', 'EXHIBITION_SCOPE:')) else type(exc).__name__
+        print('G11_SAVED_EXHIBITION_INPUT_COMPAT=DISABLED:' + code, flush=True)
+    return scope
+
+
 def capture_only_research(state, source, day):
     sys.path.insert(0,str(source))
     from daily_predeadline_authority_recovery_v1 import guard_optional_mashiro_shadow
@@ -184,7 +203,7 @@ def capture_only_research(state, source, day):
     from g11.relay import v1 as relay
     guard_optional_mashiro_shadow()
     result = {}; failures = []
-    with official_input_compatibility(), isolate_predeadline_inputs():
+    with saved_exhibition_input_scope(state, day), official_input_compatibility(), isolate_predeadline_inputs():
         try:
             result['wild_changed'] = wild.run_predeadline(state/'store',date.fromisoformat(day))
         except Exception as exc:

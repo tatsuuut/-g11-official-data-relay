@@ -9,6 +9,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    'scripts/exhibition_input_compatibility_v1.py',
+    'scripts/test_exhibition_input_compatibility_v1.py',
+    'scripts/test_exhibition_today_frozen_consumers_v1.py',
     "scripts/test_wild4_alternate_market_v1.py",
     "scripts/postprocess_delivery_v1.py",
     "scripts/test_postprocess_delivery_v1.py",
@@ -1077,7 +1080,8 @@ def main() -> int:
         # Date/cache-bound saved MORNING delivery adds transport only; no prediction code.
         # The named seed2 owner command and fingerprint add exactly 669 bytes;
         # model, LOCK, promotion and learning implementations remain frozen.
-        cap = (131_997 if name == ".github/workflows/g11-free-runner.yml" else
+        # The exact same-day exhibition source checkout adds transport only.
+        cap = (135_820 if name == ".github/workflows/g11-free-runner.yml" else
                151_029 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")

@@ -12,6 +12,89 @@ import sys
 import daily_predeadline_authority_recovery_v1 as recovery
 
 
+class ExhibitionEntryScopeTests(unittest.TestCase):
+    def setUp(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+        self.temporary=tempfile.TemporaryDirectory();self.addCleanup(self.temporary.cleanup)
+        self.state=Path(self.temporary.name)/'state';self.candidate=Path(self.temporary.name)/'candidate'
+        self.calls=[];self.readonly=[]
+        @contextmanager
+        def context(state,day,candidate,*,read_only=False):
+            self.calls.append(('enter',state,day,candidate))
+            self.readonly.append(read_only)
+            try:
+                yield {'activated_at_jst':'2026-11-27T10:30:00+09:00',
+                       'adapter_sha256':'a'*64,'candidate_source_sha':'b'*40,'frozen_source_sha':'c'*40}
+            finally:
+                self.calls.append(('exit',))
+        self.module=types.ModuleType('exhibition_input_compatibility_v1');self.module.context=context
+        self.enterContext(patch.dict(sys.modules,{'exhibition_input_compatibility_v1':self.module}))
+        self.enterContext(patch.object(sys,'argv',['entry','--state-root',str(self.state)]))
+        self.enterContext(patch.dict(os.environ,{'G11_EXHIBITION_INPUT_SOURCE':str(self.candidate)}))
+        # Synthetic activation must never resemble a live run's adoption proof.
+        self.enterContext(patch('builtins.print'))
+
+    def test_only_activated_day_critical_and_predeadline_enter_transport(self):
+        for mode,day in [('morning','2026-11-27'),('night','2026-11-27'),
+                         ('critical','2026-11-26'),('predeadline','2026-11-28')]:
+            with recovery.exhibition_input_scope(mode,day):
+                self.assertEqual([],self.calls)
+        for mode in ('critical','predeadline'):
+            self.calls.clear()
+            with recovery.exhibition_input_scope(mode,'2026-11-27'):
+                self.assertEqual([('enter',self.state.resolve(),'2026-11-27',self.candidate.resolve())],self.calls)
+            self.assertEqual(('exit',),self.calls[-1])
+
+    def test_applied_log_contains_only_verified_activation_metadata(self):
+        from unittest.mock import patch
+        with patch('builtins.print') as log:
+            with recovery.exhibition_input_scope('critical','2026-11-27'):
+                pass
+        prefix='G11_EXHIBITION_INPUT_COMPAT=APPLIED '
+        message=log.call_args.args[0]
+        self.assertTrue(message.startswith(prefix))
+        self.assertEqual({'operational_date_jst','activated_at_jst','adapter_sha256',
+                         'candidate_source_sha','frozen_source_sha'},set(json.loads(message[len(prefix):])))
+
+    def test_night_reopens_only_an_existing_activation_as_read_only(self):
+        marker=self.state/'store/g11/exhibition-input-compat/2026-11-27/activation.json'
+        marker.parent.mkdir(parents=True);marker.write_text('existing canonical activation')
+        original=marker.read_bytes()
+        with recovery.exhibition_input_scope('night','2026-11-27'):
+            self.assertEqual([('enter',self.state.resolve(),'2026-11-27',self.candidate.resolve())],self.calls)
+            self.assertEqual([True],self.readonly)
+        self.assertEqual(original,marker.read_bytes())
+        self.assertEqual(('exit',),self.calls[-1])
+
+    def test_disabled_log_bounds_controlled_codes_and_hides_other_exception_bodies(self):
+        from unittest.mock import patch
+        for reason in ('EXHIBITION_INPUT_COMPAT:SOURCE_'+'A'*200,
+                       'EXHIBITION_SCOPE:UNREVIEWED_SOURCE',
+                       'external response body must stay private'):
+            def reject(*_):
+                raise ValueError(reason)
+            with patch.object(self.module,'context',reject),patch('builtins.print') as log:
+                with recovery.exhibition_input_scope('critical','2026-11-27'):
+                    pass
+                expected=reason[:160] if reason.startswith(('EXHIBITION_INPUT_COMPAT:', 'EXHIBITION_SCOPE:')) else 'ValueError'
+                self.assertEqual('G11_EXHIBITION_INPUT_COMPAT=DISABLED:'+expected,log.call_args.args[0])
+
+    def test_rejected_adapter_keeps_primary_and_body_errors_still_propagate(self):
+        from unittest.mock import patch
+        for failure in (ValueError('unreviewed helper'),subprocess.CalledProcessError(128,['git','rev-parse','HEAD'])):
+            def reject(*_):
+                raise failure
+            with patch.object(self.module,'context',reject),patch('builtins.print') as log:
+                with recovery.exhibition_input_scope('critical','2026-11-27'):
+                    self.assertEqual([],self.calls)
+                self.assertIn('DISABLED:'+type(failure).__name__,log.call_args.args[0])
+        with self.assertRaisesRegex(RuntimeError,'normal body failure'):
+            with recovery.exhibition_input_scope('critical','2026-11-27'):
+                raise RuntimeError('normal body failure')
+        self.assertEqual(('exit',),self.calls[-1])
+
+
 class SelectedSourceBootstrapTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("G11_PRIVATE_INTEGRATION_TESTS") == "true",
                          "Full-source model integration belongs to contract CI")
