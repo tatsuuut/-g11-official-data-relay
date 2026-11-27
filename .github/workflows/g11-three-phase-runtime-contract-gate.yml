@@ -1131,13 +1131,13 @@ jobs:
           from pathlib import Path
           caller=Path('.github/workflows/g11-morning-odds-footprint-4bet-shadow-v1.yml').read_text()
           worker=Path('.g11-context-guard/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert 'g11-wild4-shadow-lock-only.yml@WARM_WORKER_COMMIT_SHA' in caller
+          assert 'g11-wild4-shadow-lock-only.yml@8e224b3e88b51142e8d06b5523301a48259c4959' in caller
           assert '.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8' in worker
           # Compare the frozen worker after removing the exact reviewed additions.
           import hashlib
           warm_current=Path('.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()
-          assert '.github/actions/g11-public-python@WARM_HELPER_COMMIT_SHA' in warm_current
-          assert hashlib.sha256(warm_current.encode()).hexdigest() == 'WARM_WORKER_FILE_SHA256'
+          assert '.github/actions/g11-public-python@e209d6f16ea046527e8571aeb7b5ec8d2de3622a' in warm_current
+          assert hashlib.sha256(warm_current.encode()).hexdigest() == '001f71c6b09f4b689221de0b179c14f7461c7b386d160638cf181202e6fab912'
           # Preserve the previous exact historical comparison in full, then
           # separately bind the reviewed warm transport to its immutable SHA.
           current=Path('.g11-warm-transport-baseline/.github/workflows/g11-wild4-shadow-lock-only.yml').read_text()

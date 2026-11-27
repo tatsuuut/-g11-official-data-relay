@@ -88,3 +88,9 @@ stop that exact waiting child; incomplete or unavailable metadata cannot
 authorize inference. Public helper and worker transport changes are delivered
 through reviewed complete commit SHAs. The seven prediction, model, input,
 LOCK, settlement and learning blocks remain byte-identical to 0634adb.
+
+The reviewed helper snapshot is `e209d6f16ea046527e8571aeb7b5ec8d2de3622a`.
+The caller pins the worker to `8e224b3e88b51142e8d06b5523301a48259c4959`,
+which in turn pins that helper snapshot. CI keeps the previous frozen worker
+comparison against exact 0634adb source and separately verifies the new worker
+file digest and all seven unchanged protected blocks.
