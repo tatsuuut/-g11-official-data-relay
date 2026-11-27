@@ -540,6 +540,19 @@ def exercise():
         with compatibility.context(state, DAY, candidate, nowfunc=lambda: clock["now"], read_only=True):
             from g11.canonical import boatcast_preview_v1 as source
             from g11.canonical import shared_original_display_v1 as shared
+            import p3_motor_comment_display_v1 as comments
+            native_readers = (current.load_public_morning_projection, current.load_public_live_projection)
+            readonly = {"stage": "PREDEADLINE", "operational_date_jst": DAY,
+                        "daily_runtime": daily.feed_binding(daily.load(state, DAY), "PREDEADLINE"),
+                        "races": [{"key": KEY, "date_jst": DAY, "venue_code": "05", "race": 2,
+                                   "deadline_jst": CUTOFF.isoformat(), "p3_snapshot_sha256": "a" * 64}]}
+            comment_before = file_bytes(store.root)
+            comment_result = comments.enrich_feed(readonly, state_root=state, source_root=frozen,
+                                                  now=clock["now"], budget_seconds=5)
+            require(comment_result == readonly, "missing sealed comment proof changed ordinary feed")
+            require(native_readers == (current.load_public_morning_projection, current.load_public_live_projection),
+                    "comment display adapter replaced a frozen native reader")
+            require(file_bytes(store.root) == comment_before, "comment display wrote frozen state")
             with patch.object(source, "_read", side_effect=AssertionError("saved consumer acquired exhibition")), \
                     patch.object(shared, "urlopen", side_effect=AssertionError("saved consumer acquired original display")):
                 retained = source.read_observation(store, KEY, CUTOFF, roster)
@@ -548,6 +561,7 @@ def exercise():
         require(wild_packet.read_bytes() == saved_packet, "read-only WILD worker rewrote an existing lock")
         require(file_bytes(controls) == saved_controls, "read-only worker changed activation or audit controls")
         checks.append("READ_ONLY_SAVED_WILD_WORKER_ZERO_HTTP_AND_IMMUTABLE_ACTIVATION")
+        checks.append("READ_ONLY_COMMENT_DISPLAY_PRESERVES_FROZEN_READER_IDENTITY_AND_STATE")
         next_day = datetime.fromisoformat("2026-11-28T01:00:00+09:00")
         stored_p3_bytes = file_bytes(saved_p3_folder)
         old_forecast_files = file_bytes(store.root / "snapshots")

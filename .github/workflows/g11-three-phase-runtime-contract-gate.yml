@@ -129,6 +129,7 @@ jobs:
         run: >-
           python3 -m unittest -v
           test_exhibition_input_compatibility_v1
+          test_p3_motor_comment_display_v1
           test_exhibition_today_frozen_consumers_v1
       - name: Verify current-source morning and early-acquisition compatibility
         env:
