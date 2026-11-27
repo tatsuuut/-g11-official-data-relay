@@ -26,9 +26,29 @@ PROBE_WALL_SECONDS = 30
 
 
 class ClaimUnavailable(RuntimeError):
-    def __init__(self, spent=False):
+    def __init__(self, spent=False, *, stage=None, reason=None, http_status=None):
         self.spent = spent
+        self.stage = stage
+        self.reason = reason or ('CLAIM_SPENT' if spent else 'CLAIM_UNAVAILABLE')
+        self.http_status = http_status
         super().__init__('LIVE_RECOVERY_CLAIM_SPENT' if spent else 'LIVE_RECOVERY_CLAIM_DEFERRED')
+
+
+def diagnostic(stage, reason, http_status=None):
+    """Report bounded failure categories without exposing transport contents."""
+    stages = {'CONFIG', 'OIDC_TOKEN', 'CLAIM_POST', 'SOURCE_VALIDATION', 'GRANT_VALIDATION'}
+    reasons = {'ORIGIN_MISMATCH', 'CONFIG_MISSING', 'HTTP_REJECTED', 'RESPONSE_TOO_LARGE',
+        'INVALID_JSON', 'INVALID_TOKEN', 'TRANSPORT_ERROR', 'CLAIM_UNAVAILABLE', 'CLAIM_SPENT',
+        'MISSING_FIELD', 'INVALID_VALUE', 'LOCAL_IO_ERROR', 'INTERNAL_ERROR',
+        'RECOVERY_TIMEZONE', 'RECOVERY_SOURCE_BINDING', 'RECOVERY_DEADLINE_OR_URL',
+        'RECOVERY_TRIGGER_BINDING', 'RECOVERY_AUTHORITY_BINDING', 'RECOVERY_GRANT_BINDING',
+        'RECOVERY_GRANT_EXPIRED'}
+    value = {'stage': stage if stage in stages else 'SOURCE_VALIDATION',
+             'reason': reason if reason in reasons else 'INTERNAL_ERROR',
+             'official_request_started': False}
+    if type(http_status) is int and 100 <= http_status <= 599:
+        value['http_status'] = http_status
+    print('G11_LIVE_REFUSAL_RECOVERY_DIAGNOSTIC=' + json.dumps(value, sort_keys=True), flush=True)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -39,24 +59,36 @@ class NoRedirect(HTTPRedirectHandler):
 def post_claim(body):
     """Use the existing Actions OIDC identity, with no retry or credential logging."""
     if os.environ.get('G11_APP_ORIGIN') != ORIGIN:
-        raise ClaimUnavailable()
-    request = Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&' + urlencode({
-        'audience': os.environ['G11_OIDC_AUDIENCE']}), headers={
-        'Authorization': 'bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
-    with urlopen(request, timeout=5) as response:
-        raw = response.read(65537)
+        raise ClaimUnavailable(stage='CONFIG', reason='ORIGIN_MISMATCH')
+    try:
+        request = Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&' + urlencode({
+            'audience': os.environ['G11_OIDC_AUDIENCE']}), headers={
+            'Authorization': 'bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+    except KeyError:
+        raise ClaimUnavailable(stage='OIDC_TOKEN', reason='CONFIG_MISSING') from None
+    try:
+        with urlopen(request, timeout=5) as response:
+            raw = response.read(65537)
+    except HTTPError as exc:
+        raise ClaimUnavailable(stage='OIDC_TOKEN', reason='HTTP_REJECTED', http_status=exc.code) from None
+    except (OSError, TimeoutError):
+        raise ClaimUnavailable(stage='OIDC_TOKEN', reason='TRANSPORT_ERROR') from None
     if len(raw) > 65536:
-        raise ClaimUnavailable()
-    token = json.loads(raw).get('value')
+        raise ClaimUnavailable(stage='OIDC_TOKEN', reason='RESPONSE_TOO_LARGE')
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise ClaimUnavailable(stage='OIDC_TOKEN', reason='INVALID_JSON') from None
+    token = value.get('value') if isinstance(value, dict) else None
     if not isinstance(token, str) or not 1 <= len(token) <= 16000:
-        raise ClaimUnavailable()
+        raise ClaimUnavailable(stage='OIDC_TOKEN', reason='INVALID_TOKEN')
     request = Request(ORIGIN + '/api/g11-input-recovery', method='POST',
         data=json.dumps(body, separators=(',', ':')).encode(), headers={
             'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
     try:
         with build_opener(NoRedirect()).open(request, timeout=8) as response:
             if response.status != 200:
-                raise ClaimUnavailable()
+                raise ClaimUnavailable(stage='CLAIM_POST', reason='HTTP_REJECTED', http_status=response.status)
             raw = response.read(4097)
     except HTTPError as exc:
         # An identical request is never replayed as an allowed grant.
@@ -64,10 +96,17 @@ def post_claim(body):
             value = json.loads(exc.read(4096))
         except (ValueError, OSError):
             value = {}
-        raise ClaimUnavailable(exc.code == 409 and value.get('error') == 'RECOVERY_CLAIM_SPENT') from None
+        spent = isinstance(value, dict) and exc.code == 409 and value.get('error') == 'RECOVERY_CLAIM_SPENT'
+        raise ClaimUnavailable(spent, stage='CLAIM_POST',
+            reason='CLAIM_SPENT' if spent else 'HTTP_REJECTED', http_status=exc.code) from None
+    except (OSError, TimeoutError):
+        raise ClaimUnavailable(stage='CLAIM_POST', reason='TRANSPORT_ERROR') from None
     if len(raw) > 4096:
-        raise ClaimUnavailable()
-    return json.loads(raw)
+        raise ClaimUnavailable(stage='CLAIM_POST', reason='RESPONSE_TOO_LARGE')
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise ClaimUnavailable(stage='CLAIM_POST', reason='INVALID_JSON') from None
 
 
 def load_authority(root, day):
@@ -104,6 +143,7 @@ class ClaimProvider:
         if self.blocked_until is not None:
             until = max(self.blocked_until, self.runner.client.clock() + timedelta(seconds=60))
             raise self.official.AcquisitionDeferred(until, self.blocked_reason)
+        stage = 'SOURCE_VALIDATION'
         try:
             day = ledger._manifest()['OPERATIONAL_DATE_JST']
             source = payload['SOURCE_ID']
@@ -150,7 +190,9 @@ class ClaimProvider:
                 'observed_at_jst': recovery['ARMED_AT_JST'],
                 'retry_at_jst': recovery['RETRY_AT_JST'],
                 'deadline_jst': cutoff.isoformat(timespec='seconds')}
+            stage = 'CLAIM_POST'
             grant = self.transport(body)
+            stage = 'GRANT_VALIDATION'
             expected = {**body, 'schema': GRANT_SCHEMA}
             if (not isinstance(grant, dict) or set(grant) != set(expected) | {
                     'claim_id', 'granted_at_jst', 'lease_until_jst'}
@@ -172,8 +214,18 @@ class ClaimProvider:
         except self.official.AcquisitionDeferred:
             raise
         except ClaimUnavailable as exc:
+            diagnostic(exc.stage or stage, exc.reason, exc.http_status)
             return self.defer(exc.spent)
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, KeyError):
+                reason = 'MISSING_FIELD'
+            elif isinstance(exc, ValueError):
+                reason = str(exc) if str(exc).startswith('RECOVERY_') else 'INVALID_VALUE'
+            elif isinstance(exc, OSError):
+                reason = 'LOCAL_IO_ERROR' if stage == 'SOURCE_VALIDATION' else 'TRANSPORT_ERROR'
+            else:
+                reason = 'INTERNAL_ERROR'
+            diagnostic(stage, reason)
             # Transport loss may have consumed the claim. Never retry it here.
             return self.defer()
 

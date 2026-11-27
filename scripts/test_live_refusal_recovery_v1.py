@@ -1,6 +1,8 @@
 """Offline transport, crash and whole-response deadline contracts."""
 from datetime import datetime, timedelta
+from contextlib import redirect_stdout
 import hashlib
+import io
 import json
 from pathlib import Path
 import signal
@@ -80,6 +82,75 @@ class TransportTests(unittest.TestCase):
             (self.ledger.root / 'events/000004.json').read_bytes()).hexdigest())
         self.assertEqual(provider.pending['url'], URL)
         self.assertEqual(len(self.requests), 1)
+
+    def failure_log(self, provider):
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(Deferred):
+            self.call(provider)
+        lines = output.getvalue().splitlines()
+        records = [json.loads(line.split('=', 1)[1]) for line in lines
+                   if line.startswith('G11_LIVE_REFUSAL_RECOVERY_DIAGNOSTIC=')]
+        self.assertEqual(len(records), 1)
+        self.assertFalse(records[0]['official_request_started'])
+        return records[0], output.getvalue()
+
+    def test_preclaim_deadline_failure_names_safe_gate_and_makes_no_claim(self):
+        self.plan['PREDEADLINE_PLAN'][0]['MUST_FINISH_BEFORE_JST'] = (
+            NOW + timedelta(seconds=49)).isoformat()
+        value, _ = self.failure_log(self.provider())
+        self.assertEqual(value['stage'], 'SOURCE_VALIDATION')
+        self.assertEqual(value['reason'], 'RECOVERY_DEADLINE_OR_URL')
+        self.assertEqual(self.requests, [])
+
+    def test_oidc_and_site_http_failures_have_distinct_safe_categories(self):
+        from urllib.error import HTTPError
+        env = {'ACTIONS_ID_TOKEN_REQUEST_URL': 'https://oidc.invalid/?request=1',
+               'ACTIONS_ID_TOKEN_REQUEST_TOKEN': 'sensitive-request-token',
+               'G11_OIDC_AUDIENCE': 'fixture'}
+        for stage in ('OIDC_TOKEN', 'CLAIM_POST'):
+            with self.subTest(stage=stage), patch.dict('os.environ', env), \
+                    patch.object(recovery, 'urlopen') as oidc, \
+                    patch.object(recovery, 'build_opener') as site:
+                response = oidc.return_value.__enter__.return_value
+                response.read.return_value = b'{"value":"sensitive-oidc-value"}'
+                error = HTTPError('https://hidden.invalid/path?secret=1', 403,
+                    'sensitive-http-message', {}, io.BytesIO(b'{"error":"sensitive-body"}'))
+                if stage == 'OIDC_TOKEN':
+                    oidc.side_effect = error
+                else:
+                    site.return_value.open.side_effect = error
+                value, output = self.failure_log(self.provider(recovery.post_claim))
+                self.assertEqual(value['stage'], stage)
+                self.assertEqual(value['http_status'], 403)
+                self.assertEqual(value['reason'], 'HTTP_REJECTED')
+                for secret in ('sensitive-', 'hidden.invalid', 'secret=1', 'Bearer'):
+                    self.assertNotIn(secret, output)
+                if stage == 'OIDC_TOKEN':
+                    site.assert_not_called()
+
+    def test_grant_binding_and_unknown_exception_do_not_log_contents(self):
+        def wrong(body):
+            grant = self.site(body)
+            grant['source_id'] = 'sensitive-grant-value'
+            return grant
+        value, output = self.failure_log(self.provider(wrong))
+        self.assertEqual((value['stage'], value['reason']),
+                         ('GRANT_VALIDATION', 'RECOVERY_GRANT_BINDING'))
+        self.assertNotIn('sensitive-', output)
+        def unknown(_body):
+            raise RuntimeError('sensitive-exception-token')
+        value, output = self.failure_log(self.provider(unknown))
+        self.assertEqual(value['reason'], 'INTERNAL_ERROR')
+        self.assertNotIn('sensitive-', output)
+
+    def test_diagnostic_rejects_unreviewed_reason_and_status_values(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            recovery.diagnostic('sensitive-stage', 'sensitive-reason', True)
+        value = json.loads(output.getvalue().split('=', 1)[1])
+        self.assertEqual(value['reason'], 'INTERNAL_ERROR')
+        self.assertNotIn('http_status', value)
+        self.assertNotIn('sensitive-', output.getvalue())
 
     def test_lost_ack_spends_claim_and_restored_worker_cannot_get_another(self):
         def lost(body):
