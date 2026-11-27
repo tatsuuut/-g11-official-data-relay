@@ -60,7 +60,7 @@ jobs:
     steps:
       - name: Prepare pinned WILD4 dependency before state acquisition
         id: preparation
-        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@4a538d01976361e469568a946fed15a6def034e8
+        uses: tatsuuut/-g11-official-data-relay/.github/actions/g11-public-python@e209d6f16ea046527e8571aeb7b5ec8d2de3622a
         with:
           enabled: ${{ inputs.lineage_readback_date == '' }}
           prewarm-base-key: ${{ inputs.prewarm_base_key }}
