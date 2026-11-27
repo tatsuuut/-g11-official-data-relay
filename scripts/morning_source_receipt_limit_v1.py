@@ -3,15 +3,18 @@ from datetime import date
 import re
 
 
-def admitted_digest_limit(payload, admitted, extra=0):
+def admitted_digest_limit(payload, admitted, extra=0, *, variable_extra=False):
     """Only a fully admitted snapshot may expand a later permit's hash list."""
     fallback = 20 + extra
     known = admitted.get(payload.get('G11_SNAPSHOT_SHA256'))
     hashes = payload.get('G11_SOURCE_SHA256')
-    if (not known or type(hashes) is not list or len(hashes) != len(known) + extra
-            or tuple(hashes[:len(known)]) != known):
+    if not known or type(hashes) is not list:
         return fallback
-    return max(fallback, len(known) + extra)
+    observed_extra = len(hashes) - len(known)
+    valid_extra = (2 <= observed_extra <= extra if variable_extra else observed_extra == extra)
+    if not valid_extra or tuple(hashes[:len(known)]) != known:
+        return fallback
+    return max(fallback, len(known) + observed_extra)
 
 
 def receipt_limit(verified):

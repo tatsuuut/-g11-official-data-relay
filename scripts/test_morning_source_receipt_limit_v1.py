@@ -72,6 +72,34 @@ class ReceiptLimitTests(unittest.TestCase):
         payload['G11_SOURCE_SHA256'].append('d'*64)
         self.assertEqual(22,admitted_digest_limit(payload,admitted,2))
 
+    def test_exhibition_permit_counts_only_actual_sources_after_verified_morning(self):
+        hashes=[f'{i:064x}' for i in range(30)]
+        admitted={'a'*64:tuple(hashes)}
+        for count in (2, 5, 6):
+            with self.subTest(extra=count):
+                payload={'G11_SNAPSHOT_SHA256':'a'*64,
+                         'G11_SOURCE_SHA256':hashes+[f'{i+100:064x}' for i in range(count)]}
+                self.assertEqual(30+count,admitted_digest_limit(
+                    payload,admitted,6,variable_extra=True))
+                self.assertEqual(26,admitted_digest_limit(payload,{},6,variable_extra=True))
+                payload['G11_SOURCE_SHA256'][0]='f'*64
+                self.assertEqual(26,admitted_digest_limit(payload,admitted,6,variable_extra=True))
+
+    def test_exhibition_permit_rejects_expansion_beyond_six_extra_sources(self):
+        hashes=[f'{i:064x}' for i in range(30)]
+        admitted={'a'*64:tuple(hashes)}
+        for count in (0,1,7):
+            with self.subTest(extra=count):
+                payload={'G11_SNAPSHOT_SHA256':'a'*64,
+                         'G11_SOURCE_SHA256':hashes+[f'{i+100:064x}' for i in range(count)]}
+                self.assertEqual(26,admitted_digest_limit(payload,admitted,6,variable_extra=True))
+
+    def test_unknown_invocation_source_keeps_its_own_admission_rule(self):
+        from rescue_night_result_parser_v1 import invocation_receipt_bridge
+        def unknown_verifier():
+            return 'unreviewed'
+        self.assertIs(unknown_verifier,invocation_receipt_bridge(unknown_verifier,{}))
+
     def test_extra_unbound_wrong_day_redirect_duplicate_and_result_sources_are_rejected(self):
         changes = [
             ('SOURCE_ID','unknown-source'),

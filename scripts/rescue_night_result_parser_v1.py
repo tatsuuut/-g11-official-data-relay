@@ -76,6 +76,29 @@ def morning_metadata_bridge(gate):
     return namespace[original.__name__]
 
 
+def invocation_receipt_bridge(verify_permit, admitted):
+    """Preserve expanded saved-MORNING provenance for exact reviewed sources."""
+    import hashlib
+    import inspect
+    from morning_race_isolation_v1 import replace_pinned
+    from morning_source_receipt_limit_v1 import admitted_digest_limit
+
+    variants = {
+        'db65b3a9f8885f95f4b8548717d5dee37e37aa67389606510f3487c6433f593e': (22, 2),
+        '47b50fdbd74ba528b51bfabcc264ae3a14c5a9535f08a5a2b14c2ed688b4f79b': (26, 6),
+    }
+    digest = hashlib.sha256(inspect.getsource(verify_permit).encode()).hexdigest()
+    if digest not in variants:
+        return verify_permit
+    ceiling, extras = variants[digest]
+    return replace_pinned(verify_permit, digest, [
+        ('2 <= len(source_hashes) <= 20', '2 <= len(source_hashes) <= _admitted_limit(payload, 0)'),
+        (f'4 <= len(source_hashes) <= {ceiling}',
+         f'4 <= len(source_hashes) <= _admitted_limit(payload, {extras})'),
+    ], {'_admitted_limit': lambda payload, extra: admitted_digest_limit(
+            payload, admitted, extra, variable_extra=(ceiling == 26 and extra == 6))})
+
+
 from contextlib import contextmanager
 @contextmanager
 def official_input_compatibility():
@@ -102,13 +125,7 @@ def official_input_compatibility():
             admitted[result['G11_SNAPSHOT_SHA256']]=tuple(result['G11_SOURCE_SHA256'])
             return result
         gate.build_canonical_official_morning_input=admitted_bridge
-        from morning_race_isolation_v1 import replace_pinned
-        from morning_source_receipt_limit_v1 import admitted_digest_limit
-        invocation.verify_formal_p3_invocation=replace_pinned(verify_permit,
-            'db65b3a9f8885f95f4b8548717d5dee37e37aa67389606510f3487c6433f593e',[
-            ('2 <= len(source_hashes) <= 20','2 <= len(source_hashes) <= _admitted_limit(payload, 0)'),
-            ('4 <= len(source_hashes) <= 22','4 <= len(source_hashes) <= _admitted_limit(payload, 2)'),
-            ],{'_admitted_limit':lambda payload,extra:admitted_digest_limit(payload,admitted,extra)})
+        invocation.verify_formal_p3_invocation=invocation_receipt_bridge(verify_permit, admitted)
         official.CanonicalRunner.run_morning=adapted_period_morning(official,adapted_morning(official,parser))
         official._night_sg_race_keys_from_saved_b=adapted_night_binding(official,parser)
         from optional_display_isolation_v1 import isolate_optional_display
