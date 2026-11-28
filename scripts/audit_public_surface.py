@@ -9,6 +9,8 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED_FILES = {
+    ".github/workflows/g11-recovery-inventory-v1.yml",
+    "scripts/recovery_inventory_v1.py",
     "scripts/independent_original_display_v1.py",
     "scripts/test_independent_original_display_v1.py",
     "scripts/independent_fallback_v1.py",
@@ -1104,7 +1106,8 @@ def main() -> int:
         # The named seed2 owner command and fingerprint add exactly 669 bytes;
         # model, LOCK, promotion and learning implementations remain frozen.
         # The exact same-day exhibition source checkout adds transport only.
-        cap = (136_023 if name == ".github/workflows/g11-free-runner.yml" else
+        # MORNING authority guard and fail-closed persistence add 739 reviewed bytes.
+        cap = (136_762 if name == ".github/workflows/g11-free-runner.yml" else
                151_029 if name == ".github/workflows/g11-wild4-shadow-lock-only.yml" else 100_000)
         if path.stat().st_size > cap:
             fail(f"oversized public file: {name}")

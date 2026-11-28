@@ -1,0 +1,89 @@
+name: G11 read-only recovery inventory
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/g11-recovery-inventory-v1.yml
+      - scripts/recovery_inventory_v1.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: g11-read-only-recovery-inventory-v1
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: Checkout reviewed public inventory code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Require OS read-only and offline isolation before state retrieval
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/unshare
+          sudo -n unshare --mount --net --fork -- /bin/sh -eu -c '
+            mount --make-rprivate /
+            test -d /sys/class/net/lo
+          ' >/dev/null 2>&1 || { echo '{"status":"BLOCKED","error_code":"OS_ISOLATION_UNAVAILABLE"}'; exit 1; }
+          echo '{"status":"ISOLATION_PRECHECK_PASS"}'
+
+      - name: Select newest current-day full checkpoint using metadata only
+        id: selected
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/recovery_inventory_v1.py select
+
+      - name: Restore the exact encrypted checkpoint without fallback
+        id: restored
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .relay-cache/state.tgz.gpg
+          key: ${{ steps.selected.outputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Authenticate and fully extract a disposable copy without day reset
+        env:
+          G11_PRIVATE_REPO_TOKEN: ${{ secrets.G11_PRIVATE_REPO_TOKEN }}
+          SELECTED_CHECKPOINT: ${{ steps.selected.outputs.cache_key }}
+          RESTORED_CHECKPOINT: ${{ steps.restored.outputs.cache-matched-key }}
+          RESTORED_HIT: ${{ steps.restored.outputs.cache-hit }}
+        run: >-
+          python3 -B scripts/recovery_inventory_v1.py extract
+          --cipher .relay-cache/state.tgz.gpg
+          --destination '${{ runner.temp }}/g11-recovery-inventory-state'
+
+      - name: Inventory the entire original copy read-only with no network or credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_state='${{ runner.temp }}/g11-recovery-inventory-state'
+          audit_script='${{ github.workspace }}/scripts/recovery_inventory_v1.py'
+          audit_host_netns="$(stat -Lc '%i' /proc/self/ns/net)"
+          sudo -n unshare --mount --net --fork -- /bin/sh -eu -c '
+            mount --make-rprivate /
+            mount --bind "$1" "$1"
+            mount -o remount,bind,ro "$1"
+            exec env -i PATH=/usr/bin:/bin PYTHONDONTWRITEBYTECODE=1 \
+              /usr/bin/python3 -B "$2" check --state "$1" --host-netns "$3"
+          ' audit "$audit_state" "$audit_script" "$audit_host_netns"
+
+      - name: Remove only the disposable recovery copy and ciphertext
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n rm -rf -- '${{ runner.temp }}/g11-recovery-inventory-state'
+          rm -f -- '${{ runner.temp }}/g11-recovery-inventory.authenticated.tgz' .relay-cache/state.tgz.gpg
