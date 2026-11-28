@@ -20,6 +20,11 @@ jobs:
     if: github.repository == 'tatsuuut/-g11-official-data-relay' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        day: ['2026-11-28', '2026-11-27']
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       PYTHONUNBUFFERED: '1'
@@ -40,11 +45,11 @@ jobs:
           ' >/dev/null 2>&1 || { echo '{"status":"BLOCKED","error_code":"OS_ISOLATION_UNAVAILABLE"}'; exit 1; }
           echo '{"status":"ISOLATION_PRECHECK_PASS"}'
 
-      - name: Select newest current-day full checkpoint using metadata only
+      - name: Select exact incident original without a fallback
         id: selected
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 -B scripts/recovery_inventory_v1.py select
+        run: python3 -B scripts/recovery_inventory_v1.py select --original-day '${{ matrix.day }}'
 
       - name: Restore the exact encrypted checkpoint without fallback
         id: restored
@@ -64,8 +69,9 @@ jobs:
           python3 -B scripts/recovery_inventory_v1.py extract
           --cipher .relay-cache/state.tgz.gpg
           --destination '${{ runner.temp }}/g11-recovery-inventory-state'
+          --original-day '${{ matrix.day }}'
 
-      - name: Inventory the entire original copy read-only with no network or credentials
+      - name: Verify exact original authority and LOCK inventory with no network or credentials
         shell: bash
         run: |
           set -euo pipefail
@@ -77,8 +83,8 @@ jobs:
             mount --bind "$1" "$1"
             mount -o remount,bind,ro "$1"
             exec env -i PATH=/usr/bin:/bin PYTHONDONTWRITEBYTECODE=1 \
-              /usr/bin/python3 -B "$2" check --state "$1" --host-netns "$3"
-          ' audit "$audit_state" "$audit_script" "$audit_host_netns"
+              /usr/bin/python3 -B "$2" check --state "$1" --host-netns "$3" --original-day "$4"
+          ' audit "$audit_state" "$audit_script" "$audit_host_netns" '${{ matrix.day }}'
 
       - name: Remove only the disposable recovery copy and ciphertext
         if: always()

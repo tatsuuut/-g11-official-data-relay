@@ -89,6 +89,78 @@ def storage_evidence():
     return report
 
 
+# Restore only original checkpoints from the observed incident runs.
+ORIGINAL_RECOVERY = {
+    '2026-11-28': (
+        '819fd40eb3a5000707af4061529a7686260cfdc6dfe889cba33e56ffa272b9d4',
+        '614905a4001d6f4392ece21f49a30b3b4991581c',
+        ('g11-state-v4-published-2026-11-28-46043616172',
+         'g11-state-v4-published-2026-11-28-46043616172-1-checkpoint',
+         'g11-state-v3-2026-11-28-46043616172')),
+    '2026-11-27': (
+        '01a42edf0de4733183f8637e001565f2d86298de1c33a8ecb0ab8b0e84a30fb6',
+        '6797fa3205f62e0f969b0d76b5612aeb556802fe',
+        ('g11-state-v4-published-2026-11-27-46045867781',
+         'g11-state-v3-2026-11-27-46045867781',
+         'g11-state-v4-published-2026-11-27-45994034079',
+         'g11-state-v3-2026-11-27-45994034079')),
+}
+
+
+def select_original(day):
+    from urllib.parse import urlencode
+    require(os.environ.get('GITHUB_REPOSITORY') == REPOSITORY, 'REPOSITORY_BINDING')
+    require(os.environ.get('GITHUB_REF') == 'refs/heads/main', 'REF_BINDING')
+    require(day in ORIGINAL_RECOVERY, 'ORIGINAL_DAY_SCOPE')
+    for key in ORIGINAL_RECOVERY[day][2]:
+        query = urlencode({'key': key, 'ref': 'refs/heads/main', 'per_page': 100})
+        result = subprocess.run(['gh', 'api', 'repos/' + REPOSITORY + '/actions/caches?' + query],
+                                capture_output=True, text=True, timeout=40, check=False)
+        require(result.returncode == 0, 'CACHE_METADATA_READ_FAILED')
+        value = json.loads(result.stdout)
+        require(type(value) is dict and type(value.get('actions_caches')) is list
+                and type(value.get('total_count')) is int and value['total_count'] <= 100,
+                'CACHE_METADATA_SHAPE')
+        matches = [r for r in value['actions_caches'] if type(r) is dict and r.get('key') == key
+                   and r.get('ref') == 'refs/heads/main' and type(r.get('size_in_bytes')) is int
+                   and r['size_in_bytes'] > 0]
+        require(len(matches) <= 1, 'EXACT_CACHE_AMBIGUOUS')
+        if matches:
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                output.write('cache_key=' + key + '\n')
+            return {'status': 'EXACT_ORIGINAL_SELECTED', 'day': day,
+                    'cache_key_sha256': sha(key.encode()), 'encrypted_bytes': matches[0]['size_in_bytes']}
+    raise RuntimeError('ORIGINAL_CHECKPOINT_NOT_RETAINED')
+
+
+def verify_original_inventory(report, day):
+    authority, source, _ = ORIGINAL_RECOVERY[day]
+    found = report['days'][day]
+    require(found.get('authority_present') == 1 and found.get('authority_self_hash_valid') == 1
+            and found.get('authority_sha256') == authority and found.get('runtime_source_sha') == source
+            and found.get('source_archive_present') == 1 and found.get('source_archive_bytes_match') == 1,
+            'ORIGINAL_AUTHORITY_NOT_VERIFIED')
+    def complete(binding, nonempty=False):
+        return (type(binding) is dict and not binding.get('error_codes')
+                and binding.get('missing_file_count') == 0 and binding.get('mismatched_file_count') == 0
+                and type(binding.get('bound_file_count')) is int
+                and binding.get('matched_file_count') == binding['bound_file_count']
+                and (not nonempty or binding['bound_file_count'] > 0))
+    require(complete(found.get('model_binding'), True), 'ORIGINAL_MODELS_NOT_VERIFIED')
+    phases = found.get('phases', {})
+    require(complete(phases.get('MORNING'), True) and phases['MORNING'].get('binding_record_count', 0) > 0
+            and complete(phases.get('PREDEADLINE')) and phases['PREDEADLINE'].get('binding_record_count', 0) > 0
+            and safe_hash(report.get('morning_input_file_sha256')), 'ORIGINAL_LOCKS_NOT_VERIFIED')
+    results = report['previous_result_sources'].get('result-k-20261127', {})
+    return {'status': 'ORIGINAL_CHECKPOINT_RESTORED_AND_INVENTORY_VERIFIED', 'day': day,
+            'authority_sha256': authority, 'morning_files': phases['MORNING']['matched_file_count'],
+            'predeadline_files': phases['PREDEADLINE']['matched_file_count'],
+            'model_files': found['model_binding']['matched_file_count'],
+            'night_input_present': bool(report.get('night_input_file_sha256')),
+            'nov27_result_bytes_match': results.get('matching_response_byte_count') == 1,
+            'production_mutated': False, 'prediction_executed': False, 'site_write': False}
+
+
 def select_cache():
     require(os.environ.get('GITHUB_REPOSITORY') == REPOSITORY, 'REPOSITORY_BINDING')
     require(os.environ.get('GITHUB_REF') == 'refs/heads/main', 'REF_BINDING')
@@ -121,14 +193,17 @@ def select_cache():
             'encrypted_bytes': row['size_in_bytes'], 'cache_storage': storage_evidence()}
 
 
-def extract_checkpoint(cipher, destination):
+def extract_checkpoint(cipher, destination, original_day=None):
     require(destination.parent.resolve() == Path(os.environ['RUNNER_TEMP']).resolve(),
             'DISPOSABLE_DESTINATION_REQUIRED')
     require(not destination.exists() and not destination.is_symlink(), 'DESTINATION_EXISTS')
     selected = os.environ.get('SELECTED_CHECKPOINT', '')
     require(selected and selected == os.environ.get('RESTORED_CHECKPOINT'), 'EXACT_RESTORE_REQUIRED')
-    require(re.fullmatch(r'g11-state-v4-(?:critical|published)-' + DAY
-                        + r'-[0-9]+(?:-[0-9]+-checkpoint)?', selected), 'CACHE_KEY_BINDING')
+    if original_day is not None:
+        require(original_day in ORIGINAL_RECOVERY and selected in ORIGINAL_RECOVERY[original_day][2], 'ORIGINAL_CACHE_KEY_BINDING')
+    else:
+        require(re.fullmatch(r'g11-state-v4-(?:critical|published)-' + DAY
+                            + r'-[0-9]+(?:-[0-9]+-checkpoint)?', selected), 'CACHE_KEY_BINDING')
     require(os.environ.get('RESTORED_HIT') == 'true', 'EXACT_CACHE_HIT_REQUIRED')
     require(cipher.is_file() and not cipher.is_symlink(), 'CIPHER_REQUIRED')
     helper = Path(__file__).resolve().with_name('extract_runtime_state_v1.py')
@@ -346,22 +421,27 @@ def compare_bindings(expected, paths, digest, prefix):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('select')
+    select = sub.add_parser('select')
+    select.add_argument('--original-day', choices=DAYS)
     extract = sub.add_parser('extract')
     extract.add_argument('--cipher', type=Path, required=True)
     extract.add_argument('--destination', type=Path, required=True)
+    extract.add_argument('--original-day', choices=DAYS)
     check = sub.add_parser('check')
     check.add_argument('--state', type=Path, required=True)
     check.add_argument('--host-netns', required=True)
+    check.add_argument('--original-day', choices=DAYS)
     args = parser.parse_args()
     try:
         if args.command == 'select':
-            report = select_cache()
+            report = select_original(args.original_day) if args.original_day else select_cache()
         elif args.command == 'extract':
-            report = extract_checkpoint(args.cipher, args.destination)
+            report = extract_checkpoint(args.cipher, args.destination, args.original_day)
         else:
             enforce_checker_isolation(args.state, args.host_netns)
             report = inspect_state(args.state)
+            if args.original_day:
+                report = verify_original_inventory(report, args.original_day)
         print(json.dumps(report, ensure_ascii=True, sort_keys=True, separators=(',', ':')))
         return 0
     except Exception as exc:
